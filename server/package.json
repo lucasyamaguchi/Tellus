@@ -1,0 +1,28 @@
+{
+  "name": "agentic-ide-server",
+  "version": "1.0.0",
+  "description": "Backend API and Agent Engine for Agentic IDE",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "chokidar": "^4.0.3",
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pdf-parse": "^2.4.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/diff": "^7.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.3"
+  }
+}

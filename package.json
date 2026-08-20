@@ -1,0 +1,60 @@
+{
+  "name": "tellus",
+  "version": "1.0.0",
+  "description": "Tellus — Local AI hub with multi-provider support (OpenRouter, Google, Anthropic, OpenAI), continuous memory engine and agentic tools.",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build": "cd server && npm run build && cd ../client && npm run build",
+    "desktop": "electron .",
+    "dist": "npm run build && electron-builder --win portable",
+    "generate-icons": "node scripts/generate-icons.js",
+    "create-shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-shortcut.ps1"
+  },
+  "build": {
+    "appId": "com.tellus.app",
+    "productName": "Tellus",
+    "directories": {
+      "output": "dist-app"
+    },
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        "portable"
+      ]
+    },
+    "files": [
+      "electron/**/*",
+      "server/dist/**/*",
+      "server/package.json",
+      "server/node_modules/**/*",
+      "client/dist/**/*",
+      "resources/**/*"
+    ]
+  },
+  "keywords": [
+    "tellus",
+    "agentic",
+    "ai",
+    "openrouter",
+    "ai-memory",
+    "claude",
+    "gemini",
+    "openai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.33.5"
+  },
+  "dependencies": {
+    "pdf-parse": "^2.4.5"
+  }
+}
