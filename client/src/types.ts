@@ -90,6 +90,67 @@ export interface Attachment {
   isCsv: boolean;
 }
 
+export interface OpenRouterCredits {
+  totalCredits: number;
+  totalUsage: number;
+  remainingCredits: number;
+}
+
+export interface FrankNote {
+  id: string;
+  title: string;
+  filename: string;
+  subject: string;
+  tags: string[];
+  content: string;
+  links: string[];
+  backlinks: string[];
+  createdAt: number;
+  updatedAt: number;
+  isProjectSpecific?: boolean;
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: 'note' | 'subject' | 'tag';
+  val: number;
+  color?: string;
+}
+
+export interface GraphLink {
+  source: string;
+  target: string;
+  type: 'wikilink' | 'tag' | 'subject';
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  links: GraphLink[];
+}
+
+export interface TellusSkill {
+  id: string;
+  name: string;
+  category: string;
+  agentAssigned?: string;
+  description: string;
+  promptInstructions: string;
+  isProjectSpecific?: boolean;
+  updatedAt: number;
+}
+
+export interface TellusArtifact {
+  id: string;
+  title: string;
+  type: 'plan' | 'walkthrough' | 'diff' | 'diagram' | 'report' | 'code';
+  filename: string;
+  content: string;
+  relativePath: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface QuotedMessage {
   sessionId: string;
   sessionTitle: string;

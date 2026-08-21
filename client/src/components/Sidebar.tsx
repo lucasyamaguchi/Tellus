@@ -16,7 +16,9 @@ import {
   Plus,
   Trash2,
   Clock,
-  Sparkles
+  Sparkles,
+  FileText,
+  Zap
 } from 'lucide-react';
 import { FileTreeItem, MemoryPage, Routine, ProjectOverview, ChatSessionMetadata } from '../types';
 
@@ -32,6 +34,8 @@ interface SidebarProps {
   onSelectRoutine: (routine: Routine) => void;
   onOpenProjectModal: () => void;
   onSwitchProject: (path: string) => void;
+  onOpenNotes?: () => void;
+  onOpenSkills?: () => void;
   recentProjects: string[];
   sessions: ChatSessionMetadata[];
   activeSessionId: string | null;
@@ -52,6 +56,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectRoutine,
   onOpenProjectModal,
   onSwitchProject,
+  onOpenNotes,
+  onOpenSkills,
   recentProjects,
   sessions,
   activeSessionId,
@@ -60,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteSession
 }) => {
   const [activeTab, setActiveTab] = useState<'chats' | 'files' | 'memory' | 'routines'>('chats');
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({ '': true });
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => ({ ...prev, [path]: !prev[path] }));
@@ -70,23 +76,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return (
       <div className="space-y-0.5" style={{ paddingLeft: depth > 0 ? '12px' : '0px' }}>
         {items.map((item) => {
+          const isSelected = selectedFile === item.path;
+          const isExpanded = !!expandedFolders[item.path];
+
           if (item.type === 'directory') {
-            const isExpanded = expandedFolders[item.path];
             return (
-              <div key={item.path}>
+              <div key={item.path} className="space-y-0.5">
                 <button
                   onClick={() => toggleFolder(item.path)}
-                  className="w-full flex items-center space-x-1.5 py-1 px-1.5 rounded hover:bg-card-border/50 text-slate-300 text-xs transition-colors text-left"
+                  className="w-full flex items-center space-x-1.5 py-1 px-1.5 rounded text-xs text-slate-300 hover:text-white hover:bg-card-border/40 transition-colors text-left font-mono"
                 >
                   {isExpanded ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
                   ) : (
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
                   )}
                   {isExpanded ? (
-                    <FolderOpen className="w-3.5 h-3.5 text-amber-400/90 shrink-0" />
+                    <FolderOpen className="w-3.5 h-3.5 text-accent-light shrink-0" />
                   ) : (
-                    <Folder className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
+                    <Folder className="w-3.5 h-3.5 text-accent-light shrink-0" />
                   )}
                   <span className="truncate">{item.name}</span>
                 </button>
@@ -94,7 +102,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             );
           } else {
-            const isSelected = selectedFile === item.path;
             return (
               <button
                 key={item.path}
@@ -117,6 +124,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className="w-64 border-r border-card-border bg-sidebar flex flex-col select-none shrink-0 h-[calc(100vh-3.5rem)]">
+      {/* Top Action Bar */}
+      <div className="flex border-b border-card-border bg-panel p-1 gap-1">
+        <button onClick={onOpenNotes} className="flex-1 py-1.5 flex items-center justify-center text-slate-400 hover:text-white hover:bg-card rounded transition-colors" title="Notas">
+          <FileText className="w-4 h-4" />
+        </button>
+        <button onClick={onOpenSkills} className="flex-1 py-1.5 flex items-center justify-center text-slate-400 hover:text-white hover:bg-card rounded transition-colors" title="Skills">
+          <Zap className="w-4 h-4" />
+        </button>
+      </div>
+
       {/* Tab Switcher Icons */}
       <div className="grid grid-cols-4 border-b border-card-border bg-panel p-1 gap-0.5">
         <button
@@ -126,7 +143,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'bg-card text-accent-light font-medium shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
           }`}
-          title="Histórico de Chats"
+          title="Histórico de Conversas"
         >
           <MessageSquare className="w-3.5 h-3.5" />
         </button>
@@ -148,7 +165,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'bg-card text-brand-cyan font-medium shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
           }`}
-          title="Base de Memória de Longo Prazo"
+          title="Memória Contínua (ai-memory)"
         >
           <Brain className="w-3.5 h-3.5 text-brand-cyan" />
         </button>
@@ -159,9 +176,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'bg-card text-accent-light font-medium shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
           }`}
-          title="Rotinas e Especialistas"
+          title="Especialistas & Rotinas"
         >
-          <Bot className="w-3.5 h-3.5 text-accent-light" />
+          <Bot className="w-3.5 h-3.5" />
         </button>
       </div>
 
