@@ -13,6 +13,7 @@ import { ProjectModal } from './components/ProjectModal';
 import { MentionModal } from './components/MentionModal';
 import { WindowPickerModal } from './components/WindowPickerModal';
 import { FloatingOverlay } from './components/FloatingOverlay';
+import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
   OpenRouterModel, 
@@ -25,7 +26,8 @@ import {
   ChatSessionMetadata,
   ChatSession,
   QuotedMessage,
-  Attachment
+  Attachment,
+  FrankNote
 } from './types';
 import { api } from './api';
 
@@ -35,6 +37,9 @@ export const App: React.FC = () => {
   const [models, setModels] = useState<{ curated: OpenRouterModel[]; all: OpenRouterModel[] }>({ curated: [], all: [] });
   const [activeModel, setActiveModel] = useState<string>('deepseek/deepseek-r1');
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
+
+  // Top-Level Main View Mode: Agent Workspace vs FrankMD Notes vs Skills
+  const [mainViewMode, setMainViewMode] = useState<'agent' | 'notes' | 'skills'>('agent');
 
   // Chat & Session State
   const [sessions, setSessions] = useState<ChatSessionMetadata[]>([]);
@@ -46,14 +51,15 @@ export const App: React.FC = () => {
 
   // Panel & Resizing Layout State
   const [sidebarWidth, setSidebarWidth] = useState<number>(240);
-  const [rightPanelWidth, setRightPanelWidth] = useState<number>(420);
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(440);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
   const [isDraggingRightPanel, setIsDraggingRightPanel] = useState<boolean>(false);
+  const [isRightPanelMaximized, setIsRightPanelMaximized] = useState<boolean>(false);
 
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [activeMemoryPage, setActiveMemoryPage] = useState<MemoryPage | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'memory' | 'terminal' | 'notes' | 'skills'>('notes');
+  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'memory' | 'terminal'>('code');
 
   // Modals & Overlay Mode
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
@@ -375,9 +381,11 @@ export const App: React.FC = () => {
         currentProject={currentProject}
         activeModel={activeModel}
         activeRoutine={activeRoutine}
+        mainViewMode={mainViewMode}
         isRightPanelOpen={isRightPanelOpen}
         rightPanelTab={rightPanelTab}
         isOverlayActive={isOverlayActive}
+        onSetMainViewMode={setMainViewMode}
         onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
         onToggleOverlay={() => setIsOverlayActive(!isOverlayActive)}
         onSetRightPanelTab={(tab) => setRightPanelTab(tab)}
@@ -387,127 +395,179 @@ export const App: React.FC = () => {
         onSelectRoutine={handleSelectRoutine}
       />
 
-      {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Sidebar with Dynamic Width */}
-        <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 flex">
-          <div className="w-full">
-            <Sidebar
-              currentProject={currentProject}
-              fileTree={currentProject?.fileTree || []}
-              memoryPages={currentProject?.memoryPages || []}
-              routines={config?.customRoutines || []}
-              activeRoutine={activeRoutine}
-              selectedFile={selectedFile}
-              onSelectFile={(filePath) => {
-                setSelectedFile(filePath);
-                setRightPanelTab('code');
-                if (!isRightPanelOpen) setIsRightPanelOpen(true);
-              }}
-              onSelectMemoryPage={(page) => {
-                setActiveMemoryPage(page);
-                setRightPanelTab('memory');
-                if (!isRightPanelOpen) setIsRightPanelOpen(true);
-              }}
-              onSelectRoutine={handleSelectRoutine}
-              onOpenProjectModal={() => setIsProjectModalOpen(true)}
-              onSwitchProject={handleOpenProject}
-              onOpenNotes={() => {
-                setRightPanelTab('notes');
-                if (!isRightPanelOpen) setIsRightPanelOpen(true);
-              }}
-              onOpenSkills={() => {
-                setRightPanelTab('skills');
-                if (!isRightPanelOpen) setIsRightPanelOpen(true);
-              }}
-              recentProjects={config?.recentProjects || []}
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              onSelectSession={handleSelectSession}
-              onNewSession={handleNewSession}
-              onDeleteSession={handleDeleteSession}
-            />
-          </div>
-        </div>
-
-        {/* Resizable Splitter 1: Left Sidebar Drag Handle */}
-        <div
-          onMouseDown={() => setIsDraggingSidebar(true)}
-          className={`w-1 cursor-col-resize hover:bg-accent transition-colors z-10 ${
-            isDraggingSidebar ? 'bg-accent' : 'bg-transparent hover:bg-accent/50'
-          }`}
-          title="Arraste para redimensionar barra lateral"
-        />
-
-        {/* Center: Antigravity Chat Area */}
-        <div className="flex-1 flex flex-col min-w-[320px] overflow-hidden">
-          <ChatArea
-            messages={messages}
-            isStreaming={isStreaming}
-            activeModel={activeModel}
-            activeRoutine={activeRoutine}
-            onSendMessage={handleSendMessage}
-            onStopStreaming={handleStopStreaming}
-            onClearChat={handleNewSession}
-            onQuickAction={(action) => handleSendMessage(action)}
-            onSelectRoutine={handleSelectRoutine}
-            onOpenMentionModal={() => setIsMentionModalOpen(true)}
-            onOpenWindowPicker={() => setIsWindowPickerOpen(true)}
-            quotedMessage={quotedMessage}
-            onClearQuotedMessage={() => setQuotedMessage(null)}
-            onOpenNotes={() => {
-              setRightPanelTab('notes');
-              if (!isRightPanelOpen) setIsRightPanelOpen(true);
+      {/* MODE 1: DEDICATED NOTION-STYLE FRANKMD NOTES & VAULT */}
+      {mainViewMode === 'notes' && (
+        <div className="flex-1 flex overflow-hidden">
+          <FrankNoteView
+            onMentionInChat={(note) => {
+              setMainViewMode('agent');
+              handleSendMessage(`Sobre a anotação [[${note.title}]]:\n\n${note.content}`);
             }}
+            onReturnToAgent={() => setMainViewMode('agent')}
           />
         </div>
+      )}
 
-        {/* Resizable Splitter 2: Right Secondary Panel Drag Handle */}
-        {isRightPanelOpen && (
-          <div
-            onMouseDown={() => setIsDraggingRightPanel(true)}
-            className={`w-1 cursor-col-resize hover:bg-accent transition-colors z-10 ${
-              isDraggingRightPanel ? 'bg-accent' : 'bg-transparent hover:bg-accent/50'
-            }`}
-            title="Arraste para redimensionar painel lateral"
-          />
-        )}
+      {/* MODE 2: DEDICATED SKILLS & ARTIFACTS GALLERY */}
+      {mainViewMode === 'skills' && (
+        <div className="flex-1 flex overflow-hidden">
+          <SkillsAndArtifactsView />
+        </div>
+      )}
 
-        {/* Right Split Panel with Dynamic Width (Code / Memory / Terminal / FrankMD Notes / Skills & Artifacts) */}
-        {isRightPanelOpen && (
-          <aside 
-            style={{ width: `${rightPanelWidth}px` }} 
-            className="border-l border-card-border bg-sidebar flex flex-col h-[calc(100vh-3.5rem)] shadow-2xl relative shrink-0"
-          >
-            {rightPanelTab === 'notes' && (
-              <FrankNoteView />
-            )}
+      {/* MODE 3: AGENTIC IDE WORKSPACE */}
+      {mainViewMode === 'agent' && (
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Left Sidebar with Dynamic Width (Hidden when right panel is maximized) */}
+          {!isRightPanelMaximized && (
+            <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 flex">
+              <div className="w-full">
+                <Sidebar
+                  currentProject={currentProject}
+                  fileTree={currentProject?.fileTree || []}
+                  memoryPages={currentProject?.memoryPages || []}
+                  routines={config?.customRoutines || []}
+                  activeRoutine={activeRoutine}
+                  selectedFile={selectedFile}
+                  onSelectFile={(filePath) => {
+                    setSelectedFile(filePath);
+                    setRightPanelTab('code');
+                    if (!isRightPanelOpen) setIsRightPanelOpen(true);
+                  }}
+                  onSelectMemoryPage={(page) => {
+                    setActiveMemoryPage(page);
+                    setRightPanelTab('memory');
+                    if (!isRightPanelOpen) setIsRightPanelOpen(true);
+                  }}
+                  onSelectRoutine={handleSelectRoutine}
+                  onOpenProjectModal={() => setIsProjectModalOpen(true)}
+                  onSwitchProject={handleOpenProject}
+                  onOpenNotes={() => setMainViewMode('notes')}
+                  onOpenSkills={() => setMainViewMode('skills')}
+                  recentProjects={config?.recentProjects || []}
+                  sessions={sessions}
+                  activeSessionId={activeSessionId}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                  onDeleteSession={handleDeleteSession}
+                />
+              </div>
+            </div>
+          )}
 
-            {rightPanelTab === 'skills' && (
-              <SkillsAndArtifactsView />
-            )}
+          {/* Resizable Splitter 1: Left Sidebar Drag Handle */}
+          {!isRightPanelMaximized && (
+            <div
+              onMouseDown={() => setIsDraggingSidebar(true)}
+              className={`w-1 cursor-col-resize hover:bg-accent transition-colors z-10 ${
+                isDraggingSidebar ? 'bg-accent' : 'bg-transparent hover:bg-accent/50'
+              }`}
+              title="Arraste para redimensionar barra lateral"
+            />
+          )}
 
-            {rightPanelTab === 'code' && (
-              <CodeViewer
-                filePath={selectedFile}
-                onFileSaved={loadProjectOverview}
+          {/* Center: Antigravity Chat Area (Hidden when right panel is maximized) */}
+          {!isRightPanelMaximized && (
+            <div className="flex-1 flex flex-col min-w-[320px] overflow-hidden">
+              <ChatArea
+                messages={messages}
+                isStreaming={isStreaming}
+                activeModel={activeModel}
+                activeRoutine={activeRoutine}
+                onSendMessage={handleSendMessage}
+                onStopStreaming={handleStopStreaming}
+                onClearChat={handleNewSession}
+                onQuickAction={(action) => handleSendMessage(action)}
+                onSelectRoutine={handleSelectRoutine}
+                onOpenMentionModal={() => setIsMentionModalOpen(true)}
+                onOpenWindowPicker={() => setIsWindowPickerOpen(true)}
+                quotedMessage={quotedMessage}
+                onClearQuotedMessage={() => setQuotedMessage(null)}
+                onOpenNotes={() => setMainViewMode('notes')}
               />
-            )}
+            </div>
+          )}
 
-            {rightPanelTab === 'memory' && (
-              <MemoryInspector
-                activeMemoryPage={activeMemoryPage}
-                activeContext={currentProject?.activeContext || ''}
-                onRefreshMemory={loadProjectOverview}
-              />
-            )}
+          {/* Resizable Splitter 2: Right Secondary Panel Drag Handle */}
+          {isRightPanelOpen && !isRightPanelMaximized && (
+            <div
+              onMouseDown={() => setIsDraggingRightPanel(true)}
+              className={`w-1 cursor-col-resize hover:bg-accent transition-colors z-10 ${
+                isDraggingRightPanel ? 'bg-accent' : 'bg-transparent hover:bg-accent/50'
+              }`}
+              title="Arraste para redimensionar painel lateral"
+            />
+          )}
 
-            {rightPanelTab === 'terminal' && (
-              <TerminalView />
-            )}
-          </aside>
-        )}
-      </div>
+          {/* Right Split Panel (Code / Memory / Terminal) with Maximize/Minimize Controls */}
+          {isRightPanelOpen && (
+            <aside 
+              style={{ width: isRightPanelMaximized ? '100%' : `${rightPanelWidth}px` }} 
+              className={`border-l border-card-border bg-sidebar flex flex-col h-[calc(100vh-3.5rem)] shadow-2xl relative ${
+                isRightPanelMaximized ? 'flex-1 z-30' : 'shrink-0'
+              }`}
+            >
+              {/* Window Controls Top Bar */}
+              <div className="h-10 border-b border-card-border bg-[#0b0d13] px-3 flex items-center justify-between shrink-0 select-none">
+                <div className="flex items-center space-x-1">
+                  <span className="text-xs font-bold text-slate-200 capitalize">
+                    {rightPanelTab === 'code' ? 'Editor de Código' : rightPanelTab === 'memory' ? 'Memória do Projeto' : 'Terminal Integrado'}
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-1">
+                  {/* Maximize / Restore Toggle */}
+                  <button
+                    onClick={() => setIsRightPanelMaximized(!isRightPanelMaximized)}
+                    className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white transition-colors"
+                    title={isRightPanelMaximized ? 'Restaurar Tamanho Normal' : 'Maximizar Painel'}
+                  >
+                    {isRightPanelMaximized ? (
+                      <Minimize2 className="w-3.5 h-3.5 text-accent-light" />
+                    ) : (
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+
+                  {/* Close / Minimize Panel */}
+                  <button
+                    onClick={() => {
+                      setIsRightPanelMaximized(false);
+                      setIsRightPanelOpen(false);
+                    }}
+                    className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-rose-400 transition-colors"
+                    title="Minimizar / Fechar Painel"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Panel Views */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {rightPanelTab === 'code' && (
+                  <CodeViewer
+                    filePath={selectedFile}
+                    onFileSaved={loadProjectOverview}
+                  />
+                )}
+
+                {rightPanelTab === 'memory' && (
+                  <MemoryInspector
+                    activeMemoryPage={activeMemoryPage}
+                    activeContext={currentProject?.activeContext || ''}
+                    onRefreshMemory={loadProjectOverview}
+                  />
+                )}
+
+                {rightPanelTab === 'terminal' && (
+                  <TerminalView />
+                )}
+              </div>
+            </aside>
+          )}
+        </div>
+      )}
 
       {/* Floating Overlay Mode (Always on Top) */}
       <FloatingOverlay
