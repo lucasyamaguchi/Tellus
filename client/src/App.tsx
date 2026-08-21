@@ -5,6 +5,8 @@ import { ChatArea } from './components/ChatArea';
 import { CodeViewer } from './components/CodeViewer';
 import { MemoryInspector } from './components/MemoryInspector';
 import { TerminalView } from './components/TerminalView';
+import { FrankNoteView } from './components/FrankNoteView';
+import { SkillsAndArtifactsView } from './components/SkillsAndArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ProjectModal } from './components/ProjectModal';
@@ -44,14 +46,14 @@ export const App: React.FC = () => {
 
   // Panel & Resizing Layout State
   const [sidebarWidth, setSidebarWidth] = useState<number>(240);
-  const [rightPanelWidth, setRightPanelWidth] = useState<number>(380);
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(420);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
   const [isDraggingRightPanel, setIsDraggingRightPanel] = useState<boolean>(false);
 
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [activeMemoryPage, setActiveMemoryPage] = useState<MemoryPage | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'memory' | 'terminal'>('memory');
+  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'memory' | 'terminal' | 'notes' | 'skills'>('notes');
 
   // Modals & Overlay Mode
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
@@ -410,6 +412,14 @@ export const App: React.FC = () => {
               onSelectRoutine={handleSelectRoutine}
               onOpenProjectModal={() => setIsProjectModalOpen(true)}
               onSwitchProject={handleOpenProject}
+              onOpenNotes={() => {
+                setRightPanelTab('notes');
+                if (!isRightPanelOpen) setIsRightPanelOpen(true);
+              }}
+              onOpenSkills={() => {
+                setRightPanelTab('skills');
+                if (!isRightPanelOpen) setIsRightPanelOpen(true);
+              }}
               recentProjects={config?.recentProjects || []}
               sessions={sessions}
               activeSessionId={activeSessionId}
@@ -459,12 +469,20 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Right Split Panel with Dynamic Width (Code / Memory Inspector / Terminal) */}
+        {/* Right Split Panel with Dynamic Width (Code / Memory / Terminal / FrankMD Notes / Skills & Artifacts) */}
         {isRightPanelOpen && (
           <aside 
             style={{ width: `${rightPanelWidth}px` }} 
             className="border-l border-card-border bg-sidebar flex flex-col h-[calc(100vh-3.5rem)] shadow-2xl relative shrink-0"
           >
+            {rightPanelTab === 'notes' && (
+              <FrankNoteView />
+            )}
+
+            {rightPanelTab === 'skills' && (
+              <SkillsAndArtifactsView />
+            )}
+
             {rightPanelTab === 'code' && (
               <CodeViewer
                 filePath={selectedFile}

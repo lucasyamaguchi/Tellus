@@ -57,6 +57,38 @@ export class OpenRouterService {
     return res.data.data || [];
   }
 
+  public static async getCredits(apiKey: string): Promise<{ totalCredits: number; totalUsage: number; remainingCredits: number }> {
+    if (!apiKey) {
+      throw new Error('Chave de API OpenRouter não informada');
+    }
+    try {
+      const res = await axios.get(`${this.baseUrl}/credits`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 10000
+      });
+      const data = res.data.data || {};
+      const totalCredits = typeof data.total_credits === 'number' ? data.total_credits : 0;
+      const totalUsage = typeof data.total_usage === 'number' ? data.total_usage : 0;
+      const remainingCredits = Math.max(0, totalCredits - totalUsage);
+      return { totalCredits, totalUsage, remainingCredits };
+    } catch (err: any) {
+      // Fallback to /auth/key endpoint if credits endpoint differs
+      try {
+        const keyRes = await axios.get(`${this.baseUrl}/auth/key`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          timeout: 10000
+        });
+        const keyData = keyRes.data.data || {};
+        const limit = keyData.limit || 0;
+        const usage = keyData.usage || 0;
+        const remaining = keyData.limit_remaining !== undefined ? keyData.limit_remaining : Math.max(0, limit - usage);
+        return { totalCredits: limit, totalUsage: usage, remainingCredits: remaining };
+      } catch (innerErr: any) {
+        throw new Error(err.response?.data?.error?.message || err.message || 'Falha ao consultar saldo OpenRouter');
+      }
+    }
+  }
+
   public static async streamChat(
     apiKey: string,
     model: string,

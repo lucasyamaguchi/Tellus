@@ -75,6 +75,7 @@ function createMainWindow() {
     height: 890,
     minWidth: 1024,
     minHeight: 700,
+    center: true,
     title: 'Tellus',
     backgroundColor: '#090a0f',
     icon: appIcon,

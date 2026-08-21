@@ -11,6 +11,9 @@
 O **Agentic IDE** é um ambiente de desenvolvimento pessoal local, projetado para ser um hub de IA que permite:
 
 - Conversar com **qualquer modelo de IA** disponível no mercado (OpenRouter, Google Gemini, Anthropic Claude, OpenAI GPT) usando apenas suas chaves de API.
+- Monitorar em tempo real seu **saldo e consumo de créditos na OpenRouter** diretamente na barra superior.
+- **FrankMD Safe Note Taker & Knowledge Graph**: Sistema de anotações com Data Safety (auto-backup, proteção contra deleção acidental), wikilinks `[[Link]]`, tags `#tag` e **Grafo de Conhecimento Visual Interativo (estilo Obsidian)** para conectar ideias entre todos os projetos.
+- **Skills dos Agentes & Galeria de Artefatos**: Pastas dedicadas para catalogar e criar novas skills por agente (`Architect`, `Debugger`, `Fast Coder`, etc.) e gerenciar entregas estruturadas do projeto (`.agentic/artifacts/`).
 - Executar um **agente autônomo** capaz de ler, criar e modificar arquivos do seu computador, rodar comandos no terminal, capturar sua tela, fazer scraping de páginas web e manter memória contínua entre conversas.
 - Tudo isso com uma interface visual elegante, sem precisar abrir nenhum terminal manualmente.
 

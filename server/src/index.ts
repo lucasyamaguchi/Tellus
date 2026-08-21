@@ -12,6 +12,8 @@ import { ScreenCapture } from './services/tools/screenCapture.js';
 import { TerminalRunner } from './services/tools/terminalRunner.js';
 import { SessionManager } from './services/sessionManager.js';
 import { AgentLoop } from './services/agentLoop.js';
+import { FrankNoteEngine } from './services/notes/frankNoteEngine.js';
+import { SkillManager } from './services/skills/skillManager.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -281,6 +283,116 @@ app.post('/api/terminal/launch-external', (req, res) => {
     }
 
     res.json({ success: true, message: `Terminal externo aberto para ${agent || 'projeto'}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// OpenRouter Credits & Usage Monitor
+app.get('/api/openrouter/credits', async (req, res) => {
+  try {
+    const config = ConfigManager.getConfig();
+    const apiKey = config.keys.openrouter;
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Chave da OpenRouter não configurada' });
+    }
+    const credits = await OpenRouterService.getCredits(apiKey);
+    res.json(credits);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Falha ao consultar saldo da OpenRouter' });
+  }
+});
+
+// FrankMD Note Taker & Knowledge Graph
+app.get('/api/notes', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const notes = FrankNoteEngine.listNotes(currentPath);
+    res.json(notes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const note = FrankNoteEngine.saveNote(req.body, currentPath);
+    res.json(note);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notes/:id', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const isProjectSpecific = req.query.isProjectSpecific === 'true';
+    const success = FrankNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/notes/graph', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const graphData = FrankNoteEngine.getGraphData(currentPath);
+    res.json(graphData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Skills & Artifacts Endpoints
+app.get('/api/skills', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const skills = SkillManager.listSkills(currentPath);
+    res.json(skills);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/skills', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const skill = SkillManager.saveSkill(req.body, currentPath);
+    res.json(skill);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/skills/:id', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const isProjectSpecific = req.query.isProjectSpecific === 'true';
+    const success = SkillManager.deleteSkill(req.params.id, isProjectSpecific, currentPath);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/artifacts', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const artifacts = SkillManager.listArtifacts(currentPath);
+    res.json(artifacts);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/artifacts', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { title, content, type, filename } = req.body;
+    const artifact = SkillManager.saveArtifact(currentPath, title, content, type, filename);
+    res.json(artifact);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

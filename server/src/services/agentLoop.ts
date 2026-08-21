@@ -3,6 +3,8 @@ import { TerminalRunner } from './tools/terminalRunner.js';
 import { ScreenCapture } from './tools/screenCapture.js';
 import { WebScraper } from './tools/webScraper.js';
 import { MemoryEngine } from './memory/memoryEngine.js';
+import { FrankNoteEngine } from './notes/frankNoteEngine.js';
+import { SkillManager } from './skills/skillManager.js';
 import { ProviderHub } from './providers/providerHub.js';
 import { ChatMessage, ToolDefinition } from './providers/openrouter.js';
 
@@ -175,6 +177,40 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'artifact_create',
+      description: 'Gera e salva um artefato estruturado no projeto (.agentic/artifacts/) como planos, walkthroughs, diagramas ou relatórios.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Título do artefato' },
+          type: { type: 'string', enum: ['plan', 'walkthrough', 'diff', 'diagram', 'report'], description: 'Tipo do artefato' },
+          content: { type: 'string', description: 'Conteúdo Markdown completo do artefato' },
+          filename: { type: 'string', description: 'Nome opcional do arquivo (ex: "implementation_plan.md")' }
+        },
+        required: ['title', 'type', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'frank_note_save',
+      description: 'Cria ou atualiza uma nota segura no sistema FrankMD / Obsidian Vault com wikilinks [[Nota]] e tags #tag.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Título da nota' },
+          subject: { type: 'string', description: 'Assunto ou tema (ex: "Arquitetura", "Segurança", "Ideias")' },
+          content: { type: 'string', description: 'Conteúdo em Markdown com wikilinks e tags' },
+          is_project_specific: { type: 'boolean', description: 'Se true salva no projeto atual, se false salva no cofre global' }
+        },
+        required: ['title', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'memory_create_handoff',
       description: 'Gera um snapshot de transição (handoff) para outro modelo ou próxima sessão.',
       parameters: {
@@ -272,6 +308,25 @@ export class AgentLoop {
         case 'web_scrape': {
           const scraped = await WebScraper.scrapeUrl(projectPath, args.url, args.export_path, args.format);
           return { status: 'success', ...scraped };
+        }
+        case 'artifact_create': {
+          const artifact = SkillManager.saveArtifact(
+            projectPath,
+            args.title,
+            args.content,
+            args.type || 'report',
+            args.filename
+          );
+          return { status: 'success', artifact: { id: artifact.id, title: artifact.title, path: artifact.relativePath } };
+        }
+        case 'frank_note_save': {
+          const note = FrankNoteEngine.saveNote({
+            title: args.title,
+            subject: args.subject,
+            content: args.content,
+            isProjectSpecific: args.is_project_specific
+          }, projectPath);
+          return { status: 'success', note: { id: note.id, title: note.title, subject: note.subject } };
         }
         case 'memory_create_handoff': {
           const handoff = MemoryEngine.createHandoff(

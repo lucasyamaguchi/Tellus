@@ -9,7 +9,12 @@ import {
   Attachment,
   ChatSessionMetadata,
   ChatSession,
-  QuotedMessage
+  QuotedMessage,
+  OpenRouterCredits,
+  FrankNote,
+  GraphData,
+  TellusSkill,
+  TellusArtifact
 } from './types';
 
 const API_BASE = '/api';
@@ -106,7 +111,78 @@ export const api = {
     return res.json();
   },
 
-  // Chat Sessions & Cross-Chat Mentions
+  // OpenRouter Credits & Usage
+  async getOpenRouterCredits(): Promise<OpenRouterCredits> {
+    const res = await fetch(`${API_BASE}/openrouter/credits`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao consultar créditos' }));
+      throw new Error(err.error || 'Falha ao consultar créditos');
+    }
+    return res.json();
+  },
+
+  // FrankMD Notes & Knowledge Graph
+  async listNotes(): Promise<FrankNote[]> {
+    const res = await fetch(`${API_BASE}/notes`);
+    return res.json();
+  },
+
+  async saveNote(data: { id?: string; title: string; subject?: string; content: string; isProjectSpecific?: boolean }): Promise<FrankNote> {
+    const res = await fetch(`${API_BASE}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+
+  async deleteNote(id: string, isProjectSpecific?: boolean): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/notes/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
+      method: 'DELETE'
+    });
+    return res.json();
+  },
+
+  async getNotesGraph(): Promise<GraphData> {
+    const res = await fetch(`${API_BASE}/notes/graph`);
+    return res.json();
+  },
+
+  // Skills & Artifacts
+  async listSkills(): Promise<TellusSkill[]> {
+    const res = await fetch(`${API_BASE}/skills`);
+    return res.json();
+  },
+
+  async saveSkill(skill: Partial<TellusSkill>): Promise<TellusSkill> {
+    const res = await fetch(`${API_BASE}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(skill)
+    });
+    return res.json();
+  },
+
+  async deleteSkill(id: string, isProjectSpecific?: boolean): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/skills/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
+      method: 'DELETE'
+    });
+    return res.json();
+  },
+
+  async listArtifacts(): Promise<TellusArtifact[]> {
+    const res = await fetch(`${API_BASE}/artifacts`);
+    return res.json();
+  },
+
+  async saveArtifact(data: { title: string; content: string; type?: string; filename?: string }): Promise<TellusArtifact> {
+    const res = await fetch(`${API_BASE}/artifacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
   async listSessions(): Promise<ChatSessionMetadata[]> {
     const res = await fetch(`${API_BASE}/sessions`);
     return res.json();
