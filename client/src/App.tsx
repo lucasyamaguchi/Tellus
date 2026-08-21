@@ -455,6 +455,10 @@ export const App: React.FC = () => {
             onOpenWindowPicker={() => setIsWindowPickerOpen(true)}
             quotedMessage={quotedMessage}
             onClearQuotedMessage={() => setQuotedMessage(null)}
+            onOpenNotes={() => {
+              setRightPanelTab('notes');
+              if (!isRightPanelOpen) setIsRightPanelOpen(true);
+            }}
           />
         </div>
 

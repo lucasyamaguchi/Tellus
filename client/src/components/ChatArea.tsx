@@ -47,6 +47,7 @@ interface ChatAreaProps {
   quotedMessage: QuotedMessage | null;
   onClearQuotedMessage: () => void;
   onOpenWindowPicker: () => void;
+  onOpenNotes?: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -62,7 +63,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenMentionModal,
   quotedMessage,
   onClearQuotedMessage,
-  onOpenWindowPicker
+  onOpenWindowPicker,
+  onOpenNotes
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -75,9 +77,31 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [isGeneratingNote, setIsGeneratingNote] = useState(false);
+  const [createdNoteInfo, setCreatedNoteInfo] = useState<{ id: string; title: string } | null>(null);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming, attachments]);
+
+  const handleGenerateNote = async () => {
+    if (messages.length === 0) {
+      alert('Inicie ou carregue uma conversa antes de criar uma anotação.');
+      return;
+    }
+    setIsGeneratingNote(true);
+    try {
+      const res = await api.generateNoteFromChat({
+        messages,
+        model: activeModel
+      });
+      setCreatedNoteInfo({ id: res.note.id, title: res.note.title });
+    } catch (err: any) {
+      alert(`Erro ao criar anotação: ${err.message}`);
+    } finally {
+      setIsGeneratingNote(false);
+    }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -87,8 +111,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleSend = () => {
-    if ((!input.trim() && attachments.length === 0) || isStreaming) return;
-    onSendMessage(input.trim(), attachments.length > 0 ? attachments : undefined, quotedMessage || undefined);
+    const trimmed = input.trim();
+    const lower = trimmed.toLowerCase();
+
+    // Check for note creation commands
+    if (
+      lower === '/nota' ||
+      lower === '/note' ||
+      lower === 'criar uma anotação disso' ||
+      lower === 'anotar conversa' ||
+      lower === 'resumir em nota'
+    ) {
+      setInput('');
+      handleGenerateNote();
+      return;
+    }
+
+    if ((!trimmed && attachments.length === 0) || isStreaming) return;
+    onSendMessage(trimmed, attachments.length > 0 ? attachments : undefined, quotedMessage || undefined);
     setInput('');
     setAttachments([]);
     if (quotedMessage) onClearQuotedMessage();
@@ -508,6 +548,36 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
+        {/* Staged Created Note Notification Banner */}
+        {createdNoteInfo && (
+          <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between animate-in fade-in">
+            <div className="flex items-center space-x-2 text-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-slate-200">
+                Anotação <strong>"{createdNoteInfo.title}"</strong> criada no FrankMD Vault!
+              </span>
+            </div>
+            <div className="flex items-center space-x-2">
+              {onOpenNotes && (
+                <button
+                  type="button"
+                  onClick={onOpenNotes}
+                  className="px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] transition-all"
+                >
+                  Ver no Vault
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setCreatedNoteInfo(null)}
+                className="p-0.5 text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Staged Attachments Preview Bar */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 p-2 rounded-xl bg-card border border-card-border">
@@ -647,6 +717,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               >
                 <Eye className="w-3.5 h-3.5 text-accent-light" />
                 <span className="text-[11px] font-sans font-medium">Escolher Janela</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleGenerateNote}
+                disabled={isGeneratingNote || messages.length === 0}
+                className="p-1.5 rounded-lg bg-panel hover:bg-emerald-500/20 border border-card-border hover:border-emerald-500/40 text-emerald-400 transition-all flex items-center space-x-1"
+                title="Criar nota estruturada no FrankMD Vault com os pontos chave e resumo da conversa (/nota)"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-sans font-medium">
+                  {isGeneratingNote ? 'Sintetizando...' : 'Anotar Chat'}
+                </span>
               </button>
 
               <span className="flex items-center space-x-1 pl-2">
