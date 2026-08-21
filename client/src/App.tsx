@@ -206,7 +206,12 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSendMessage = (content: string, attachments?: Attachment[], quotedMsg?: QuotedMessage) => {
+  const handleSendMessage = (
+    content: string, 
+    attachments?: Attachment[], 
+    quotedMsg?: QuotedMessage, 
+    customHistory?: Message[]
+  ) => {
     if (isStreaming) return;
 
     let enrichedPromptForLLM = content;
@@ -243,7 +248,8 @@ export const App: React.FC = () => {
       timestamp: Date.now()
     };
 
-    const updatedMessages = [...messages, userMessage];
+    const baseHistory = customHistory !== undefined ? customHistory : messages;
+    const updatedMessages = [...baseHistory, userMessage];
     setMessages([...updatedMessages, initialAssistantMessage]);
     setIsStreaming(true);
 
@@ -324,6 +330,33 @@ export const App: React.FC = () => {
     );
 
     stopStreamRef.current = cancelFn;
+  };
+
+  const handleEditAndResendMessage = (messageId: string, newContent: string) => {
+    if (isStreaming) handleStopStreaming();
+
+    const msgIndex = messages.findIndex(m => m.id === messageId);
+    if (msgIndex === -1) return;
+
+    const userMsg = messages[msgIndex];
+    const previousHistory = messages.slice(0, msgIndex);
+
+    handleSendMessage(newContent, userMsg.attachments, userMsg.quotedMessage, previousHistory);
+  };
+
+  const handleRegenerateResponse = (assistantMsgId: string) => {
+    if (isStreaming) handleStopStreaming();
+
+    const msgIndex = messages.findIndex(m => m.id === assistantMsgId);
+    if (msgIndex === -1) return;
+
+    const precedingUserMsgIndex = msgIndex - 1;
+    if (precedingUserMsgIndex < 0) return;
+
+    const userMsg = messages[precedingUserMsgIndex];
+    const previousHistory = messages.slice(0, precedingUserMsgIndex);
+
+    handleSendMessage(userMsg.content, userMsg.attachments, userMsg.quotedMessage, previousHistory);
   };
 
   const handleStopStreaming = () => {
@@ -484,6 +517,8 @@ export const App: React.FC = () => {
                 quotedMessage={quotedMessage}
                 onClearQuotedMessage={() => setQuotedMessage(null)}
                 onOpenNotes={() => setMainViewMode('notes')}
+                onEditMessage={handleEditAndResendMessage}
+                onRegenerateResponse={handleRegenerateResponse}
               />
             </div>
           )}

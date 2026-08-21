@@ -26,7 +26,9 @@ import {
   MessageSquareQuote,
   Quote,
   ExternalLink,
-  Eye
+  Eye,
+  RotateCcw,
+  Edit2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -48,6 +50,8 @@ interface ChatAreaProps {
   onClearQuotedMessage: () => void;
   onOpenWindowPicker: () => void;
   onOpenNotes?: () => void;
+  onEditMessage?: (messageId: string, newContent: string) => void;
+  onRegenerateResponse?: (assistantMessageId: string) => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -64,7 +68,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   quotedMessage,
   onClearQuotedMessage,
   onOpenWindowPicker,
-  onOpenNotes
+  onOpenNotes,
+  onEditMessage,
+  onRegenerateResponse
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -72,6 +78,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  
+  // Message In-Place Editing State
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editInput, setEditInput] = useState<string>('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -486,21 +496,103 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
                 )}
 
-                {/* Text Content */}
-                {msg.content && (
-                  <div className="prose prose-invert max-w-none text-xs leading-relaxed break-words">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {msg.content}
-                    </ReactMarkdown>
+                {/* Text Content & Edit Mode */}
+                {msg.role === 'user' && editingMessageId === msg.id ? (
+                  <div className="space-y-2 mt-1">
+                    <textarea
+                      value={editInput}
+                      onChange={(e) => setEditInput(e.target.value)}
+                      className="w-full bg-black/40 border border-white/30 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-white resize-none leading-relaxed"
+                      rows={3}
+                      autoFocus
+                    />
+                    <div className="flex items-center justify-end space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingMessageId(null)}
+                        className="px-2.5 py-1 rounded-lg bg-black/40 hover:bg-black/60 text-xs text-slate-300 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onEditMessage && editInput.trim()) {
+                            onEditMessage(msg.id, editInput.trim());
+                          }
+                          setEditingMessageId(null);
+                        }}
+                        className="px-3 py-1 rounded-lg bg-white hover:bg-slate-100 text-accent font-semibold text-xs transition-all shadow-md"
+                      >
+                        Salvar e Reenviar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  msg.content && (
+                    <div className={`prose prose-invert max-w-none text-xs leading-relaxed break-words ${msg.role === 'user' ? 'text-white' : 'text-slate-100'}`}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
+                  )
+                )}
+
+                {/* User Message Action Buttons (Edit + Copy) */}
+                {msg.role === 'user' && editingMessageId !== msg.id && (
+                  <div className="mt-2 pt-1.5 border-t border-white/15 flex items-center justify-end space-x-2 text-[10px] text-white/70">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingMessageId(msg.id);
+                        setEditInput(msg.content);
+                      }}
+                      className="hover:text-white flex items-center space-x-1 transition-colors"
+                      title="Editar esta mensagem e reenviar à IA"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>Editar</span>
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(msg.content, msg.id)}
+                      className="hover:text-white flex items-center space-x-1 transition-colors"
+                    >
+                      {copiedId === msg.id ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-300" />
+                          <span className="text-emerald-300">Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
 
-                {/* Copy Button */}
+                {/* Assistant Message Action Buttons (Regenerate + Copy) */}
                 {msg.role === 'assistant' && (
-                  <div className="mt-2 pt-2 border-t border-card-border/50 flex justify-end">
+                  <div className="mt-2 pt-2 border-t border-card-border/50 flex items-center justify-end space-x-3">
+                    {onRegenerateResponse && (
+                      <button
+                        type="button"
+                        onClick={() => onRegenerateResponse(msg.id)}
+                        disabled={isStreaming}
+                        className="text-[10px] text-slate-400 hover:text-accent-light flex items-center space-x-1 transition-colors disabled:opacity-50"
+                        title="Regenerar esta resposta com o modelo ativo"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Regenerar</span>
+                      </button>
+                    )}
                     <button
+                      type="button"
                       onClick={() => copyToClipboard(msg.content, msg.id)}
-                      className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center space-x-1"
+                      className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center space-x-1 transition-colors"
                     >
                       {copiedId === msg.id ? (
                         <>
@@ -575,6 +667,25 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Active Streaming Alert & Stop Button Banner */}
+        {isStreaming && (
+          <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/40 flex items-center justify-between animate-in fade-in">
+            <div className="flex items-center space-x-2 text-xs text-rose-300">
+              <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
+              <span>Antigravity Agent está gerando resposta com <strong>{activeModel.split('/').pop()}</strong>...</span>
+            </div>
+            <button
+              type="button"
+              onClick={onStopStreaming}
+              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-rose-950/40"
+              title="Interromper geração imediatamente"
+            >
+              <Square className="w-3 h-3 fill-current" />
+              <span>Interromper Resposta</span>
+            </button>
           </div>
         )}
 

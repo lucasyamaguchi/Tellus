@@ -598,12 +598,16 @@ app.post('/api/chat/stream', async (req, res) => {
     if (routine) systemPrompt = routine.systemPrompt;
   }
 
-  const selectedModel = model || config.defaultModel;
-  const selectedProvider = provider || config.defaultProvider;
+  const selectedModel = model || config.defaultModel || 'deepseek/deepseek-r1';
+  const selectedProvider = provider || config.defaultProvider || 'openrouter';
 
   const abortController = new AbortController();
-  req.on('close', () => {
-    abortController.abort();
+  
+  // Abort only when client disconnects prematurely before response finishes
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
   });
 
   try {
@@ -623,7 +627,9 @@ app.post('/api/chat/stream', async (req, res) => {
     sendSSE('done', { status: 'completed' });
     res.end();
   } catch (err: any) {
-    sendSSE('error', { message: err.message || 'Erro durante o streaming' });
+    if (!abortController.signal.aborted) {
+      sendSSE('error', { message: err.message || 'Erro durante a execução do agente' });
+    }
     res.end();
   }
 });
