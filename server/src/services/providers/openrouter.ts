@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 export interface OpenRouterModel {
   id: string;
   name: string;
@@ -53,8 +51,12 @@ export class OpenRouterService {
     if (apiKey) {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
-    const res = await axios.get(`${this.baseUrl}/models`, { headers, timeout: 15000 });
-    return res.data.data || [];
+    const res = await fetch(`${this.baseUrl}/models`, { headers });
+    if (!res.ok) {
+      throw new Error(`Falha ao listar modelos da OpenRouter: ${res.statusText}`);
+    }
+    const data = (await res.json()) as any;
+    return data.data || [];
   }
 
   public static async getCredits(apiKey: string): Promise<{ totalCredits: number; totalUsage: number; remainingCredits: number }> {
@@ -62,30 +64,37 @@ export class OpenRouterService {
       throw new Error('Chave de API OpenRouter não informada');
     }
     try {
-      const res = await axios.get(`${this.baseUrl}/credits`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        timeout: 10000
+      const res = await fetch(`${this.baseUrl}/credits`, {
+        headers: { Authorization: `Bearer ${apiKey}` }
       });
-      const data = res.data.data || {};
-      const totalCredits = typeof data.total_credits === 'number' ? data.total_credits : 0;
-      const totalUsage = typeof data.total_usage === 'number' ? data.total_usage : 0;
-      const remainingCredits = Math.max(0, totalCredits - totalUsage);
-      return { totalCredits, totalUsage, remainingCredits };
-    } catch (err: any) {
-      // Fallback to /auth/key endpoint if credits endpoint differs
-      try {
-        const keyRes = await axios.get(`${this.baseUrl}/auth/key`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          timeout: 10000
-        });
-        const keyData = keyRes.data.data || {};
+      if (res.ok) {
+        const json = (await res.json()) as any;
+        const data = json.data || {};
+        const totalCredits = typeof data.total_credits === 'number' ? data.total_credits : 0;
+        const totalUsage = typeof data.total_usage === 'number' ? data.total_usage : 0;
+        const remainingCredits = Math.max(0, totalCredits - totalUsage);
+        return { totalCredits, totalUsage, remainingCredits };
+      }
+    } catch {
+      // fallback
+    }
+
+    // Fallback to /auth/key endpoint
+    try {
+      const keyRes = await fetch(`${this.baseUrl}/auth/key`, {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      if (keyRes.ok) {
+        const keyJson = (await keyRes.json()) as any;
+        const keyData = keyJson.data || {};
         const limit = keyData.limit || 0;
         const usage = keyData.usage || 0;
         const remaining = keyData.limit_remaining !== undefined ? keyData.limit_remaining : Math.max(0, limit - usage);
         return { totalCredits: limit, totalUsage: usage, remainingCredits: remaining };
-      } catch (innerErr: any) {
-        throw new Error(err.response?.data?.error?.message || err.message || 'Falha ao consultar saldo OpenRouter');
       }
+      throw new Error(`Erro na API OpenRouter: status ${keyRes.status}`);
+    } catch (err: any) {
+      throw new Error(err.message || 'Falha ao consultar saldo da OpenRouter');
     }
   }
 
@@ -116,21 +125,38 @@ export class OpenRouterService {
       payload.tool_choice = 'auto';
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'http://localhost:3000',
-        'X-Title': 'Agentic IDE Local'
-      },
-      body: JSON.stringify(payload),
-      signal: abortSignal
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': 'http://localhost:3000',
+          'X-Title': 'Tellus Agentic IDE'
+        },
+        body: JSON.stringify(payload),
+        signal: abortSignal
+      });
+    } catch (fetchErr: any) {
+      if (abortSignal?.aborted) {
+        throw new Error('Requisição cancelada pelo usuário.');
+      }
+      throw fetchErr;
+    }
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`OpenRouter Error (${response.status}): ${errText}`);
+      let errorMsg = `OpenRouter Error (${response.status}): ${errText}`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.error?.message) {
+          errorMsg = `OpenRouter (${response.status}): ${parsed.error.message}`;
+        }
+      } catch {
+        // use raw
+      }
+      throw new Error(errorMsg);
     }
 
     const reader = response.body?.getReader();
@@ -178,43 +204,44 @@ export class OpenRouterService {
           }
 
           // Check for tool calls
-          if (delta.tool_calls) {
+          if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
             for (const tc of delta.tool_calls) {
-              const idx = tc.index ?? 0;
-              if (!activeToolCalls[idx]) {
-                activeToolCalls[idx] = {
-                  id: tc.id || `call_${Math.random().toString(36).substring(2, 9)}`,
+              const index = tc.index || 0;
+              if (!activeToolCalls[index]) {
+                activeToolCalls[index] = {
+                  id: tc.id || `call_${Math.random().toString(36).substr(2, 9)}`,
                   name: tc.function?.name || '',
-                  arguments: ''
+                  arguments: tc.function?.arguments || ''
                 };
-              }
-              if (tc.function?.name) {
-                activeToolCalls[idx].name = tc.function.name;
-              }
-              if (tc.function?.arguments) {
-                activeToolCalls[idx].arguments += tc.function.arguments;
+              } else {
+                if (tc.function?.name) activeToolCalls[index].name += tc.function.name;
+                if (tc.function?.arguments) activeToolCalls[index].arguments += tc.function.arguments;
               }
             }
           }
         } catch {
-          // ignore chunk parse errors
+          // ignore malformed SSE line
         }
       }
     }
 
-    const finalToolCalls = Object.values(activeToolCalls).map(tc => ({
+    const formattedToolCalls = Object.values(activeToolCalls).map(tc => ({
       id: tc.id,
-      type: 'function' as const,
+      type: 'function',
       function: {
         name: tc.name,
         arguments: tc.arguments
       }
     }));
 
-    if (finalToolCalls.length > 0) {
-      callbacks.onToolCalls(finalToolCalls);
+    if (formattedToolCalls.length > 0) {
+      callbacks.onToolCalls(formattedToolCalls);
     }
 
-    return { fullContent, fullReasoning, toolCalls: finalToolCalls };
+    return {
+      fullContent,
+      fullReasoning,
+      toolCalls: formattedToolCalls
+    };
   }
 }

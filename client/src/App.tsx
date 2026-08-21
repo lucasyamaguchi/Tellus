@@ -142,13 +142,17 @@ export const App: React.FC = () => {
   };
 
   const handleNewSession = () => {
+    handleStopStreaming();
     const newId = 'session_' + Math.random().toString(36).substring(2, 9);
     setActiveSessionId(newId);
     setMessages([]);
     setQuotedMessage(null);
+    setIsStreaming(false);
   };
 
   const handleSelectSession = async (sessionId: string) => {
+    handleStopStreaming();
+    setIsStreaming(false);
     try {
       const session = await api.getSession(sessionId);
       if (session) {
@@ -166,6 +170,8 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteSession = async (sessionId: string) => {
+    handleStopStreaming();
+    setIsStreaming(false);
     try {
       await api.deleteSession(sessionId);
       const updated = sessions.filter(s => s.id !== sessionId);
