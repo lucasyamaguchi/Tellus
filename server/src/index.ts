@@ -14,6 +14,7 @@ import { SessionManager } from './services/sessionManager.js';
 import { AgentLoop } from './services/agentLoop.js';
 import { FrankNoteEngine } from './services/notes/frankNoteEngine.js';
 import { SkillManager } from './services/skills/skillManager.js';
+import { ProviderHub } from './services/providers/providerHub.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -342,6 +343,89 @@ app.get('/api/notes/graph', (req, res) => {
     res.json(graphData);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Sintetizar e criar uma nota do FrankMD a partir do chat atual
+app.post('/api/notes/generate-from-chat', async (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { messages, sessionTitle, model } = req.body;
+    const config = ConfigManager.getConfig();
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Nenhuma mensagem na conversa para sintetizar.' });
+    }
+
+    const chatTranscript = messages
+      .filter((m: any) => m.content && (m.role === 'user' || m.role === 'assistant'))
+      .map((m: any) => `${m.role === 'user' ? 'Usuário' : 'Assistente'}: ${m.content}`)
+      .join('\n\n');
+
+    if (!chatTranscript.trim()) {
+      return res.status(400).json({ error: 'Nenhum texto relevante para criar nota.' });
+    }
+
+    const promptMessages = [
+      {
+        role: 'system' as const,
+        content: `Você é o sintetizador de conhecimento do FrankMD Notes.
+Sua missão é extrair todo o conteúdo relevante da conversa e gerar uma nota rica, clara e estruturada no formato Markdown.
+Estrutura obrigatória:
+<!-- subject: Assunto principal -->
+# Título Claro e Específico da Nota
+
+## 📌 Resumo Executivo
+Breve resumo dos objetivos, contexto e conclusões da discussão.
+
+## 🔑 Principais Pontos e Decisões
+- Pontos essenciais debatidos e soluções adotadas
+- Snippets de código ou comandos chave (se houver)
+
+## 💡 Conexões e Próximos Passos
+- Conexões sugeridas usando wikilinks no padrão [[Nome de Outra Nota]]
+- Tags no final: #categoria #tecnologia #ideia`
+      },
+      {
+        role: 'user' as const,
+        content: `Transcrição da conversa "${sessionTitle || 'Sessão'}":\n\n${chatTranscript.slice(0, 25000)}\n\nCrie uma nota completa contendo todo o conteúdo relevante.`
+      }
+    ];
+
+    let generatedNoteContent = '';
+    const activeModel = model || config.defaultModel || 'deepseek/deepseek-r1';
+
+    await ProviderHub.streamChat(
+      'auto',
+      activeModel,
+      promptMessages,
+      [],
+      {
+        onContentChunk: (chunk: string) => { generatedNoteContent += chunk; },
+        onReasoningChunk: () => {},
+        onToolCalls: () => {}
+      }
+    );
+
+    const firstH1 = generatedNoteContent.match(/^#+\s*(.*)/m);
+    const title = firstH1 ? firstH1[1].trim() : (sessionTitle ? `Nota: ${sessionTitle}` : `Nota ${new Date().toLocaleDateString()}`);
+
+    const subjectMatch = generatedNoteContent.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
+    const subject = subjectMatch ? subjectMatch[1].trim() : 'Sessões';
+
+    const savedNote = FrankNoteEngine.saveNote({
+      title,
+      subject,
+      content: generatedNoteContent,
+      isProjectSpecific: true
+    }, currentPath);
+
+    res.json({
+      success: true,
+      note: savedNote
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Falha ao sintetizar nota do chat' });
   }
 });
 

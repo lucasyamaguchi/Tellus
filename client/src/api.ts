@@ -136,6 +136,19 @@ export const api = {
     return res.json();
   },
 
+  async generateNoteFromChat(data: { messages: Message[]; sessionTitle?: string; model?: string }): Promise<{ success: boolean; note: FrankNote }> {
+    const res = await fetch(`${API_BASE}/notes/generate-from-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao criar nota' }));
+      throw new Error(err.error || 'Falha ao sintetizar nota');
+    }
+    return res.json();
+  },
+
   async deleteNote(id: string, isProjectSpecific?: boolean): Promise<{ success: boolean }> {
     const res = await fetch(`${API_BASE}/notes/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
       method: 'DELETE'
