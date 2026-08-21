@@ -115,6 +115,25 @@ app.get('/api/projects/current', (req, res) => {
   }
 });
 
+app.get('/api/projects/open-list', (req, res) => {
+  try {
+    const openProjects = ProjectManager.getOpenProjects();
+    const overviews = openProjects.map(p => ProjectManager.getProjectOverview(p));
+    res.json(overviews);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/pick-directory', async (req, res) => {
+  try {
+    const picked = await ProjectManager.pickDirectory();
+    res.json({ path: picked });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/projects/open', (req, res) => {
   try {
     const { path: projectPath } = req.body;
@@ -124,6 +143,19 @@ app.post('/api/projects/open', (req, res) => {
     const result = ProjectManager.openProject(projectPath);
     const overview = ProjectManager.getProjectOverview(result.path);
     res.json(overview);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/close', (req, res) => {
+  try {
+    const { path: projectPath } = req.body;
+    if (!projectPath) {
+      return res.status(400).json({ error: 'Caminho do projeto é obrigatório' });
+    }
+    const result = ProjectManager.closeOpenProject(projectPath);
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

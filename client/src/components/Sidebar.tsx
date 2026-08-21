@@ -18,12 +18,17 @@ import {
   Clock,
   Sparkles,
   FileText,
-  Zap
+  Zap,
+  FolderGit2,
+  X,
+  FolderSearch
 } from 'lucide-react';
 import { FileTreeItem, MemoryPage, Routine, ProjectOverview, ChatSessionMetadata } from '../types';
 
 interface SidebarProps {
   currentProject: ProjectOverview | null;
+  openProjects: ProjectOverview[];
+  onCloseOpenProject: (path: string) => void;
   fileTree: FileTreeItem[];
   memoryPages: MemoryPage[];
   routines: Routine[];
@@ -46,6 +51,8 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentProject,
+  openProjects,
+  onCloseOpenProject,
   fileTree,
   memoryPages,
   routines,
@@ -65,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewSession,
   onDeleteSession
 }) => {
-  const [activeTab, setActiveTab] = useState<'chats' | 'files' | 'memory' | 'routines'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'files' | 'projects' | 'memory' | 'routines'>('chats');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
 
   const toggleFolder = (path: string) => {
@@ -101,41 +108,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {isExpanded && item.children && renderFileTree(item.children, depth + 1)}
               </div>
             );
-          } else {
-            return (
-              <button
-                key={item.path}
-                onClick={() => onSelectFile(item.path)}
-                className={`w-full flex items-center space-x-2 py-1 px-1.5 rounded text-xs transition-all text-left ${
-                  isSelected
-                    ? 'bg-accent/20 text-accent-light font-medium border-l-2 border-accent pl-1'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/40'
-                }`}
-              >
-                <FileCode className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-3.5" />
-                <span className="truncate">{item.name}</span>
-              </button>
-            );
           }
+
+          return (
+            <button
+              key={item.path}
+              onClick={() => onSelectFile(item.path)}
+              className={`w-full flex items-center space-x-2 py-1 px-2 rounded text-xs transition-colors text-left font-mono ${
+                isSelected 
+                  ? 'bg-accent/20 text-accent-light font-medium border-l-2 border-accent' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/30'
+              }`}
+            >
+              <FileCode className="w-3.5 h-3.5 shrink-0 opacity-70" />
+              <span className="truncate">{item.name}</span>
+            </button>
+          );
         })}
       </div>
     );
   };
 
   return (
-    <aside className="w-64 border-r border-card-border bg-sidebar flex flex-col select-none shrink-0 h-[calc(100vh-3.5rem)]">
-      {/* Top Action Bar */}
-      <div className="flex border-b border-card-border bg-panel p-1 gap-1">
-        <button onClick={onOpenNotes} className="flex-1 py-1.5 flex items-center justify-center text-slate-400 hover:text-white hover:bg-card rounded transition-colors" title="Notas">
-          <FileText className="w-4 h-4" />
-        </button>
-        <button onClick={onOpenSkills} className="flex-1 py-1.5 flex items-center justify-center text-slate-400 hover:text-white hover:bg-card rounded transition-colors" title="Skills">
-          <Zap className="w-4 h-4" />
+    <aside className="w-full h-[calc(100vh-3.5rem)] border-r border-card-border bg-sidebar flex flex-col select-none overflow-hidden">
+      {/* Top Workspace Header */}
+      <div className="p-3 border-b border-card-border flex items-center justify-between">
+        <div className="flex items-center space-x-2 overflow-hidden flex-1 mr-2">
+          <div className="w-6 h-6 rounded bg-accent/15 border border-accent/30 flex items-center justify-center shrink-0">
+            <FolderGit2 className="w-3.5 h-3.5 text-accent-light" />
+          </div>
+          <div className="overflow-hidden">
+            <span className="text-xs font-bold text-slate-200 block truncate">
+              {currentProject ? currentProject.name : 'Nenhum Projeto'}
+            </span>
+            <span className="text-[10px] text-slate-400 block truncate font-mono">
+              {currentProject?.path || 'Local'}
+            </span>
+          </div>
+        </div>
+
+        <button
+          onClick={onOpenProjectModal}
+          className="p-1 rounded-lg bg-panel hover:bg-card-border border border-card-border text-slate-400 hover:text-white transition-colors"
+          title="Abrir ou trocar projeto local"
+        >
+          <FolderPlusIcon className="w-3.5 h-3.5" />
         </button>
       </div>
 
       {/* Tab Switcher Icons */}
-      <div className="grid grid-cols-4 border-b border-card-border bg-panel p-1 gap-0.5">
+      <div className="grid grid-cols-5 border-b border-card-border bg-panel p-1 gap-0.5">
         <button
           onClick={() => setActiveTab('chats')}
           className={`py-1.5 rounded flex items-center justify-center text-xs transition-all ${
@@ -146,6 +168,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           title="Histórico de Conversas"
         >
           <MessageSquare className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => setActiveTab('projects')}
+          className={`py-1.5 rounded flex items-center justify-center text-xs transition-all ${
+            activeTab === 'projects'
+              ? 'bg-card text-accent-light font-medium shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Projetos Abertos"
+        >
+          <FolderGit2 className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => setActiveTab('files')}
@@ -165,7 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'bg-card text-brand-cyan font-medium shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
           }`}
-          title="Memória Contínua (ai-memory)"
+          title="Memória Contínua (.agentic)"
         >
           <Brain className="w-3.5 h-3.5 text-brand-cyan" />
         </button>
@@ -251,7 +284,78 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* TAB 2: FILES EXPLORER */}
+        {/* TAB 2: PROJETOS ABERTOS (MULTI-PROJECT WORKSPACE) */}
+        {activeTab === 'projects' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
+                Projetos Abertos ({openProjects.length})
+              </span>
+              <button
+                onClick={onOpenProjectModal}
+                className="px-2 py-1 rounded-md bg-accent/20 hover:bg-accent hover:text-white text-accent-light text-[11px] font-medium flex items-center space-x-1 transition-all"
+                title="Abrir outro projeto e adicionar à lista"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Abrir Pasta</span>
+              </button>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              {openProjects.length === 0 ? (
+                <div className="p-4 text-center text-slate-500 text-xs">
+                  Nenhum projeto aberto.
+                </div>
+              ) : (
+                openProjects.map((p) => {
+                  const isActive = currentProject?.path === p.path;
+                  return (
+                    <div
+                      key={p.path}
+                      onClick={() => onSwitchProject(p.path)}
+                      className={`group rounded-xl p-2.5 transition-all flex items-start justify-between cursor-pointer border ${
+                        isActive
+                          ? 'bg-accent/15 border-accent text-white shadow-sm'
+                          : 'bg-card border-card-border text-slate-300 hover:bg-card-border/40'
+                      }`}
+                    >
+                      <div className="overflow-hidden pr-2 flex-1">
+                        <div className="flex items-center space-x-1.5">
+                          <FolderGit2 className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-accent-light' : 'text-slate-400'}`} />
+                          <span className="font-semibold text-xs truncate text-slate-100">
+                            {p.name}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 truncate block mt-0.5 font-mono">
+                          {p.path}
+                        </span>
+                        {isActive && (
+                          <span className="inline-block mt-1 text-[9px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-800/40 px-1.5 py-0.5 rounded">
+                            ● Ativo Agora
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Close Project Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCloseOpenProject(p.path);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 text-slate-500 transition-opacity"
+                        title="Fechar e remover este projeto dos abertos"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: FILES EXPLORER */}
         {activeTab === 'files' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
@@ -267,7 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* TAB 3: MEMORY WIKI (ai-memory) */}
+        {/* TAB 4: MEMORY WIKI (ai-memory) */}
         {activeTab === 'memory' && (
           <div className="space-y-4">
             <div className="p-2.5 rounded-lg bg-brand-cyan/10 border border-brand-cyan/20 text-xs text-brand-cyan space-y-1">
@@ -276,7 +380,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>ai-memory Wiki Engine</span>
               </div>
               <p className="text-[11px] text-slate-300">
-                Mantém as decisões, gotchas e active_context persistidos em Markdown.
+                Decisões, gotchas e active_context mantidos em Markdown.
               </p>
             </div>
 
@@ -340,37 +444,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* TAB 4: ROUTINES & SPECIALISTS */}
+        {/* TAB 5: SPECIALIST ROUTINES */}
         {activeTab === 'routines' && (
           <div className="space-y-3">
             <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
-              Especialistas por Tarefa
+              Especialistas Disponíveis
             </div>
 
             <div className="space-y-2">
-              {routines.map(routine => {
+              {routines.map((routine) => {
                 const isActive = activeRoutine?.id === routine.id;
                 return (
                   <div
                     key={routine.id}
                     onClick={() => onSelectRoutine(routine)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                    className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1 ${
                       isActive
-                        ? 'bg-accent/15 border-accent text-white shadow-md shadow-accent/10'
-                        : 'bg-card border-card-border text-slate-300 hover:border-slate-600'
+                        ? 'bg-accent/15 border-accent text-white shadow-sm'
+                        : 'bg-card border-card-border text-slate-300 hover:bg-card-border/40'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold text-xs text-slate-100">{routine.name}</span>
-                      {isActive && <div className="w-2 h-2 rounded-full bg-accent animate-ping" />}
+                      <span className="font-bold text-xs text-slate-200">{routine.name}</span>
+                      <span className="font-mono text-[10px] text-accent-light bg-panel px-1.5 py-0.5 rounded border border-card-border">
+                        {routine.model.split('/').pop()}
+                      </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                    <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
                       {routine.description}
                     </p>
-                    <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                      <span>{routine.model.split('/').pop()}</span>
-                      <span className="text-accent-light uppercase">{routine.provider}</span>
-                    </div>
                   </div>
                 );
               })}
@@ -378,30 +480,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div>
-
-      {/* Sidebar Footer: Quick Project Switcher */}
-      <div className="p-3 border-t border-card-border bg-panel">
-        <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-          <span>Projetos Recentes</span>
-          <button
-            onClick={onOpenProjectModal}
-            className="hover:text-accent-light flex items-center text-[11px]"
-          >
-            <Plus className="w-3 h-3 mr-0.5" /> Novo
-          </button>
-        </div>
-        <div className="space-y-1 max-h-24 overflow-y-auto">
-          {recentProjects.map(p => (
-            <button
-              key={p}
-              onClick={() => onSwitchProject(p)}
-              className="w-full text-left text-[11px] py-1 px-2 rounded hover:bg-card text-slate-300 truncate block transition-colors"
-            >
-              📁 {p.split(/[\\/]/).pop()}
-            </button>
-          ))}
-        </div>
-      </div>
     </aside>
   );
 };
+
+const FolderPlusIcon = ({ className }: { className?: string }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+  >
+    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+    <line x1="12" y1="10" x2="12" y2="16" />
+    <line x1="9" y1="13" x2="15" y2="13" />
+  </svg>
+);

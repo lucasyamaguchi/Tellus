@@ -47,8 +47,30 @@ export const api = {
     return res.json();
   },
 
+  async getOpenProjects(): Promise<ProjectOverview[]> {
+    const res = await fetch(`${API_BASE}/projects/open-list`);
+    return res.json();
+  },
+
+  async pickDirectory(): Promise<string | null> {
+    const res = await fetch(`${API_BASE}/projects/pick-directory`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    return data.path || null;
+  },
+
   async openProject(path: string): Promise<ProjectOverview> {
     const res = await fetch(`${API_BASE}/projects/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    return res.json();
+  },
+
+  async closeProject(path: string): Promise<{ success: boolean; openProjects: string[] }> {
+    const res = await fetch(`${API_BASE}/projects/close`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path })

@@ -8,24 +8,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#090a0f',
-        card: '#12141c',
-        'card-border': '#1f2433',
-        sidebar: '#0d0f17',
-        'sidebar-border': '#181c28',
-        panel: '#10121a',
+        background: '#131418',
+        card: '#1a1c22',
+        'card-border': '#2a2d36',
+        sidebar: '#16181d',
+        'sidebar-border': '#232630',
+        panel: '#1e2027',
         accent: {
-          DEFAULT: '#6366f1',
-          hover: '#4f46e5',
-          light: '#818cf8',
-          glow: 'rgba(99, 102, 241, 0.15)',
+          DEFAULT: '#d97706',
+          hover: '#b45309',
+          light: '#f59e0b',
+          glow: 'rgba(217, 119, 6, 0.15)',
         },
         brand: {
-          cyan: '#06b6d4',
-          emerald: '#10b981',
-          amber: '#f59e0b',
-          rose: '#f43f5e',
-          purple: '#a855f7'
+          cyan: '#2dd4bf',
+          emerald: '#34d399',
+          amber: '#fbbf24',
+          rose: '#f87171',
+          purple: '#c084fc'
         }
       },
       fontFamily: {

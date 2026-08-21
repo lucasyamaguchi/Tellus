@@ -20,23 +20,23 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1f2433;
+  background: #2a2d36;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #333a50;
+  background: #3b3f4c;
 }
 
 /* Prose tweaks for markdown in dark mode */
 .prose pre {
-  background-color: #0d0f17 !important;
-  border: 1px solid #1f2433;
+  background-color: #16181d !important;
+  border: 1px solid #2a2d36;
   border-radius: 0.75rem;
 }
 
 .prose code {
-  color: #818cf8 !important;
+  color: #f59e0b !important;
   font-family: 'Fira Code', monospace;
   font-size: 0.85em;
 }
