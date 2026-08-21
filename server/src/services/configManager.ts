@@ -12,6 +12,7 @@ export interface AppConfig {
   defaultModel: string;
   defaultProvider: 'openrouter' | 'google' | 'anthropic' | 'openai';
   recentProjects: string[];
+  openProjects?: string[];
   currentProject?: string;
   customRoutines: Array<{
     id: string;
@@ -32,6 +33,7 @@ const DEFAULT_CONFIG: AppConfig = {
   defaultModel: 'deepseek/deepseek-r1',
   defaultProvider: 'openrouter',
   recentProjects: [],
+  openProjects: [],
   customRoutines: [
     {
       id: 'architect',

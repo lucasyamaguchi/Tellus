@@ -68,6 +68,16 @@ export const App: React.FC = () => {
   const [isMentionModalOpen, setIsMentionModalOpen] = useState<boolean>(false);
   const [isWindowPickerOpen, setIsWindowPickerOpen] = useState<boolean>(false);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
+  const [openProjects, setOpenProjects] = useState<ProjectOverview[]>([]);
+
+  const loadOpenProjects = async () => {
+    try {
+      const list = await api.getOpenProjects();
+      setOpenProjects(list);
+    } catch {
+      // ignore
+    }
+  };
 
   // Initial Load
   useEffect(() => {
@@ -83,8 +93,9 @@ export const App: React.FC = () => {
     // 2. Load models
     api.getModels().then((m) => setModels(m)).catch(() => {});
 
-    // 3. Load current project & sessions
+    // 3. Load current project & open projects & sessions
     loadProjectOverview();
+    loadOpenProjects();
     loadSessions();
   }, []);
 
@@ -391,10 +402,26 @@ export const App: React.FC = () => {
       setCurrentProject(overview);
       setSelectedFile(null);
       setActiveMemoryPage(null);
+      loadOpenProjects();
       loadProjectOverview();
       loadSessions();
     } catch (err: any) {
       alert(`Erro ao abrir projeto: ${err.message}`);
+    }
+  };
+
+  const handleCloseOpenProject = async (path: string) => {
+    try {
+      await api.closeProject(path);
+      const remaining = openProjects.filter(p => p.path !== path);
+      setOpenProjects(remaining);
+      if (currentProject?.path === path) {
+        if (remaining.length > 0) {
+          handleOpenProject(remaining[0].path);
+        }
+      }
+    } catch (err: any) {
+      alert(`Erro ao fechar projeto: ${err.message}`);
     }
   };
 
@@ -463,6 +490,8 @@ export const App: React.FC = () => {
               <div className="w-full">
                 <Sidebar
                   currentProject={currentProject}
+                  openProjects={openProjects}
+                  onCloseOpenProject={handleCloseOpenProject}
                   fileTree={currentProject?.fileTree || []}
                   memoryPages={currentProject?.memoryPages || []}
                   routines={config?.customRoutines || []}

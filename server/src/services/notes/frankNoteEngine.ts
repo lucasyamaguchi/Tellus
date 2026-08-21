@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+
+// Diretório fixo do cofre Obsidian usado pelo FrankMD.
+// No Windows, este caminho representa o volume E: e não depende do diretório
+// de execução do servidor.
+const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
 
 export interface FrankNote {
   id: string;
@@ -35,8 +39,8 @@ export interface GraphData {
   links: GraphLink[];
 }
 
-const GLOBAL_NOTES_DIR = path.join(os.homedir(), '.tellus', 'notes');
-const BACKUPS_DIR = path.join(GLOBAL_NOTES_DIR, '.backups');
+const GLOBAL_NOTES_DIR = OBSIDIAN_VAULT_DIR;
+const BACKUPS_DIR = path.join(OBSIDIAN_VAULT_DIR, '.backups');
 
 export class FrankNoteEngine {
   private static ensureDirs(projectPath?: string) {
@@ -45,12 +49,6 @@ export class FrankNoteEngine {
     }
     if (!fs.existsSync(BACKUPS_DIR)) {
       fs.mkdirSync(BACKUPS_DIR, { recursive: true });
-    }
-    if (projectPath) {
-      const projNotes = path.join(projectPath, '.agentic', 'notes');
-      if (!fs.existsSync(projNotes)) {
-        fs.mkdirSync(projNotes, { recursive: true });
-      }
     }
   }
 
@@ -115,20 +113,6 @@ export class FrankNoteEngine {
       }
     }
 
-    // 2. Read Project Notes (.agentic/notes)
-    if (projectPath) {
-      const projNotesDir = path.join(projectPath, '.agentic', 'notes');
-      if (fs.existsSync(projNotesDir)) {
-        const files = fs.readdirSync(projNotesDir);
-        for (const file of files) {
-          if (file.endsWith('.md') && !file.startsWith('.')) {
-            const filePath = path.join(projNotesDir, file);
-            notes.push(this.parseNote(filePath, true));
-          }
-        }
-      }
-    }
-
     // 3. Compute Backlinks
     for (const note of notes) {
       for (const other of notes) {
@@ -182,11 +166,9 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
     const id = data.id || safeTitle.toLowerCase().replace(/[^a-z0-9\u00C0-\u00FF]/gi, '-').replace(/-+/g, '-').slice(0, 50);
     const filename = `${id}.md`;
 
-    const targetDir = data.isProjectSpecific && projectPath
-      ? path.join(projectPath, '.agentic', 'notes')
-      : GLOBAL_NOTES_DIR;
-
-    const filePath = path.join(targetDir, filename);
+    // Todas as notas, inclusive as marcadas como específicas do projeto,
+    // são armazenadas no cofre para que o Obsidian tenha uma fonte única.
+    const filePath = path.join(GLOBAL_NOTES_DIR, filename);
 
     // Data Safety: Backup before overwriting existing file
     if (fs.existsSync(filePath)) {
@@ -206,11 +188,7 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
   }
 
   public static deleteNote(id: string, isProjectSpecific?: boolean, projectPath?: string): boolean {
-    const targetDir = isProjectSpecific && projectPath
-      ? path.join(projectPath, '.agentic', 'notes')
-      : GLOBAL_NOTES_DIR;
-
-    const filePath = path.join(targetDir, `${id}.md`);
+    const filePath = path.join(GLOBAL_NOTES_DIR, `${id}.md`);
     if (fs.existsSync(filePath)) {
       // Create backup before deleting
       const existingContent = fs.readFileSync(filePath, 'utf-8');
