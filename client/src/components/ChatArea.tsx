@@ -29,7 +29,9 @@ import {
   Eye,
   RotateCcw,
   Edit2,
-  Zap
+  Zap,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -95,9 +97,22 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [isGeneratingNote, setIsGeneratingNote] = useState(false);
   const [createdNoteInfo, setCreatedNoteInfo] = useState<{ id: string; title: string } | null>(null);
 
+  const [isExpandedEditor, setIsExpandedEditor] = useState<boolean>(false);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming, attachments]);
+
+  // Auto-resize textarea height to fit content smoothly without covering text
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const maxH = isExpandedEditor ? 480 : 260;
+      const minH = isExpandedEditor ? 220 : 54;
+      const calculatedH = Math.min(Math.max(textareaRef.current.scrollHeight, minH), maxH);
+      textareaRef.current.style.height = `${calculatedH}px`;
+    }
+  }, [input, isExpandedEditor]);
 
   const handleGenerateNote = async () => {
     if (messages.length === 0) {
@@ -787,8 +802,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           )}
         </div>
 
-        {/* Input Bar */}
-        <div className="relative rounded-2xl bg-card border border-card-border focus-within:border-accent shadow-lg shadow-black/40 transition-all">
+        {/* Auto-Expanding Input Bar Card (Flexbox - Buttons NEVER overlap text!) */}
+        <div className={`rounded-2xl bg-card border border-card-border focus-within:border-accent shadow-xl shadow-black/40 transition-all flex flex-col p-3 gap-2.5 ${
+          isExpandedEditor ? 'ring-2 ring-accent/30' : ''
+        }`}>
           <input
             ref={fileInputRef}
             type="file"
@@ -798,6 +815,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             className="hidden"
           />
 
+          {/* Top Bar inside Input Box: Expand Button & Status */}
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-0.5">
+            <span className="text-[10px] text-slate-500">
+              {input.length > 0 ? `${input.length} caracteres` : 'Escreva uma mensagem ou instrução para o agente...'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsExpandedEditor(!isExpandedEditor)}
+              className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white transition-colors flex items-center space-x-1 text-[10px]"
+              title={isExpandedEditor ? "Recolher caixa de texto" : "Expandir caixa de texto para digitação confortável"}
+            >
+              {isExpandedEditor ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isExpandedEditor ? 'Recolher' : 'Expandir'}</span>
+            </button>
+          </div>
+
+          {/* Auto-Expanding Textarea (Full clear visibility) */}
           <textarea
             ref={textareaRef}
             value={input}
@@ -809,14 +843,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Digite uma mensagem, digite @ para citar outro chat, ou anexe arquivos (PDF, CSV, PNG, MP3)..."
-            rows={2}
-            className="w-full bg-transparent px-4 pt-3.5 pb-10 text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none"
+            placeholder="Digite uma mensagem, instrução para o agente, ou use @ para citar outro chat..."
+            className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none leading-relaxed overflow-y-auto font-sans"
+            style={{ minHeight: isExpandedEditor ? '240px' : '48px' }}
           />
 
-          {/* Bottom Bar inside Input Box */}
-          <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-[10px] text-slate-400 font-mono">
+          {/* Bottom Toolbar naturally below the text (NEVER covering text!) */}
+          <div className="pt-2 border-t border-card-border/60 flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-1.5 text-[10px] text-slate-400 font-mono flex-wrap gap-y-1">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -865,17 +899,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 </span>
               </button>
 
-              <span className="flex items-center space-x-1 pl-2">
+              <span className="flex items-center space-x-1 pl-1 text-slate-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span>{activeModel.split('/').pop()}</span>
+                <span className="font-semibold">{activeModel.split('/').pop()}</span>
               </span>
-              <span className="hidden sm:inline">• Shift+Enter para nova linha</span>
+              <span className="hidden sm:inline text-slate-500">• Shift+Enter p/ nova linha</span>
             </div>
 
             {isStreaming ? (
               <button
                 onClick={onStopStreaming}
-                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-rose-600/30 transition-all"
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-rose-600/30 transition-all"
               >
                 <Square className="w-3 h-3" />
                 <span>Interromper</span>
@@ -884,13 +918,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               <button
                 onClick={handleSend}
                 disabled={!input.trim() && attachments.length === 0}
-                className={`p-2 rounded-xl text-white transition-all ${
+                className={`px-4 py-2 rounded-xl text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-md ${
                   input.trim() || attachments.length > 0
-                    ? 'bg-accent hover:bg-accent-hover shadow-md shadow-accent/30'
+                    ? 'bg-accent hover:bg-accent-hover shadow-accent/30'
                     : 'bg-card-border text-slate-500 cursor-not-allowed'
                 }`}
               >
-                <Send className="w-4 h-4" />
+                <span>Enviar</span>
+                <Send className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
