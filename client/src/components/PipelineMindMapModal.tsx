@@ -49,14 +49,28 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
     fastToolsModel: currentPipeline?.fastToolsModel || ''
   });
 
+  // Keep pipeline synchronized when primaryModel or currentPipeline updates
+  React.useEffect(() => {
+    if (isOpen) {
+      setPipelineState({
+        primaryModel: primaryModel || currentPipeline?.primaryModel || '',
+        plannerModel: currentPipeline?.plannerModel || '',
+        codingModel: currentPipeline?.codingModel || '',
+        reasoningModel: currentPipeline?.reasoningModel || '',
+        fastToolsModel: currentPipeline?.fastToolsModel || ''
+      });
+    }
+  }, [isOpen, primaryModel, currentPipeline]);
+
   if (!isOpen) return null;
 
   const handlePrimaryChange = (newPrimary: string) => {
+    const cleanPrimary = newPrimary.replace(/:batch$/i, '').trim();
     setPipelineState(prev => ({
       ...prev,
-      primaryModel: newPrimary
+      primaryModel: cleanPrimary
     }));
-    onSelectPrimaryModel(newPrimary);
+    onSelectPrimaryModel(cleanPrimary);
   };
 
   const handleResetAllToPrimary = () => {

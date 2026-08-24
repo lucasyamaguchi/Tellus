@@ -56,7 +56,9 @@ export class OpenRouterService {
       throw new Error(`Falha ao listar modelos da OpenRouter: ${res.statusText}`);
     }
     const data = (await res.json()) as any;
-    return data.data || [];
+    const rawList: OpenRouterModel[] = data.data || [];
+    // Filter out asynchronous batch models that only work with offline Batch API
+    return rawList.filter(m => !m.id.endsWith(':batch') && !m.id.includes(':batch'));
   }
 
   public static async getCredits(apiKey: string): Promise<{ totalCredits: number; totalUsage: number; remainingCredits: number }> {
@@ -114,8 +116,11 @@ export class OpenRouterService {
       throw new Error('API Key da OpenRouter não configurada. Por favor, adicione sua chave nas configurações.');
     }
 
+    // Strip :batch suffix if entered, fallback to interactive chat endpoint
+    const cleanModel = model.replace(/:batch$/i, '').trim();
+
     const payload: any = {
-      model,
+      model: cleanModel,
       messages,
       stream: true,
     };

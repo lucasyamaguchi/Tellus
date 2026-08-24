@@ -166,6 +166,13 @@ export const App: React.FC = () => {
     setMessages([]);
     setQuotedMessage(null);
     setIsStreaming(false);
+    setAgentPipeline({
+      primaryModel: activeModel,
+      plannerModel: '',
+      codingModel: '',
+      reasoningModel: '',
+      fastToolsModel: ''
+    });
   };
 
   const handleSelectSession = async (sessionId: string) => {
@@ -176,9 +183,22 @@ export const App: React.FC = () => {
       if (session) {
         setActiveSessionId(session.id);
         setMessages(session.messages || []);
-        if (session.model) setActiveModel(session.model);
+        if (session.model) {
+          const cleanModel = session.model.replace(/:batch$/i, '').trim();
+          setActiveModel(cleanModel);
+          if (session.pipeline) {
+            setAgentPipeline(session.pipeline);
+          } else {
+            setAgentPipeline({
+              primaryModel: cleanModel,
+              plannerModel: '',
+              codingModel: '',
+              reasoningModel: '',
+              fastToolsModel: ''
+            });
+          }
+        }
         if (session.tokenEfficiency !== undefined) setTokenEfficiency(session.tokenEfficiency);
-        if (session.pipeline) setAgentPipeline(session.pipeline);
         if (session.routineId && config?.customRoutines) {
           const r = config.customRoutines.find(cr => cr.id === session.routineId);
           if (r) setActiveRoutine(r);
@@ -398,15 +418,16 @@ export const App: React.FC = () => {
   };
 
   const handleSelectModel = (modelId: string) => {
-    setActiveModel(modelId);
+    const cleanId = modelId.replace(/:batch$/i, '').trim();
+    setActiveModel(cleanId);
     setAgentPipeline(prev => ({
-      primaryModel: modelId,
-      plannerModel: prev?.plannerModel,
-      codingModel: prev?.codingModel,
-      reasoningModel: prev?.reasoningModel,
-      fastToolsModel: prev?.fastToolsModel
+      primaryModel: cleanId,
+      plannerModel: prev?.plannerModel || '',
+      codingModel: prev?.codingModel || '',
+      reasoningModel: prev?.reasoningModel || '',
+      fastToolsModel: prev?.fastToolsModel || ''
     }));
-    api.updateConfig({ defaultModel: modelId }).then((c) => setConfig(c));
+    api.updateConfig({ defaultModel: cleanId }).then((c) => setConfig(c));
   };
 
   const handleSelectRoutine = (routine: Routine) => {

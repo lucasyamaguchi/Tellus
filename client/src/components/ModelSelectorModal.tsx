@@ -81,7 +81,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
   };
 
   const filterAndSortModels = () => {
-    let list = [...modelsPool];
+    let list = [...modelsPool].filter(m => !m.id.endsWith(':batch') && !m.id.includes(':batch'));
 
     // 1. Provider Filter
     if (selectedProviderFilter !== 'all') {
