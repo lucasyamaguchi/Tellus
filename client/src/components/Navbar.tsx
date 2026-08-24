@@ -18,7 +18,8 @@ import {
   FileText,
   RefreshCw,
   Bot,
-  FolderTree
+  FolderTree,
+  Network
 } from 'lucide-react';
 import { AppConfig, OpenRouterModel, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
@@ -32,9 +33,13 @@ interface NavbarProps {
   isRightPanelOpen: boolean;
   rightPanelTab: 'code' | 'memory' | 'terminal';
   isOverlayActive: boolean;
+  tokenEfficiency: boolean;
+  hasCustomPipeline?: boolean;
   onSetMainViewMode: (mode: 'agent' | 'notes' | 'skills') => void;
   onToggleRightPanel: () => void;
   onToggleOverlay: () => void;
+  onToggleTokenEfficiency: () => void;
+  onOpenPipelineModal: () => void;
   onSetRightPanelTab: (tab: 'code' | 'memory' | 'terminal') => void;
   onOpenModelModal: () => void;
   onOpenSettingsModal: () => void;
@@ -51,9 +56,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   isRightPanelOpen,
   rightPanelTab,
   isOverlayActive,
+  tokenEfficiency,
+  hasCustomPipeline,
   onSetMainViewMode,
   onToggleRightPanel,
   onToggleOverlay,
+  onToggleTokenEfficiency,
+  onOpenPipelineModal,
   onSetRightPanelTab,
   onOpenModelModal,
   onOpenSettingsModal,
@@ -172,34 +181,68 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
       </div>
 
-      {/* Center: Active Model & Routine */}
+      {/* Center: Active Model, Routine & Multi-Agent Pipeline */}
       <div className="flex items-center space-x-2">
         <button
           onClick={onOpenModelModal}
           className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-panel hover:bg-card-border/70 border border-card-border text-xs text-slate-200 transition-all shadow-sm group"
+          title="Trocar modelo principal do chat ou digitar modelo customizado"
         >
           <Cpu className="w-3.5 h-3.5 text-brand-cyan group-hover:text-accent-light transition-colors" />
           <div className="flex flex-col items-start text-left">
             <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none">
               Modelo Ativo
             </span>
-            <span className="font-mono text-xs font-semibold text-slate-100 max-w-[160px] truncate">
+            <span className="font-mono text-xs font-semibold text-slate-100 max-w-[150px] truncate">
               {activeModel.split('/').pop()}
             </span>
           </div>
           <ChevronDown className="w-3 h-3 text-slate-400 ml-1" />
         </button>
 
+        {/* Multi-Agent Mind Map / Pipeline Button */}
+        <button
+          onClick={onOpenPipelineModal}
+          className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all shadow-sm group ${
+            hasCustomPipeline
+              ? 'bg-brand-purple/20 border-brand-purple/50 text-brand-purple'
+              : 'bg-panel hover:bg-card-border/70 border-card-border text-slate-300'
+          }`}
+          title="Ver e orquestrar o Mind Map / Pipeline multi-modelo de especialistas para cada tarefa"
+        >
+          <Network className={`w-3.5 h-3.5 ${hasCustomPipeline ? 'text-brand-purple' : 'text-slate-400 group-hover:text-accent-light'}`} />
+          <span className="font-medium hidden md:inline">Pipeline Multi-Agente</span>
+          {hasCustomPipeline && (
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-purple animate-pulse" />
+          )}
+        </button>
+
         {activeRoutine && (
           <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-xs text-accent-light">
             <Zap className="w-3.5 h-3.5 text-accent animate-pulse-subtle" />
-            <span className="font-medium max-w-[130px] truncate">{activeRoutine.name}</span>
+            <span className="font-medium max-w-[120px] truncate">{activeRoutine.name}</span>
           </div>
         )}
       </div>
 
-      {/* Right: Credits Monitor, CLI Launcher, API Keys & Right Panel Controls */}
-      <div className="flex items-center space-x-2.5">
+      {/* Right: Token Efficiency, Credits Monitor, CLI Launcher, API Keys & Right Panel Controls */}
+      <div className="flex items-center space-x-2">
+        {/* Token Efficiency Toggle Button */}
+        <button
+          onClick={onToggleTokenEfficiency}
+          className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all shadow-sm ${
+            tokenEfficiency
+              ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-amber-500/10'
+              : 'bg-card hover:bg-card-border/70 border-card-border text-slate-400 hover:text-slate-200'
+          }`}
+          title="Modo Token Efficiency: Respostas diretas, sem enrolação, foco estrito em executar e reportar alterações"
+        >
+          <Zap className={`w-3.5 h-3.5 ${tokenEfficiency ? 'text-amber-400 fill-amber-400 animate-pulse' : 'text-slate-500'}`} />
+          <span className="hidden sm:inline font-mono">
+            {tokenEfficiency ? '⚡ Eficiência ON' : '⚡ Eficiência'}
+          </span>
+        </button>
+
         {/* OpenRouter Live Balance / Credit Monitor */}
         {config?.keys.openrouter && (
           <div 

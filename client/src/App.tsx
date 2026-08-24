@@ -13,6 +13,7 @@ import { ProjectModal } from './components/ProjectModal';
 import { MentionModal } from './components/MentionModal';
 import { WindowPickerModal } from './components/WindowPickerModal';
 import { FloatingOverlay } from './components/FloatingOverlay';
+import { PipelineMindMapModal } from './components/PipelineMindMapModal';
 import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
@@ -27,7 +28,8 @@ import {
   ChatSession,
   QuotedMessage,
   Attachment,
-  FrankNote
+  FrankNote,
+  AgentPipelineConfig
 } from './types';
 import { api } from './api';
 
@@ -63,12 +65,17 @@ export const App: React.FC = () => {
 
   // Modals & Overlay Mode
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
+  const [isPipelineModalOpen, setIsPipelineModalOpen] = useState<boolean>(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState<boolean>(false);
   const [isMentionModalOpen, setIsMentionModalOpen] = useState<boolean>(false);
   const [isWindowPickerOpen, setIsWindowPickerOpen] = useState<boolean>(false);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
   const [openProjects, setOpenProjects] = useState<ProjectOverview[]>([]);
+
+  // Token Efficiency & Multi-Agent Pipeline State
+  const [tokenEfficiency, setTokenEfficiency] = useState<boolean>(false);
+  const [agentPipeline, setAgentPipeline] = useState<AgentPipelineConfig | undefined>(undefined);
 
   const loadOpenProjects = async () => {
     try {
@@ -170,6 +177,8 @@ export const App: React.FC = () => {
         setActiveSessionId(session.id);
         setMessages(session.messages || []);
         if (session.model) setActiveModel(session.model);
+        if (session.tokenEfficiency !== undefined) setTokenEfficiency(session.tokenEfficiency);
+        if (session.pipeline) setAgentPipeline(session.pipeline);
         if (session.routineId && config?.customRoutines) {
           const r = config.customRoutines.find(cr => cr.id === session.routineId);
           if (r) setActiveRoutine(r);
@@ -214,6 +223,8 @@ export const App: React.FC = () => {
         updatedAt: Date.now(),
         model: activeModel,
         routineId: activeRoutine?.id,
+        tokenEfficiency,
+        pipeline: agentPipeline,
         messages: currentMsgs
       });
 
@@ -282,6 +293,8 @@ export const App: React.FC = () => {
       activeModel,
       config?.defaultProvider || 'openrouter',
       activeRoutine?.id,
+      tokenEfficiency,
+      agentPipeline,
       (event) => {
         setMessages(prev => {
           const newMsgs = prev.map(msg => {
@@ -386,6 +399,13 @@ export const App: React.FC = () => {
 
   const handleSelectModel = (modelId: string) => {
     setActiveModel(modelId);
+    setAgentPipeline(prev => ({
+      primaryModel: modelId,
+      plannerModel: prev?.plannerModel,
+      codingModel: prev?.codingModel,
+      reasoningModel: prev?.reasoningModel,
+      fastToolsModel: prev?.fastToolsModel
+    }));
     api.updateConfig({ defaultModel: modelId }).then((c) => setConfig(c));
   };
 
@@ -451,9 +471,13 @@ export const App: React.FC = () => {
         isRightPanelOpen={isRightPanelOpen}
         rightPanelTab={rightPanelTab}
         isOverlayActive={isOverlayActive}
+        tokenEfficiency={tokenEfficiency}
+        hasCustomPipeline={!!(agentPipeline?.plannerModel || agentPipeline?.codingModel || agentPipeline?.reasoningModel || agentPipeline?.fastToolsModel)}
         onSetMainViewMode={setMainViewMode}
         onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
         onToggleOverlay={() => setIsOverlayActive(!isOverlayActive)}
+        onToggleTokenEfficiency={() => setTokenEfficiency(!tokenEfficiency)}
+        onOpenPipelineModal={() => setIsPipelineModalOpen(true)}
         onSetRightPanelTab={(tab) => setRightPanelTab(tab)}
         onOpenModelModal={() => setIsModelModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
@@ -554,6 +578,8 @@ export const App: React.FC = () => {
                 onOpenNotes={() => setMainViewMode('notes')}
                 onEditMessage={handleEditAndResendMessage}
                 onRegenerateResponse={handleRegenerateResponse}
+                tokenEfficiency={tokenEfficiency}
+                onToggleTokenEfficiency={() => setTokenEfficiency(!tokenEfficiency)}
               />
             </div>
           )}
@@ -661,6 +687,17 @@ export const App: React.FC = () => {
         allModels={models.all}
         activeModel={activeModel}
         onSelectModel={handleSelectModel}
+      />
+
+      <PipelineMindMapModal
+        isOpen={isPipelineModalOpen}
+        onClose={() => setIsPipelineModalOpen(false)}
+        primaryModel={activeModel}
+        curatedModels={models.curated}
+        allModels={models.all}
+        currentPipeline={agentPipeline}
+        onSavePipeline={(p) => setAgentPipeline(p)}
+        onSelectPrimaryModel={handleSelectModel}
       />
 
       <SettingsModal
