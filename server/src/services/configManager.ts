@@ -2,6 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+export interface AgentPipelineConfig {
+  primaryModel: string;
+  plannerModel?: string;
+  codingModel?: string;
+  reasoningModel?: string;
+  fastToolsModel?: string;
+}
+
 export interface AppConfig {
   keys: {
     openrouter?: string;
@@ -23,6 +31,7 @@ export interface AppConfig {
     systemPrompt: string;
     temperature?: number;
   }>;
+  pipeline?: AgentPipelineConfig;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.tellus');

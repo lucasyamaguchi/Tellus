@@ -28,7 +28,8 @@ import {
   ExternalLink,
   Eye,
   RotateCcw,
-  Edit2
+  Edit2,
+  Zap
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -52,6 +53,8 @@ interface ChatAreaProps {
   onOpenNotes?: () => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onRegenerateResponse?: (assistantMessageId: string) => void;
+  tokenEfficiency?: boolean;
+  onToggleTokenEfficiency?: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -70,7 +73,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenWindowPicker,
   onOpenNotes,
   onEditMessage,
-  onRegenerateResponse
+  onRegenerateResponse,
+  tokenEfficiency,
+  onToggleTokenEfficiency
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -753,6 +758,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             <Terminal className="w-3 h-3 text-brand-amber" />
             <span>Diagnóstico</span>
           </button>
+
+          {/* Quick Token Efficiency Switcher */}
+          {onToggleTokenEfficiency && (
+            <button
+              onClick={onToggleTokenEfficiency}
+              className={`px-2.5 py-1 rounded-lg border text-xs transition-all whitespace-nowrap flex items-center space-x-1.5 font-mono ${
+                tokenEfficiency
+                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-sm font-semibold'
+                  : 'bg-card hover:bg-card-border border-card-border text-slate-400'
+              }`}
+              title="Ativar/Desativar Token Efficiency: Respostas diretas e sem enrolação, apenas aplicando a ação e reportando arquivos modificados."
+            >
+              <Zap className={`w-3 h-3 ${tokenEfficiency ? 'text-amber-400 fill-amber-400' : 'text-slate-500'}`} />
+              <span>{tokenEfficiency ? '⚡ Eficiência: ON' : '⚡ Modo Eficiência'}</span>
+            </button>
+          )}
+
           {messages.length > 0 && (
             <button
               onClick={onClearChat}

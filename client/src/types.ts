@@ -13,6 +13,14 @@ export interface OpenRouterModel {
   };
 }
 
+export interface AgentPipelineConfig {
+  primaryModel: string;
+  plannerModel?: string;
+  codingModel?: string;
+  reasoningModel?: string;
+  fastToolsModel?: string;
+}
+
 export interface AppConfig {
   keys: {
     openrouter?: string;
@@ -23,8 +31,10 @@ export interface AppConfig {
   defaultModel: string;
   defaultProvider: 'openrouter' | 'google' | 'anthropic' | 'openai';
   recentProjects: string[];
+  openProjects?: string[];
   currentProject?: string;
   customRoutines: Routine[];
+  pipeline?: AgentPipelineConfig;
 }
 
 export interface Routine {
@@ -189,6 +199,8 @@ export interface ChatSession {
   updatedAt: number;
   model: string;
   routineId?: string;
+  tokenEfficiency?: boolean;
+  pipeline?: AgentPipelineConfig;
   messages: Message[];
 }
 

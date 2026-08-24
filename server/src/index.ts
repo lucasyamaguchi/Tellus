@@ -610,7 +610,7 @@ app.get('/api/terminal/tasks', (req, res) => {
 
 // 9. Streaming Agent Chat SSE Endpoint
 app.post('/api/chat/stream', async (req, res) => {
-  const { messages, model, provider, routineId } = req.body;
+  const { messages, model, provider, routineId, tokenEfficiency, pipeline } = req.body;
   const projectPath = ProjectManager.getCurrentProject();
   const config = ConfigManager.getConfig();
 
@@ -630,7 +630,20 @@ app.post('/api/chat/stream', async (req, res) => {
     if (routine) systemPrompt = routine.systemPrompt;
   }
 
-  const selectedModel = model || config.defaultModel || 'deepseek/deepseek-r1';
+  // Inject Token Efficiency strict instructions if active
+  if (tokenEfficiency) {
+    systemPrompt += `\n\n[⚡ MODO TOKEN EFFICIENCY ATIVADO - MÁXIMA ECONOMIA DE TOKENS E EXECUÇÃO DIRETA]
+- Seja cirúrgico, conciso e 100% focado em executar a ação solicitada sem enrolação.
+- NÃO use saudações, introduções ou despedidas ("Olá", "Com certeza!", "Espero ter ajudado", etc.).
+- NÃO faça perguntas reflexivas ou loops de confirmação se a ação pretendida for clara no projeto: execute a alteração imediatamente com as ferramentas apropriadas.
+- Ao concluir a tarefa, limite sua resposta final a um relatório estritamente estruturado:
+  1. Status: ✅ Concluído
+  2. Arquivos alterados/criados (com caminhos relativos)
+  3. Resumo objetivo da correção/implementação realizada (máx 2-3 linhas).`;
+  }
+
+  // Model selection with pipeline override support
+  const selectedModel = model || pipeline?.primaryModel || config.defaultModel || 'deepseek/deepseek-r1';
   const selectedProvider = provider || config.defaultProvider || 'openrouter';
 
   const abortController = new AbortController();
