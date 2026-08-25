@@ -7,7 +7,9 @@ import {
   Check, 
   CheckCircle2,
   ExternalLink,
-  Sparkles
+  Sparkles,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { AppConfig } from '../types';
 import { api } from '../api';
@@ -29,6 +31,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [googleKey, setGoogleKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -38,6 +41,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setGoogleKey(config.keys.google || '');
       setAnthropicKey(config.keys.anthropic || '');
       setOpenaiKey(config.keys.openai || '');
+      if (config.theme) setTheme(config.theme);
     }
   }, [config]);
 
@@ -48,6 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsSaving(true);
     try {
       const updated = await api.updateConfig({
+        theme,
         keys: {
           openrouter: openrouterKey.trim() || undefined,
           google: googleKey.trim() || undefined,
@@ -97,6 +102,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSave} className="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
+          {/* Theme Selector (Dark / Light) */}
+          <div className="space-y-2 p-3 rounded-xl bg-panel border border-card-border">
+            <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+              <span className="w-2 h-2 rounded-full bg-accent" />
+              <span>Tema da Interface</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setTheme('dark')}
+                className={`flex items-center justify-center space-x-2 p-2 rounded-lg border text-xs font-medium transition-all ${
+                  theme === 'dark'
+                    ? 'bg-accent/20 border-accent text-accent-light shadow-sm'
+                    : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5" />
+                <span>Tema Escuro (Padrão)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme('light')}
+                className={`flex items-center justify-center space-x-2 p-2 rounded-lg border text-xs font-medium transition-all ${
+                  theme === 'light'
+                    ? 'bg-accent/20 border-accent text-accent-light shadow-sm'
+                    : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span>Tema Claro</span>
+              </button>
+            </div>
+          </div>
+
           {/* OpenRouter Key & Live Balance */}
           <div className="space-y-2 p-3 rounded-xl bg-panel border border-card-border">
             <div className="flex items-center justify-between">

@@ -77,6 +77,20 @@ export const App: React.FC = () => {
   const [tokenEfficiency, setTokenEfficiency] = useState<boolean>(false);
   const [agentPipeline, setAgentPipeline] = useState<AgentPipelineConfig | undefined>(undefined);
 
+  // Theme State (Dark / Light)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(nextTheme);
+    api.updateConfig({ theme: nextTheme }).then(c => setConfig(c));
+  };
+
   const loadOpenProjects = async () => {
     try {
       const list = await api.getOpenProjects();
@@ -91,6 +105,7 @@ export const App: React.FC = () => {
     // 1. Load config
     api.getConfig().then((cfg) => {
       setConfig(cfg);
+      if (cfg.theme) setTheme(cfg.theme);
       if (cfg.defaultModel) setActiveModel(cfg.defaultModel);
       if (cfg.customRoutines && cfg.customRoutines.length > 0) {
         setActiveRoutine(cfg.customRoutines[0]);
@@ -494,6 +509,8 @@ export const App: React.FC = () => {
         isOverlayActive={isOverlayActive}
         tokenEfficiency={tokenEfficiency}
         hasCustomPipeline={!!(agentPipeline?.plannerModel || agentPipeline?.codingModel || agentPipeline?.reasoningModel || agentPipeline?.fastToolsModel)}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
         onSetMainViewMode={setMainViewMode}
         onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
         onToggleOverlay={() => setIsOverlayActive(!isOverlayActive)}

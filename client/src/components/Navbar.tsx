@@ -19,7 +19,9 @@ import {
   Settings,
   MoreVertical,
   Code2,
-  BrainCircuit
+  BrainCircuit,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { AppConfig, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
@@ -35,6 +37,8 @@ interface NavbarProps {
   isOverlayActive: boolean;
   tokenEfficiency: boolean;
   hasCustomPipeline?: boolean;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
   onSetMainViewMode: (mode: 'agent' | 'notes' | 'skills') => void;
   onToggleRightPanel: () => void;
   onToggleOverlay: () => void;
@@ -58,6 +62,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   isOverlayActive,
   tokenEfficiency,
   hasCustomPipeline,
+  theme,
+  onToggleTheme,
   onSetMainViewMode,
   onToggleRightPanel,
   onToggleOverlay,
@@ -340,6 +346,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {configuredKeysCount}/4
                 </span>
               </button>
+
+              {/* Theme Toggle (Dark / Light) */}
+              {onToggleTheme && (
+                <button
+                  onClick={() => {
+                    setIsMenuDropdownOpen(false);
+                    onToggleTheme();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-panel text-slate-200 flex items-center justify-between"
+                  title="Alternar entre tema escuro e tema claro"
+                >
+                  <div className="flex items-center space-x-2">
+                    {theme === 'light' ? (
+                      <Sun className="w-3.5 h-3.5 text-amber-500" />
+                    ) : (
+                      <Moon className="w-3.5 h-3.5 text-accent-light" />
+                    )}
+                    <span>Tema: {theme === 'light' ? 'Claro' : 'Escuro'}</span>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-panel border border-card-border text-slate-400 font-mono">
+                    {theme === 'light' ? '☀️ Claro' : '🌙 Escuro'}
+                  </span>
+                </button>
+              )}
 
               {/* Floating Overlay Mode Toggle */}
               <button

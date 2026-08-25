@@ -35,6 +35,7 @@ export interface AppConfig {
   currentProject?: string;
   customRoutines: Routine[];
   pipeline?: AgentPipelineConfig;
+  theme?: 'dark' | 'light';
 }
 
 export interface Routine {
