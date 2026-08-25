@@ -147,6 +147,7 @@ function createOverlayWindow() {
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId('Tellus.AgenticIDE');
   startBackendServer();
   waitForServer(() => {
     createMainWindow();
