@@ -8,12 +8,12 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#131418',
-        card: '#1a1c22',
-        'card-border': '#2a2d36',
-        sidebar: '#16181d',
-        'sidebar-border': '#232630',
-        panel: '#1e2027',
+        background: 'var(--color-bg)',
+        card: 'var(--color-card)',
+        'card-border': 'var(--color-card-border)',
+        sidebar: 'var(--color-sidebar)',
+        'sidebar-border': 'var(--color-sidebar-border)',
+        panel: 'var(--color-panel)',
         accent: {
           DEFAULT: '#d97706',
           hover: '#b45309',

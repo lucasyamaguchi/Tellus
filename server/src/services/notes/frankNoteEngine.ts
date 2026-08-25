@@ -127,8 +127,10 @@ export class FrankNoteEngine {
       }
     }
 
-    // If no notes exist yet, create a welcoming FrankMD starter note
-    if (notes.length === 0) {
+    // Only create starter note on very first initialization of the vault
+    const initFlagPath = path.join(GLOBAL_NOTES_DIR, '.initialized');
+    if (!fs.existsSync(initFlagPath) && notes.length === 0) {
+      fs.writeFileSync(initFlagPath, 'true', 'utf-8');
       this.saveNote({
         title: 'Bem-vindo ao FrankMD Notes',
         subject: 'Início',
@@ -148,6 +150,8 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
         isProjectSpecific: false
       });
       return this.listNotes(projectPath);
+    } else if (!fs.existsSync(initFlagPath)) {
+      fs.writeFileSync(initFlagPath, 'true', 'utf-8');
     }
 
     return notes.sort((a, b) => b.updatedAt - a.updatedAt);

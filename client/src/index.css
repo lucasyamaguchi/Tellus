@@ -2,6 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-bg: #131418;
+  --color-card: #1a1c22;
+  --color-card-border: #2a2d36;
+  --color-sidebar: #16181d;
+  --color-sidebar-border: #232630;
+  --color-panel: #1e2027;
+}
+
+.light, [data-theme="light"] {
+  --color-bg: #f8fafc;
+  --color-card: #ffffff;
+  --color-card-border: #e2e8f0;
+  --color-sidebar: #f1f5f9;
+  --color-sidebar-border: #cbd5e1;
+  --color-panel: #eef2f6;
+}
+
+.light body {
+  color: #1e293b;
+}
+
+.light .text-slate-100 {
+  color: #0f172a !important;
+}
+
+.light .text-slate-200 {
+  color: #1e293b !important;
+}
+
+.light .text-slate-300 {
+  color: #334155 !important;
+}
+
+.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+.light .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.light .bg-panel {
+  background-color: #f1f5f9 !important;
+}
+
 @layer base {
   body {
     @apply bg-background text-slate-100 antialiased;
@@ -24,19 +70,27 @@
   border-radius: 4px;
 }
 
+.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
 ::-webkit-scrollbar-thumb:hover {
   background: #3b3f4c;
 }
 
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 /* Prose tweaks for markdown in dark mode */
 .prose pre {
-  background-color: #16181d !important;
-  border: 1px solid #2a2d36;
+  background-color: var(--color-sidebar) !important;
+  border: 1px solid var(--color-card-border);
   border-radius: 0.75rem;
 }
 
 .prose code {
-  color: #f59e0b !important;
+  color: #d97706 !important;
   font-family: 'Fira Code', monospace;
   font-size: 0.85em;
 }

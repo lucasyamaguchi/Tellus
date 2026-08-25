@@ -32,6 +32,7 @@ export interface AppConfig {
     temperature?: number;
   }>;
   pipeline?: AgentPipelineConfig;
+  theme?: 'dark' | 'light';
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.tellus');
@@ -43,6 +44,7 @@ const DEFAULT_CONFIG: AppConfig = {
   defaultProvider: 'openrouter',
   recentProjects: [],
   openProjects: [],
+  theme: 'dark',
   customRoutines: [
     {
       id: 'architect',
