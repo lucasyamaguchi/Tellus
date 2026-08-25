@@ -343,7 +343,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               {/* Message Header */}
               <div className="flex items-center space-x-2 text-[11px] text-slate-400 px-1">
                 <span className="font-semibold text-slate-300">
-                  {msg.role === 'user' ? 'Você' : 'Antigravity Agent'}
+                  {msg.role === 'user' ? 'Você' : 'Tellus'}
                 </span>
                 {msg.modelUsed && (
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-panel border border-card-border text-slate-400">
@@ -695,7 +695,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/40 flex items-center justify-between animate-in fade-in">
             <div className="flex items-center space-x-2 text-xs text-rose-300">
               <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-              <span>Antigravity Agent está gerando resposta com <strong>{activeModel.split('/').pop()}</strong>...</span>
+              <span>Tellus está gerando resposta com <strong>{activeModel.split('/').pop()}</strong>...</span>
             </div>
             <button
               type="button"

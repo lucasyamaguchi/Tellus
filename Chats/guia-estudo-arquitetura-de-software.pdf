@@ -1,0 +1,686 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Length 4218 >>
+stream
+BT
+/F2 22 Tf
+0.09 0.21 0.36 rg
+1 0 0 1 54 800 Tm (Guia de Estudo) Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 770 Tm (Arquitetura de Software) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 743 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 736 Tm (Do nível iniciante ao avançado) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 722 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 715 Tm (---) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 701 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 694 Tm (Objetivo) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 667 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 660 Tm (Aprender a projetar, avaliar, documentar e evoluir arquiteturas de software robustas,) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 646 Tm (escaláveis, sustentáveis e alinhadas às necessidades do negócio.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 632 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 625 Tm (Como usar este guia) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 598 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 591 Tm (1. Estude o primeiro tema do currículo.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 577 Tm (2. Registre conceitos, exemplos e dúvidas.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 563 Tm (3. Compare suas anotações com a fonte estudada.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 549 Tm (4. Resolva exercícios sobre o conteúdo estudado.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 535 Tm (5. Explique o assunto pela Técnica de Feynman.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 521 Tm (6. Registre lacunas e avance para o próximo tópico.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 507 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 500 Tm (---) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 486 Tm () Tj
+/F2 22 Tf
+0.09 0.21 0.36 rg
+1 0 0 1 54 479 Tm (1. Currículo completo) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 449 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 442 Tm (Módulo 1 ? Fundamentos de Arquitetura de Software) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 415 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 408 Tm (? O que é arquitetura de software) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 394 Tm (? Diferença entre arquitetura, design e implementação) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 380 Tm (? Papel do arquiteto de software) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 366 Tm (? Requisitos funcionais e não funcionais) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 352 Tm (? Atributos de qualidade: manutenibilidade, escalabilidade, disponibilidade, segurança,) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 338 Tm (desempenho, testabilidade e observabilidade) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 324 Tm (? Trade-offs e decisões arquiteturais) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 310 Tm () Tj
+/F2 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 303 Tm (Fundamentos essenciais: decisões estruturais, requisitos de qualidade, trade-offs e relação) Tj
+/F2 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 289 Tm (entre arquitetura e negócio.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 275 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 268 Tm (Módulo 2 ? Princípios de Design de Software) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 241 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 234 Tm (? SOLID, coesão e acoplamento) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 220 Tm (? Separação de responsabilidades e encapsulamento) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 206 Tm (? DRY, KISS, YAGNI e Lei de Demeter) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 192 Tm (? Design orientado a mudanças) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 178 Tm (? Débito técnico) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 164 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 157 Tm (Módulo 3 ? Estilos e Padrões Arquiteturais) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 130 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 123 Tm (? Monólitos, camadas e modularidade) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 109 Tm (? Arquitetura hexagonal e Clean Architecture) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 95 Tm (? SOA, microservices, event-driven, serverless e plugins) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 81 Tm (? Critérios de escolha e impactos operacionais) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 67 Tm () Tj
+ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1  /F2 2 >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Length 4369 >>
+stream
+BT
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 800 Tm (Módulo 4 ? Modelagem de Domínio) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 773 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 766 Tm (? DDD, domínios e subdomínios) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 752 Tm (? Entidades, objetos de valor, agregados e serviços) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 738 Tm (? Eventos de domínio, bounded contexts e context mapping) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 724 Tm (? Linguagem ubíqua) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 710 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 703 Tm (Módulo 5 ? Integração e Comunicação) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 676 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 669 Tm (? REST, GraphQL, RPC/gRPC) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 655 Tm (? Mensageria, filas e tópicos) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 641 Tm (? Comunicação síncrona e assíncrona) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 627 Tm (? Idempotência, retries, timeouts e circuit breakers) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 613 Tm (? Contratos e versionamento de APIs) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 599 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 592 Tm (Módulo 6 ? Dados e Persistência) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 565 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 558 Tm (? Bancos relacionais e NoSQL) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 544 Tm (? Consistência, disponibilidade e transações) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 530 Tm (? Cache, replicação e sharding) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 516 Tm (? CQRS, Event Sourcing e persistência poliglota) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 502 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 495 Tm (Módulo 7 ? Escalabilidade, Desempenho e Resiliência) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 468 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 461 Tm (? Escalabilidade vertical e horizontal) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 447 Tm (? Balanceamento, alta disponibilidade e tolerância a falhas) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 433 Tm (? Bulkhead, rate limiting, backpressure e autoscaling) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 419 Tm (? Disaster recovery, RTO/RPO e testes de carga) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 405 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 398 Tm (Módulo 8 ? Segurança) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 371 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 364 Tm (? Security by design) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 350 Tm (? Autenticação, autorização, OAuth 2.0 e OpenID Connect) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 336 Tm (? Criptografia, segredos, segurança de APIs e OWASP) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 322 Tm (? Threat modeling, menor privilégio, auditoria e cloud security) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 308 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 301 Tm (Módulo 9 ? Sistemas Distribuídos) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 274 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 267 Tm (? Latência, falhas de rede e consistência) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 253 Tm (? Replicação, particionamento, eleição de líder e consensus) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 239 Tm (? Descoberta de serviços, coordenação e transações distribuídas) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 225 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 218 Tm (Módulo 10 ? Cloud e Infraestrutura) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 191 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 184 Tm (? IaaS, PaaS e SaaS) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 170 Tm (? Containers, Kubernetes e infraestrutura como código) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 156 Tm (? Redes cloud, serviços gerenciados, multi-region/multi-cloud) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 142 Tm (? FinOps e arquitetura cloud-native) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 128 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 121 Tm (Módulo 11 ? Observabilidade e Operação) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 94 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 87 Tm (? Logs, métricas e traces) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 73 Tm (? SLIs, SLOs e SLAs) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 59 Tm (? Monitoramento, alertas, incidentes e capacidade) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1  /F2 2 >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 4685 >>
+stream
+BT
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 800 Tm (? Runbooks, post-mortems e chaos engineering) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 786 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 779 Tm (Módulo 12 ? Documentação e Comunicação) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 752 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 745 Tm (? Modelo C4 e diagramas de contexto, contêineres e componentes) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 731 Tm (? Diagramas de sequência) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 717 Tm (? Architecture Decision Records \(ADRs\)) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 703 Tm (? Documentação viva, revisões e governança) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 689 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 682 Tm (Módulo 13 ? Evolução e Modernização) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 655 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 648 Tm (? Refatoração arquitetural e sistemas legados) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 634 Tm (? Strangler Fig Pattern e migração incremental) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 620 Tm (? Compatibilidade, feature flags e versionamento) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 606 Tm (? Modernização de monólitos, riscos e planos de migração) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 592 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 585 Tm (Módulo 14 ? Prática Avançada) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 558 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 551 Tm (? Avaliação de arquiteturas e cenários de qualidade) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 537 Tm (? Trade-offs, threat modeling e capacity planning) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 523 Tm (? Custos, governança evolutiva, Lei de Conway e Team Topologies) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 509 Tm (? Liderança técnica) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 495 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 488 Tm (---) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 474 Tm () Tj
+/F2 22 Tf
+0.09 0.21 0.36 rg
+1 0 0 1 54 467 Tm (2. Fontes recomendadas) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 437 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 430 Tm (1. Fundamentals of Software Architecture ? Mark Richards e Neal Ford) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 416 Tm (Melhor ponto de partida para fundamentos, estilos, características de qualidade e) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 402 Tm (arquitetura evolutiva.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 388 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 381 Tm (2. Software Architecture in Practice ? Len Bass, Paul Clements e Rick Kazman) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 367 Tm (Referência clássica para atributos de qualidade e avaliação arquitetural.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 353 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 346 Tm (3. Software Architecture: The Hard Parts ? Neal Ford, Mark Richards, Pramod Sadalage e) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 332 Tm (Zhamak Dehghani) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 318 Tm (Explora trade-offs e decisões difíceis, especialmente em sistemas distribuídos.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 304 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 297 Tm (4. Designing Software Architectures: A Practical Approach ? Humberto Cervantes e Rick Kazman) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 283 Tm (Conecta teoria, projeto e avaliação de alternativas arquiteturais.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 269 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 262 Tm (5. Documenting Software Architectures: Views and Beyond ? Paul Clements et al.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 248 Tm (Ensina a documentar e comunicar arquiteturas por diferentes visões.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 234 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 227 Tm (Ordem recomendada) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 200 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 193 Tm (1. Fundamentals of Software Architecture) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 179 Tm (2. Software Architecture in Practice) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 165 Tm (3. Software Architecture: The Hard Parts) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 151 Tm (4. Designing Software Architectures) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 137 Tm (5. Documenting Software Architectures: Views and Beyond) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 123 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 116 Tm (---) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 102 Tm () Tj
+/F2 22 Tf
+0.09 0.21 0.36 rg
+1 0 0 1 54 95 Tm (3. Prompts de estudo ativo) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 65 Tm () Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1  /F2 2 >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 3423 >>
+stream
+BT
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 800 Tm (Prompt 3 ? Revisão das anotações) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 773 Tm () Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 766 Tm (? Compare minhas anotações [NOME DO ARQUIVO] com o conteúdo estudado [CONTEÚDO ESTUDADO] da) Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 752 Tm (fonte [FONTE ESTUDADA]. Verifique se estão corretas e completas. Liste conceitos ausentes,) Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 738 Tm (informações incorretas, ambiguidades e sugestões de melhoria. Corrija erros de redação sem) Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 724 Tm (alterar o sentido.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 710 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 703 Tm (Prompt 4 ? Exercícios) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 676 Tm () Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 669 Tm (? Crie questões somente sobre [CONTEÚDO ESTUDADO] da fonte [FONTE ESTUDADA]. Organize-as do) Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 655 Tm (nível básico ao avançado e não forneça as respostas antes que eu tente resolvê-las.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 641 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 634 Tm (Prompt 5 ? Técnica Feynman) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 607 Tm () Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 600 Tm (? Faça uma apresentação somente sobre [CONTEÚDO ESTUDADO] da fonte [FONTE ESTUDADA], usando) Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 586 Tm (linguagem simples, analogias, exemplos práticos, trade-offs e perguntas de verificação. Ao) Tj
+/F1 10 Tf
+0.25 0.25 0.25 rg
+1 0 0 1 66 572 Tm (final, destaque o que um iniciante precisa conseguir explicar sem consultar material.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 558 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 551 Tm (---) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 537 Tm () Tj
+/F2 22 Tf
+0.09 0.21 0.36 rg
+1 0 0 1 54 530 Tm (4. Primeira sessão sugerida) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 500 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 493 Tm (Fonte: Fundamentals of Software Architecture) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 479 Tm (Conteúdo: definição de arquitetura, papel do arquiteto, diferença entre arquitetura e) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 465 Tm (design, características de qualidade, trade-offs, decisões arquiteturais e arquitetura) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 451 Tm (evolutiva.) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 437 Tm () Tj
+/F2 16 Tf
+0.12 0.31 0.48 rg
+1 0 0 1 54 430 Tm (Modelo de registro) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 403 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 396 Tm (? Data:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 382 Tm (? Fonte e capítulo:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 368 Tm (? Conteúdo estudado:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 354 Tm (? Minhas anotações:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 340 Tm (? Dúvidas:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 326 Tm (? Exercícios concluídos:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 312 Tm (? Explicação Feynman:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 66 298 Tm (? Próximo passo:) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 284 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 277 Tm (---) Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 263 Tm () Tj
+/F1 10 Tf
+0.12 0.12 0.12 rg
+1 0 0 1 54 256 Tm (Guia preparado para estudo progressivo de Arquitetura de Software.) Tj
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1  /F2 2 >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R] /Count 4 >>
+endobj
+12 0 obj
+<< /Type /Catalog /Pages 11 0 R >>
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000015 00000 n 
+0000000085 00000 n 
+0000000160 00000 n 
+0000004430 00000 n 
+0000004560 00000 n 
+0000008981 00000 n 
+0000009111 00000 n 
+0000013848 00000 n 
+0000013978 00000 n 
+0000017453 00000 n 
+0000017584 00000 n 
+0000017661 00000 n 
+trailer
+<< /Size 13 /Root 12 0 R >>
+startxref
+17712
+%%EOF

@@ -624,7 +624,7 @@ app.post('/api/chat/stream', async (req, res) => {
   };
 
   // Find system prompt based on routine
-  let systemPrompt = 'Você é o Antigravity Local Agent, um assistente de engenharia de software de elite. Você executa tarefas completas usando ferramentas locais sem necessidade de intervenção por terminal manual.';
+  let systemPrompt = 'Você é o Tellus Agent, um assistente de engenharia de software de elite. Você executa tarefas completas usando ferramentas locais sem necessidade de intervenção por terminal manual.';
   if (routineId) {
     const routine = config.customRoutines.find(r => r.id === routineId);
     if (routine) systemPrompt = routine.systemPrompt;
