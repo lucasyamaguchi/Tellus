@@ -136,10 +136,10 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="flex items-center space-x-2.5 shrink-0">
         {/* Tellus Brand */}
         <div className="flex items-center space-x-2">
-          <div className="w-7 h-7 rounded-lg overflow-hidden border border-accent/40 shadow-sm bg-card flex items-center justify-center">
-            <img src="/logo.png" alt="Tellus Logo" className="w-full h-full object-cover" />
+          <div className="w-8 h-8 rounded-xl overflow-hidden border border-card-border/80 shadow-md bg-white p-0.5 flex items-center justify-center shrink-0">
+            <img src="/logo.png" alt="Tellus Logo" className="w-full h-full object-contain" />
           </div>
-          <span className="font-bold text-sm bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent hidden sm:inline font-mono">
+          <span className="font-bold text-sm bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent hidden sm:inline font-mono tracking-tight">
             Tellus
           </span>
         </div>

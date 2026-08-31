@@ -61,8 +61,10 @@ export const FloatingOverlay: React.FC<FloatingOverlayProps> = ({
         {/* Drag Bar & Header */}
         <div className="p-3 bg-sidebar border-b border-card-border flex items-center justify-between select-none">
           <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 rounded-full bg-brand-emerald animate-pulse" />
-            <span className="text-xs font-bold bg-gradient-to-r from-accent-light to-brand-cyan bg-clip-text text-transparent">
+            <div className="w-5 h-5 rounded-md bg-white p-0.5 border border-card-border/80 shadow-xs flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
+            </div>
+            <span className="text-xs font-bold text-slate-100 font-mono">
               Tellus (Sempre no Topo)
             </span>
           </div>
