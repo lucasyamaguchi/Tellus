@@ -482,6 +482,17 @@ app.post('/api/skills', (req, res) => {
   }
 });
 
+app.post('/api/skills/toggle', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { skillId, isActive } = req.body;
+    SkillManager.toggleSkillActive(skillId, isActive, currentPath);
+    res.json({ success: true, skillId, isActive });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/skills/:id', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
@@ -506,9 +517,20 @@ app.get('/api/artifacts', (req, res) => {
 app.post('/api/artifacts', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const { title, content, type, filename } = req.body;
-    const artifact = SkillManager.saveArtifact(currentPath, title, content, type, filename);
+    const { title, content, type, filename, isGlobal } = req.body;
+    const artifact = SkillManager.saveArtifact(currentPath, title, content, type, filename, isGlobal);
     res.json(artifact);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/artifacts/:filename', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const isGlobal = req.query.isGlobal === 'true';
+    const success = SkillManager.deleteArtifact(req.params.filename, isGlobal, currentPath);
+    res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

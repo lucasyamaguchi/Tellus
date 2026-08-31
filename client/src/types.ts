@@ -148,6 +148,7 @@ export interface TellusSkill {
   description: string;
   promptInstructions: string;
   isProjectSpecific?: boolean;
+  isActive?: boolean;
   updatedAt: number;
 }
 
@@ -158,6 +159,7 @@ export interface TellusArtifact {
   filename: string;
   content: string;
   relativePath: string;
+  isGlobal?: boolean;
   createdAt: number;
   updatedAt: number;
 }

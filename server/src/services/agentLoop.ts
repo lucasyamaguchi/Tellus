@@ -360,7 +360,8 @@ export class AgentLoop {
     abortSignal?: AbortSignal
   ): Promise<{ fullMessages: ChatMessage[] }> {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
-    const enrichedSystemPrompt = `${systemPrompt}\n\n${memoryContext}`;
+    const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
+    const enrichedSystemPrompt = `${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     const currentHistory: ChatMessage[] = [
       { role: 'system', content: enrichedSystemPrompt },
