@@ -199,6 +199,15 @@ export const api = {
     return res.json();
   },
 
+  async toggleSkill(skillId: string, isActive: boolean): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/skills/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skillId, isActive })
+    });
+    return res.json();
+  },
+
   async deleteSkill(id: string, isProjectSpecific?: boolean): Promise<{ success: boolean }> {
     const res = await fetch(`${API_BASE}/skills/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
       method: 'DELETE'
@@ -211,11 +220,18 @@ export const api = {
     return res.json();
   },
 
-  async saveArtifact(data: { title: string; content: string; type?: string; filename?: string }): Promise<TellusArtifact> {
+  async saveArtifact(data: { title: string; content: string; type?: string; filename?: string; isGlobal?: boolean }): Promise<TellusArtifact> {
     const res = await fetch(`${API_BASE}/artifacts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+
+  async deleteArtifact(filename: string, isGlobal?: boolean): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/artifacts/${encodeURIComponent(filename)}?isGlobal=${!!isGlobal}`, {
+      method: 'DELETE'
     });
     return res.json();
   },
