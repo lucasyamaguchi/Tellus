@@ -79,8 +79,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Header */}
         <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
           <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-brand-emerald/20 border border-brand-emerald/30 flex items-center justify-center">
-              <Key className="w-4 h-4 text-emerald-400" />
+            <div className="w-8 h-8 rounded-xl bg-white p-0.5 border border-card-border/80 shadow-sm flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-100">Configuração de Chaves e Provedores</h3>

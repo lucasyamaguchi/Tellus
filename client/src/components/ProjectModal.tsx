@@ -65,8 +65,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         {/* Header */}
         <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
           <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-accent/20 border border-accent/30 flex items-center justify-center">
-              <FolderGit2 className="w-4 h-4 text-accent-light" />
+            <div className="w-8 h-8 rounded-xl bg-white p-0.5 border border-card-border/80 shadow-sm flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-100">Abrir ou Criar Projeto Local</h3>

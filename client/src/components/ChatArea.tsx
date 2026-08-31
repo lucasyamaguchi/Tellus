@@ -264,8 +264,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin scrollbar-thumb-card-border">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-16 space-y-6">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-accent/20 to-brand-cyan/20 border border-accent/30 flex items-center justify-center shadow-xl shadow-accent/5">
-              <Sparkles className="w-7 h-7 text-accent-light animate-pulse-subtle" />
+            <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-card-border/80 shadow-xl shadow-accent/5 flex items-center justify-center shrink-0 animate-in fade-in zoom-in-95">
+              <img src="/logo.png" alt="Tellus Logo" className="w-full h-full object-contain" />
             </div>
 
             <div className="space-y-2">
@@ -342,9 +342,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             >
               {/* Message Header */}
               <div className="flex items-center space-x-2 text-[11px] text-slate-400 px-1">
-                <span className="font-semibold text-slate-300">
-                  {msg.role === 'user' ? 'Você' : 'Tellus'}
-                </span>
+                {msg.role === 'user' ? (
+                  <span className="font-semibold text-slate-300">Você</span>
+                ) : (
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-4 h-4 rounded-md bg-white p-0.5 border border-card-border shadow-xs flex items-center justify-center shrink-0">
+                      <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
+                    </div>
+                    <span className="font-semibold text-slate-200">Tellus</span>
+                  </div>
+                )}
                 {msg.modelUsed && (
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-panel border border-card-border text-slate-400">
                     {msg.modelUsed.split('/').pop()}
