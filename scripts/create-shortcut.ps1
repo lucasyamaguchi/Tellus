@@ -1,17 +1,16 @@
-$WshShell = New-Object -ComObject WScript.Shell
-
 $ProjectRoot = "e:\Die-Sonne\Projects\AgenticIDE"
-$VbsPath = "$ProjectRoot\Tellus.vbs"
-$IconPath = "$ProjectRoot\resources\icon.ico"
+$ExePath = "$ProjectRoot\Tellus.exe"
+$IconPath = "$ProjectRoot\Tellus.ico"
+$AppId = "Tellus.AgenticIDE"
 
 # 1. Project Root Shortcut
+$WshShell = New-Object -ComObject WScript.Shell
 $RootLnk = "$ProjectRoot\Tellus.lnk"
 $Shortcut1 = $WshShell.CreateShortcut($RootLnk)
-$Shortcut1.TargetPath = "wscript.exe"
-$Shortcut1.Arguments = "`"$VbsPath`""
+$Shortcut1.TargetPath = $ExePath
 $Shortcut1.WorkingDirectory = $ProjectRoot
 $Shortcut1.IconLocation = "$IconPath,0"
-$Shortcut1.Description = "Tellus - Multi-Provider AI Hub and Knowledge Vault"
+$Shortcut1.Description = "Tellus - Multi-Provider Agentic AI IDE"
 $Shortcut1.Save()
 
 Write-Host "Atalho criado com sucesso na raiz: $RootLnk"
@@ -21,11 +20,11 @@ $Desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder
 if (Test-Path $Desktop) {
     $DesktopLnk = "$Desktop\Tellus.lnk"
     $Shortcut2 = $WshShell.CreateShortcut($DesktopLnk)
-    $Shortcut2.TargetPath = "wscript.exe"
-    $Shortcut2.Arguments = "`"$VbsPath`""
+    $Shortcut2.TargetPath = $ExePath
     $Shortcut2.WorkingDirectory = $ProjectRoot
     $Shortcut2.IconLocation = "$IconPath,0"
-    $Shortcut2.Description = "Tellus - Multi-Provider AI Hub and Knowledge Vault"
+    $Shortcut2.Description = "Tellus - Multi-Provider Agentic AI IDE"
     $Shortcut2.Save()
     Write-Host "Atalho criado com sucesso no Desktop: $DesktopLnk"
 }
+

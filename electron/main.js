@@ -8,6 +8,22 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Ensure Windows Taskbar uses the same AppUserModelID
+app.setAppUserModelId('Tellus.AgenticIDE');
+
+// Single instance lock
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 let mainWindow = null;
 let overlayWindow = null;
 let serverProcess = null;
