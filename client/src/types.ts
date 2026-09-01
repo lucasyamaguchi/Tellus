@@ -111,6 +111,7 @@ export interface FrankNote {
   id: string;
   title: string;
   filename: string;
+  folder?: string;
   subject: string;
   tags: string[];
   content: string;
@@ -119,6 +120,7 @@ export interface FrankNote {
   createdAt: number;
   updatedAt: number;
   isProjectSpecific?: boolean;
+  relativePath?: string;
 }
 
 export interface GraphNode {

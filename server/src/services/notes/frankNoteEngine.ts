@@ -10,6 +10,7 @@ export interface FrankNote {
   id: string;
   title: string;
   filename: string;
+  folder: string; // e.g. "Estudos - Arquitetura de Software", "Geral", "Ideias"
   subject: string; // e.g. "Arquitetura", "Segurança", "Ideias", "Geral"
   tags: string[];   // e.g. ["#database", "#performance"]
   content: string;
@@ -18,6 +19,7 @@ export interface FrankNote {
   createdAt: number;
   updatedAt: number;
   isProjectSpecific?: boolean;
+  relativePath: string;
 }
 
 export interface GraphNode {
@@ -64,12 +66,18 @@ export class FrankNoteEngine {
     return Array.from(new Set(matches.map(t => t.toLowerCase())));
   }
 
+  // Sanitize name for folders and files
+  public static sanitizeName(name: string): string {
+    return name.replace(/[<>:"/\\|?*]/g, '_').trim();
+  }
+
   // Extract subject / category from frontmatter or default to "Geral"
-  private static parseNote(filePath: string, isProjectSpecific: boolean = false): FrankNote {
+  private static parseNote(filePath: string, folderName: string = 'Geral', isProjectSpecific: boolean = false): FrankNote {
     const content = fs.readFileSync(filePath, 'utf-8');
     const stat = fs.statSync(filePath);
     const filename = path.basename(filePath);
-    const id = filename.replace(/\.md$/, '');
+    const id = filename.replace(/\.md$/i, '');
+    const relativePath = path.relative(GLOBAL_NOTES_DIR, filePath);
 
     // Extract title from first H1 or filename
     const firstLine = content.split('\n')[0] || '';
@@ -78,7 +86,7 @@ export class FrankNoteEngine {
 
     // Extract subject/topic if marked with <!-- subject: xyz --> or default to parent directory
     const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
-    const subject = subjectMatch ? subjectMatch[1].trim() : 'Geral';
+    const subject = subjectMatch ? subjectMatch[1].trim() : folderName;
 
     const tags = this.extractTags(content);
     const links = this.extractWikilinks(content);
@@ -87,6 +95,7 @@ export class FrankNoteEngine {
       id,
       title,
       filename,
+      folder: folderName,
       subject,
       tags,
       content,
@@ -94,7 +103,8 @@ export class FrankNoteEngine {
       backlinks: [],
       createdAt: stat.birthtimeMs || stat.mtimeMs,
       updatedAt: stat.mtimeMs,
-      isProjectSpecific
+      isProjectSpecific,
+      relativePath
     };
   }
 
@@ -102,16 +112,23 @@ export class FrankNoteEngine {
     this.ensureDirs(projectPath);
     const notes: FrankNote[] = [];
 
-    // 1. Read Global Notes (~/.tellus/notes)
-    if (fs.existsSync(GLOBAL_NOTES_DIR)) {
-      const files = fs.readdirSync(GLOBAL_NOTES_DIR);
-      for (const file of files) {
-        if (file.endsWith('.md') && !file.startsWith('.')) {
-          const filePath = path.join(GLOBAL_NOTES_DIR, file);
-          notes.push(this.parseNote(filePath, false));
+    const scanDir = (currentDir: string, currentFolder: string) => {
+      if (!fs.existsSync(currentDir)) return;
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue; // skip hidden dirs/files like .backups, .obsidian
+
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          scanDir(fullPath, entry.name);
+        } else if (entry.isFile() && entry.name.endsWith('.md')) {
+          notes.push(this.parseNote(fullPath, currentFolder, false));
         }
       }
-    }
+    };
+
+    scanDir(GLOBAL_NOTES_DIR, 'Geral');
 
     // 3. Compute Backlinks
     for (const note of notes) {
@@ -133,19 +150,16 @@ export class FrankNoteEngine {
       fs.writeFileSync(initFlagPath, 'true', 'utf-8');
       this.saveNote({
         title: 'Bem-vindo ao FrankMD Notes',
+        folder: 'Início',
         subject: 'Início',
         content: `# Bem-vindo ao FrankMD Notes
 
 Sistema de anotações seguras baseado no conceito **FrankMD** e no grafo de conhecimento do Obsidian.
 
-## 🛡️ Data Safety
-- Arquivos salvos em texto puro Markdown no seu disco.
-- Histórico de backups e proteção contra deleção acidental.
+## 🛡️ Pastas e Organização
+- Arquivos organizados em pastas no seu cofre Obsidian.
 - Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.
-- Use tags como #arquitetura, #segurança, #ideias para categorizar.
-
-## 🔗 Exemplo de Conexão
-Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
+- Use tags como #arquitetura, #estudos, #ideias.
 `,
         isProjectSpecific: false
       });
@@ -157,9 +171,40 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
     return notes.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  // List all folders in vault
+  public static listFolders(): string[] {
+    this.ensureDirs();
+    const folders: string[] = ['Geral'];
+
+    if (fs.existsSync(GLOBAL_NOTES_DIR)) {
+      const entries = fs.readdirSync(GLOBAL_NOTES_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          folders.push(entry.name);
+        }
+      }
+    }
+    return Array.from(new Set(folders));
+  }
+
+  // Create new folder
+  public static createFolder(folderName: string): boolean {
+    this.ensureDirs();
+    const cleanName = this.sanitizeName(folderName);
+    if (!cleanName) return false;
+
+    const folderPath = path.join(GLOBAL_NOTES_DIR, cleanName);
+    if (!fs.existsSync(folderPath)) {
+      fs.mkdirSync(folderPath, { recursive: true });
+      return true;
+    }
+    return true;
+  }
+
   public static saveNote(data: {
     id?: string;
     title: string;
+    folder?: string;
     subject?: string;
     content: string;
     isProjectSpecific?: boolean;
@@ -169,10 +214,17 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
     const safeTitle = data.title.trim() || 'Sem Título';
     const id = data.id || safeTitle.toLowerCase().replace(/[^a-z0-9\u00C0-\u00FF]/gi, '-').replace(/-+/g, '-').slice(0, 50);
     const filename = `${id}.md`;
+    const folder = data.folder ? this.sanitizeName(data.folder) : (data.subject ? this.sanitizeName(data.subject) : 'Geral');
 
-    // Todas as notas, inclusive as marcadas como específicas do projeto,
-    // são armazenadas no cofre para que o Obsidian tenha uma fonte única.
-    const filePath = path.join(GLOBAL_NOTES_DIR, filename);
+    let targetDir = GLOBAL_NOTES_DIR;
+    if (folder && folder !== 'Geral') {
+      targetDir = path.join(GLOBAL_NOTES_DIR, folder);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+    }
+
+    const filePath = path.join(targetDir, filename);
 
     // Data Safety: Backup before overwriting existing file
     if (fs.existsSync(filePath)) {
@@ -182,19 +234,22 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
     }
 
     let finalContent = data.content;
-    const subject = data.subject || 'Geral';
+    const subject = data.subject || folder;
     if (!finalContent.includes('<!-- subject:')) {
       finalContent = `<!-- subject: ${subject} -->\n${finalContent}`;
     }
 
     fs.writeFileSync(filePath, finalContent, 'utf-8');
-    return this.parseNote(filePath, data.isProjectSpecific);
+    return this.parseNote(filePath, folder, data.isProjectSpecific);
   }
 
   public static deleteNote(id: string, isProjectSpecific?: boolean, projectPath?: string): boolean {
-    const filePath = path.join(GLOBAL_NOTES_DIR, `${id}.md`);
+    const notes = this.listNotes(projectPath);
+    const note = notes.find(n => n.id === id || n.filename === `${id}.md`);
+    if (!note) return false;
+
+    const filePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
     if (fs.existsSync(filePath)) {
-      // Create backup before deleting
       const existingContent = fs.readFileSync(filePath, 'utf-8');
       const backupFilename = `${id}_deleted_${Date.now()}.md`;
       fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
@@ -202,6 +257,30 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
       return true;
     }
     return false;
+  }
+
+  // Import notes from Notion
+  public static importNotionNotes(items: Array<{ filename: string; content: string; folder?: string }>): { importedCount: number } {
+    this.ensureDirs();
+    let count = 0;
+
+    for (const item of items) {
+      if (!item.content) continue;
+
+      // Clean Notion's exported 32-character hash from filename (e.g., "My Page 88fa3910c2ef.md" -> "My Page.md")
+      let cleanName = item.filename.replace(/\s+[a-f0-9]{32}\.md$/i, '.md').replace(/\.md$/i, '');
+      const folder = item.folder ? this.sanitizeName(item.folder) : 'Notion Import';
+
+      this.saveNote({
+        title: cleanName,
+        folder,
+        subject: folder,
+        content: item.content
+      });
+      count++;
+    }
+
+    return { importedCount: count };
   }
 
   // Generate Obsidian-style Interactive Graph
@@ -222,11 +301,12 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
         color: note.isProjectSpecific ? '#38bdf8' : '#818cf8'
       });
 
-      if (note.subject) {
-        subjects.add(note.subject);
+      if (note.folder || note.subject) {
+        const sub = note.folder || note.subject;
+        subjects.add(sub);
         links.push({
           source: `note_${note.id}`,
-          target: `sub_${note.subject}`,
+          target: `sub_${sub}`,
           type: 'subject'
         });
       }
@@ -255,7 +335,7 @@ Crie uma nova nota e vincule a [[Arquitetura do Projeto]]!
       }
     }
 
-    // Add Subject Nodes
+    // Add Subject/Folder Nodes
     for (const sub of Array.from(subjects)) {
       nodes.push({
         id: `sub_${sub}`,

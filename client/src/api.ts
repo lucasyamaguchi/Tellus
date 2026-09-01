@@ -150,7 +150,30 @@ export const api = {
     return res.json();
   },
 
-  async saveNote(data: { id?: string; title: string; subject?: string; content: string; isProjectSpecific?: boolean }): Promise<FrankNote> {
+  async listFolders(): Promise<string[]> {
+    const res = await fetch(`${API_BASE}/notes/folders`);
+    return res.json();
+  },
+
+  async createFolder(name: string): Promise<{ success: boolean; name: string }> {
+    const res = await fetch(`${API_BASE}/notes/folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    return res.json();
+  },
+
+  async importNotionNotes(items: Array<{ filename: string; content: string; folder?: string }>): Promise<{ importedCount: number }> {
+    const res = await fetch(`${API_BASE}/notes/import-notion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    });
+    return res.json();
+  },
+
+  async saveNote(data: { id?: string; title: string; folder?: string; subject?: string; content: string; isProjectSpecific?: boolean }): Promise<FrankNote> {
     const res = await fetch(`${API_BASE}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
