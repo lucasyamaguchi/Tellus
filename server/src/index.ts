@@ -368,6 +368,41 @@ app.delete('/api/notes/:id', (req, res) => {
   }
 });
 
+app.get('/api/notes/folders', (req, res) => {
+  try {
+    const folders = FrankNoteEngine.listFolders();
+    res.json(folders);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/folders', (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
+    }
+    const success = FrankNoteEngine.createFolder(name.trim());
+    res.json({ success, name: name.trim() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/import-notion', (req, res) => {
+  try {
+    const { items } = req.body; // Array<{ filename: string; content: string; folder?: string }>
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ error: 'Lista de notas para importar é inválida' });
+    }
+    const result = FrankNoteEngine.importNotionNotes(items);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/notes/graph', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();

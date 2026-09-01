@@ -6,6 +6,7 @@ import {
   Save, 
   Search, 
   Folder, 
+  FolderPlus,
   ShieldCheck, 
   Network, 
   Edit3, 
@@ -20,7 +21,13 @@ import {
   MessageSquare,
   HelpCircle,
   ExternalLink,
-  BookOpen
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Upload,
+  Download,
+  FolderOpen,
+  Wand2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -39,17 +46,30 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   onReturnToAgent
 }) => {
   const [notes, setNotes] = useState<FrankNote[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [collapsedFolders, setCollapsedFolders] = useState<{ [f: string]: boolean }>({});
   const [activeNote, setActiveNote] = useState<FrankNote | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedSubject, setSelectedSubject] = useState<string>('all');
+  const [selectedFolderFilter, setSelectedFolderFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'editor' | 'graph'>('editor');
   const [editContent, setEditContent] = useState<string>('');
   const [editTitle, setEditTitle] = useState<string>('');
-  const [editSubject, setEditSubject] = useState<string>('Geral');
+  const [editFolder, setEditFolder] = useState<string>('Geral');
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Folder Creation State
+  const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
+  const [newFolderName, setNewFolderName] = useState<string>('');
+
+  // Notion Import Modal State
+  const [isNotionModalOpen, setIsNotionModalOpen] = useState<boolean>(false);
+  const [notionPasteTitle, setNotionPasteTitle] = useState<string>('');
+  const [notionPasteContent, setNotionPasteContent] = useState<string>('');
+  const [notionTargetFolder, setNotionTargetFolder] = useState<string>('Notion Import');
+  const [isImportingNotion, setIsImportingNotion] = useState<boolean>(false);
 
   // Text Selection & Context Menu for Study Engine
   const [selectedText, setSelectedText] = useState<string>('');
@@ -58,20 +78,23 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [floatingActionPos, setFloatingActionPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-      // Close context menu and floating action if clicked outside
+    const handleGlobalClick = () => {
       setContextMenuPos(null);
     };
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
 
-  const fetchNotes = async () => {
+  const fetchNotesAndFolders = async () => {
     try {
-      const list = await api.listNotes();
-      setNotes(list);
-      if (list.length > 0 && !activeNote) {
-        selectNote(list[0]);
+      const [notesList, foldersList] = await Promise.all([
+        api.listNotes(),
+        api.listFolders()
+      ]);
+      setNotes(notesList);
+      setFolders(foldersList);
+      if (notesList.length > 0 && !activeNote) {
+        selectNote(notesList[0]);
       }
     } catch {
       // ignore
@@ -88,7 +111,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   };
 
   useEffect(() => {
-    fetchNotes();
+    fetchNotesAndFolders();
   }, []);
 
   useEffect(() => {
@@ -100,22 +123,75 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const selectNote = (note: FrankNote) => {
     setActiveNote(note);
     setEditTitle(note.title);
-    setEditSubject(note.subject || 'Geral');
+    setEditFolder(note.folder || note.subject || 'Geral');
     setEditContent(note.content);
   };
 
-  const handleCreateNote = () => {
+  const handleCreateNoteInFolder = (folderName: string = 'Geral') => {
     const newNoteTemplate = {
       title: 'Nova Anotação ' + new Date().toLocaleDateString('pt-BR'),
-      subject: selectedSubject !== 'all' ? selectedSubject : 'Ideias',
+      folder: folderName,
+      subject: folderName,
       content: `# Nova Anotação\n\nEscreva suas notas aqui no formato Notion/Markdown.\n\nUse \`[[Nome de Outra Nota]]\` para criar conexões e #tags para categorizar.\n`,
       isProjectSpecific: false
     };
 
     api.saveNote(newNoteTemplate).then((created) => {
-      fetchNotes();
+      fetchNotesAndFolders();
       selectNote(created);
     });
+  };
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    try {
+      await api.createFolder(newFolderName.trim());
+      setIsCreatingFolder(false);
+      setNewFolderName('');
+      await fetchNotesAndFolders();
+    } catch (err: any) {
+      alert(`Erro ao criar pasta: ${err.message}`);
+    }
+  };
+
+  const toggleFolderCollapse = (folderName: string) => {
+    setCollapsedFolders(prev => ({
+      ...prev,
+      [folderName]: !prev[folderName]
+    }));
+  };
+
+  const handleReviewFolderWithAgent = (folderName: string) => {
+    const folderNotes = notes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
+    if (folderNotes.length === 0) {
+      alert(`A pasta "${folderName}" está vazia.`);
+      return;
+    }
+
+    const payload = `Quero fazer uma revisão e aprimoramento visual completo de todas as anotações da pasta "${folderName}".
+
+Aqui estão as notas atuais da pasta:
+
+${folderNotes.map(n => `### [[${n.title}]] (Arquivo: ${n.filename})\n${n.content}`).join('\n\n---\n\n')}
+
+Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comparativas, diagramas Mermaid, callouts de destaque e checklists estruturados para deixar as anotações visualmente muito agradáveis, claras e profissionais. Salve as melhorias diretamente no FrankMD Vault usando a ferramenta frank_note_save.`;
+
+    if (onMentionInChat) {
+      onMentionInChat({
+        id: `review-${folderName}`,
+        title: `Revisão de Notas: ${folderName}`,
+        filename: 'folder_review.md',
+        folder: folderName,
+        subject: folderName,
+        tags: ['#revisao', '#formatacao'],
+        content: payload,
+        links: folderNotes.map(n => n.title),
+        backlinks: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    }
   };
 
   const handleSaveActiveNote = async () => {
@@ -125,12 +201,13 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       const updated = await api.saveNote({
         id: activeNote.id,
         title: editTitle,
-        subject: editSubject,
+        folder: editFolder,
+        subject: editFolder,
         content: editContent,
         isProjectSpecific: activeNote.isProjectSpecific
       });
       setActiveNote(updated);
-      fetchNotes();
+      fetchNotesAndFolders();
     } catch (err: any) {
       alert(`Erro ao salvar: ${err.message}`);
     } finally {
@@ -151,111 +228,66 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
   };
 
+  const handleImportNotionPaste = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!notionPasteTitle.trim() || !notionPasteContent.trim()) return;
+
+    setIsImportingNotion(true);
+    try {
+      await api.importNotionNotes([{
+        filename: `${notionPasteTitle.trim()}.md`,
+        content: notionPasteContent,
+        folder: notionTargetFolder.trim() || 'Notion Import'
+      }]);
+      setIsNotionModalOpen(false);
+      setNotionPasteTitle('');
+      setNotionPasteContent('');
+      await fetchNotesAndFolders();
+      alert('Nota importada com sucesso do Notion!');
+    } catch (err: any) {
+      alert(`Erro ao importar nota: ${err.message}`);
+    } finally {
+      setIsImportingNotion(false);
+    }
+  };
+
+  const handleImportNotionFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsImportingNotion(true);
+    try {
+      const items: Array<{ filename: string; content: string; folder?: string }> = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.name.endsWith('.md') || file.name.endsWith('.txt')) {
+          const text = await file.text();
+          items.push({
+            filename: file.name,
+            content: text,
+            folder: notionTargetFolder.trim() || 'Notion Import'
+          });
+        }
+      }
+
+      if (items.length > 0) {
+        const res = await api.importNotionNotes(items);
+        alert(`${res.importedCount} notas importadas com sucesso do Notion!`);
+        setIsNotionModalOpen(false);
+        await fetchNotesAndFolders();
+      }
+    } catch (err: any) {
+      alert(`Erro ao importar arquivos: ${err.message}`);
+    } finally {
+      setIsImportingNotion(false);
+    }
+  };
+
   const copyNoteContent = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
-
-  const subjects = Array.from(new Set(notes.map(n => n.subject || 'Geral')));
-
-  const filteredNotes = notes.filter(n => {
-    const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesSubject = selectedSubject === 'all' || (n.subject || 'Geral') === selectedSubject;
-    return matchesQuery && matchesSubject;
-  });
-
-  // Render Interactive Canvas Graph (Obsidian-Style)
-  useEffect(() => {
-    if (viewMode !== 'graph' || !graphData || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let animationFrameId: number;
-    const width = canvas.width = canvas.parentElement?.clientWidth || 800;
-    const height = canvas.height = canvas.parentElement?.clientHeight || 600;
-
-    const simNodes = graphData.nodes.map((node, i) => {
-      const angle = (i / Math.max(1, graphData.nodes.length)) * Math.PI * 2;
-      const radius = 150 + Math.random() * 120;
-      return {
-        ...node,
-        x: width / 2 + Math.cos(angle) * radius,
-        y: height / 2 + Math.sin(angle) * radius,
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4
-      };
-    });
-
-    const nodeMap = new Map(simNodes.map(n => [n.id, n]));
-
-    const render = () => {
-      ctx.clearRect(0, 0, width, height);
-
-      // Grid background
-      ctx.strokeStyle = '#1e293b22';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < width; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
-
-      // Links
-      ctx.strokeStyle = '#64748b55';
-      ctx.lineWidth = 1.2;
-      for (const link of graphData.links) {
-        const source = nodeMap.get(link.source);
-        const target = nodeMap.get(link.target);
-        if (source && target) {
-          ctx.beginPath();
-          ctx.moveTo(source.x, source.y);
-          ctx.lineTo(target.x, target.y);
-          ctx.stroke();
-        }
-      }
-
-      // Nodes
-      for (const node of simNodes) {
-        ctx.fillStyle = node.color || '#818cf8';
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.type === 'subject' ? 10 : node.type === 'tag' ? 6 : 8, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = '#ffffff33';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        ctx.font = '11px Inter, sans-serif';
-        ctx.fillStyle = '#cbd5e1';
-        ctx.textAlign = 'center';
-        ctx.fillText(node.label.replace(/^📂\s*/, ''), node.x, node.y + 18);
-
-        node.x += node.vx;
-        node.y += node.vy;
-        if (node.x < 40 || node.x > width - 40) node.vx *= -1;
-        if (node.y < 40 || node.y > height - 40) node.vy *= -1;
-      }
-
-      animationFrameId = requestAnimationFrame(render);
-    };
-
-    render();
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [viewMode, graphData]);
 
   const handleTextSelection = () => {
     setTimeout(() => {
@@ -291,37 +323,246 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
   };
 
-  return (
-    <div className="h-full flex flex-col bg-[#090a0f] text-slate-100 overflow-hidden select-none">
-      {/* Notion-style Top Bar */}
-      <div className="h-14 border-b border-card-border bg-sidebar px-6 flex items-center justify-between shrink-0">
-        <div className="flex items-center space-x-4">
-          {onReturnToAgent && (
-            <button
-              onClick={onReturnToAgent}
-              className="px-2.5 py-1.5 rounded-lg bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-white flex items-center space-x-1.5 transition-all"
-              title="Voltar ao Workspace do Agente"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Voltar ao Agente</span>
-            </button>
-          )}
+  // Group notes by folder
+  const allFolderNames = Array.from(new Set([
+    ...folders,
+    ...notes.map(n => n.folder || n.subject || 'Geral')
+  ]));
 
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-brand-cyan/20 border border-brand-cyan/30 flex items-center justify-center">
-              <FileText className="w-4 h-4 text-brand-cyan" />
-            </div>
-            <div>
-              <span className="font-bold text-sm bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-                FrankMD Notes & Knowledge Vault
-              </span>
-              <span className="text-[10px] text-slate-400 block -mt-0.5">
-                Segurança local de dados · Wikilinks · Grafo Obsidian
-              </span>
-            </div>
+  const filteredNotes = notes.filter(n => {
+    const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      n.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesFolder = selectedFolderFilter === 'all' || (n.folder || n.subject || 'Geral') === selectedFolderFilter;
+    return matchesQuery && matchesFolder;
+  });
+
+  return (
+    <div className="h-full flex flex-col bg-background text-slate-200 overflow-hidden select-none font-sans relative">
+      {/* Floating Action Pill on Text Selection */}
+      {showFloatingAction && selectedText && (
+        <div
+          style={{ left: `${floatingActionPos.x}px`, top: `${floatingActionPos.y}px` }}
+          className="fixed z-50 bg-card/95 backdrop-blur-md border border-accent/60 shadow-2xl rounded-2xl p-1.5 flex items-center space-x-1.5 animate-in fade-in zoom-in-95"
+        >
+          <button
+            onClick={() => {
+              setShowFloatingAction(false);
+              onStudyTopic?.(selectedText);
+            }}
+            className="px-3 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all"
+            title="Iniciar Roteiro de Estudo Ativo no Chat"
+          >
+            <GraduationCap className="w-3.5 h-3.5 text-accent-light" />
+            <span>Estudar sobre "{selectedText.slice(0, 20)}{selectedText.length > 20 ? '...' : ''}"</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowFloatingAction(false);
+              if (activeNote) {
+                onMentionInChat?.({
+                  ...activeNote,
+                  content: `Pergunta sobre o trecho "${selectedText}" na anotação [[${activeNote.title}]]:\n\n${activeNote.content}`
+                });
+              }
+            }}
+            className="p-1.5 rounded-xl hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+            title="Perguntar no Chat"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Right Click Context Menu */}
+      {contextMenuPos && selectedText && (
+        <div
+          style={{ left: `${contextMenuPos.x}px`, top: `${contextMenuPos.y}px` }}
+          className="fixed z-50 bg-card border border-card-border shadow-2xl rounded-2xl p-1.5 min-w-[250px] flex flex-col space-y-1 animate-in fade-in zoom-in-95 text-xs select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2.5 py-1.5 border-b border-card-border text-[10px] text-slate-400 font-mono truncate">
+            Seleção: <strong className="text-slate-200">"{selectedText.slice(0, 24)}{selectedText.length > 24 ? '...' : ''}"</strong>
           </div>
 
-          {/* View Mode Toggle */}
+          <button
+            onClick={() => {
+              setContextMenuPos(null);
+              setShowFloatingAction(false);
+              onStudyTopic?.(selectedText);
+            }}
+            className="w-full text-left px-2.5 py-2 rounded-xl bg-accent/20 hover:bg-accent text-accent-light hover:text-white font-semibold flex items-center space-x-2 transition-all"
+          >
+            <GraduationCap className="w-4 h-4" />
+            <span>Pesquisar e Estudar sobre</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setContextMenuPos(null);
+              setShowFloatingAction(false);
+              if (activeNote) {
+                onMentionInChat?.({
+                  ...activeNote,
+                  content: `Explique detalhadamente o trecho "${selectedText}" da anotação [[${activeNote.title}]]:\n\n${activeNote.content}`
+                });
+              }
+            }}
+            className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-panel text-slate-300 hover:text-white flex items-center space-x-2 transition-all"
+          >
+            <HelpCircle className="w-4 h-4 text-brand-cyan" />
+            <span>Explicar este Trecho no Chat</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setContextMenuPos(null);
+              setShowFloatingAction(false);
+              const newNoteTemplate = {
+                title: selectedText.slice(0, 40),
+                folder: activeNote?.folder || 'Estudos',
+                subject: activeNote?.folder || 'Estudos',
+                content: `# ${selectedText}\n\nConceito referenciado a partir de [[${activeNote?.title || 'Nota Anterior'}]].\n\n## Definição e Anotações\n`,
+                isProjectSpecific: activeNote?.isProjectSpecific || false
+              };
+              api.saveNote(newNoteTemplate).then((created) => {
+                fetchNotesAndFolders();
+                selectNote(created);
+              });
+            }}
+            className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-panel text-slate-300 hover:text-white flex items-center space-x-2 transition-all"
+          >
+            <BookOpen className="w-4 h-4 text-emerald-400" />
+            <span>Criar Nota [[{selectedText.slice(0, 16)}]]</span>
+          </button>
+        </div>
+      )}
+
+      {/* Notion Import Modal */}
+      {isNotionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
+          <div className="bg-card border border-card-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center">
+                  <Download className="w-4 h-4 text-accent-light" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Importar Páginas do Notion</h3>
+                  <p className="text-[11px] text-slate-400">Importe arquivos Markdown (.md) exportados do Notion ou cole o conteúdo.</p>
+                </div>
+              </div>
+              <button onClick={() => setIsNotionModalOpen(false)} className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {/* Export Help Banner */}
+              <div className="p-3 rounded-xl bg-panel border border-card-border text-[11px] text-slate-300 leading-relaxed space-y-1">
+                <span className="font-bold text-accent-light block flex items-center space-x-1.5">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Como exportar do Notion:</span>
+                </span>
+                <span>No Notion, clique em <strong>Configurações & Membros</strong> ➔ <strong>Exportar todo o conteúdo</strong> ➔ Formato: <strong>Markdown & CSV</strong>.</span>
+              </div>
+
+              {/* Destination Folder Selector */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Pasta de Destino no Cofre:</label>
+                <input
+                  type="text"
+                  value={notionTargetFolder}
+                  onChange={(e) => setNotionTargetFolder(e.target.value)}
+                  placeholder="Ex: Notion Import, Arquitetura, Estudos..."
+                  className="w-full bg-panel border border-card-border rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-accent font-mono"
+                />
+              </div>
+
+              {/* Upload Multi-files */}
+              <div className="p-4 rounded-2xl border-2 border-dashed border-card-border hover:border-accent/50 bg-panel/50 text-center space-y-2 cursor-pointer relative">
+                <input
+                  type="file"
+                  multiple
+                  accept=".md,.txt"
+                  onChange={handleImportNotionFiles}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <Upload className="w-6 h-6 text-accent-light mx-auto" />
+                <span className="font-bold text-slate-200 block">Selecionar arquivos Markdown (.md) do Notion</span>
+                <span className="text-[11px] text-slate-400 block">Clique ou arraste os arquivos aqui</span>
+              </div>
+
+              <div className="text-center text-slate-500 font-mono text-[10px]">OU COLE O CONTEÚDO MANUALMENTE</div>
+
+              {/* Manual Paste Form */}
+              <form onSubmit={handleImportNotionPaste} className="space-y-2.5">
+                <input
+                  type="text"
+                  placeholder="Título da página do Notion..."
+                  value={notionPasteTitle}
+                  onChange={(e) => setNotionPasteTitle(e.target.value)}
+                  className="w-full bg-panel border border-card-border rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                />
+
+                <textarea
+                  rows={4}
+                  placeholder="# Conteúdo Markdown copiado da página do Notion..."
+                  value={notionPasteContent}
+                  onChange={(e) => setNotionPasteContent(e.target.value)}
+                  className="w-full bg-panel border border-card-border rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-accent"
+                />
+
+                <div className="flex justify-end space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsNotionModalOpen(false)}
+                    className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-300 text-xs"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isImportingNotion}
+                    className="px-4 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-xs transition-all shadow-md"
+                  >
+                    {isImportingNotion ? 'Importando...' : 'Importar Nota'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top Bar Controls */}
+      <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
+            <div className="w-6 h-6 rounded-lg bg-white p-0.5 border border-card-border shadow-xs flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
+            </div>
+            <span className="font-bold text-xs text-slate-100 font-mono">FrankMD Vault & Pastas</span>
+          </div>
+          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1">
+            <ShieldCheck className="w-3 h-3" />
+            <span>Obsidian Standard Compatible</span>
+          </span>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          {/* Notion Import Button */}
+          <button
+            onClick={() => setIsNotionModalOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-panel hover:bg-card border border-card-border text-xs text-slate-300 hover:text-white flex items-center space-x-1.5 transition-all"
+            title="Importar notas exportadas do Notion (.md / .csv)"
+          >
+            <Download className="w-3.5 h-3.5 text-accent-light" />
+            <span>Importar do Notion</span>
+          </button>
+
+          {/* Mode Switcher: Editor vs Graph */}
           <div className="flex items-center bg-card rounded-lg p-0.5 border border-card-border text-xs">
             <button
               onClick={() => setViewMode('editor')}
@@ -331,8 +572,8 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Documento & Editor</span>
+              <Edit3 className="w-3 h-3" />
+              <span>Notas ({notes.length})</span>
             </button>
             <button
               onClick={() => setViewMode('graph')}
@@ -342,149 +583,200 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Network className="w-3.5 h-3.5 text-brand-cyan" />
-              <span>Grafo de Conhecimento (Obsidian)</span>
+              <Network className="w-3 h-3 text-cyan-400" />
+              <span>Grafo</span>
             </button>
           </div>
-        </div>
-
-        {/* Right Actions */}
-        <div className="flex items-center space-x-3">
-          <span className="flex items-center space-x-1.5 text-[11px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-800/40 px-3 py-1 rounded-full">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Data Safety: Auto-Backup Local Ativo</span>
-          </span>
-
-          {activeNote && onMentionInChat && (
-            <button
-              onClick={() => onMentionInChat(activeNote)}
-              className="px-3 py-1.5 rounded-lg bg-panel hover:bg-brand-cyan/20 border border-card-border hover:border-brand-cyan/40 text-brand-cyan text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm"
-              title="Citar esta anotação na conversa ativa com a IA"
-            >
-              <MessageSquareQuote className="w-3.5 h-3.5" />
-              <span>Mencionar no Chat</span>
-            </button>
-          )}
 
           <button
-            onClick={handleCreateNote}
-            className="px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all"
+            onClick={() => handleCreateNoteInFolder(selectedFolderFilter !== 'all' ? selectedFolderFilter : 'Geral')}
+            className="px-3 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition-all"
           >
-            <Plus className="w-4 h-4" />
-            <span>Nova Anotação</span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>Nova Nota</span>
           </button>
         </div>
       </div>
 
-      {/* Main Area */}
+      {/* VIEW MODES */}
       {viewMode === 'graph' ? (
-        /* GRAPH VIEW */
-        <div className="flex-1 relative flex flex-col bg-[#07080c] overflow-hidden p-6">
-          <div className="absolute top-8 left-8 z-10 bg-card/90 backdrop-blur border border-card-border p-4 rounded-2xl shadow-2xl text-xs space-y-2 pointer-events-none max-w-sm">
-            <div className="font-bold text-slate-100 flex items-center space-x-2 text-sm">
-              <Network className="w-4 h-4 text-brand-cyan" />
+        /* OBSIDIAN-STYLE INTERACTIVE GRAPH */
+        <div className="flex-1 p-6 flex flex-col bg-background relative overflow-hidden">
+          <div className="absolute top-8 left-8 z-10 p-4 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-xl space-y-1.5 max-w-sm">
+            <div className="flex items-center space-x-2 font-bold text-xs text-slate-100">
+              <Network className="w-4 h-4 text-cyan-400" />
               <span>Grafo de Conexões de Conhecimento</span>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Visualização de todos os conceitos, wikilinks <code className="text-accent-light">[[Ideia]]</code> e tags entre seus projetos.
+              Visualização de todos os conceitos, pastas, wikilinks <code className="text-accent-light">[[Ideia]]</code> e tags entre seus projetos.
             </p>
-            <div className="flex items-center space-x-4 text-[11px] pt-1">
-              <span className="flex items-center space-x-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#818cf8]" /><span>Notas</span></span>
-              <span className="flex items-center space-x-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" /><span>Assuntos</span></span>
-              <span className="flex items-center space-x-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#34d399]" /><span>Tags</span></span>
-            </div>
           </div>
           <canvas ref={canvasRef} className="w-full h-full rounded-2xl border border-card-border/50 bg-[#06070a]" />
         </div>
       ) : (
-        /* NOTION-STYLE FULL DOCUMENT WORKSPACE */
+        /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE */
         <div className="flex-1 flex overflow-hidden">
-          {/* Notes Explorer Sidebar */}
-          <div className="w-80 border-r border-card-border bg-sidebar flex flex-col shrink-0">
-            {/* Search & Topic Tabs */}
-            <div className="p-4 border-b border-card-border space-y-3">
+          {/* Notes & Folders Explorer Sidebar */}
+          <div className="w-84 border-r border-card-border bg-sidebar flex flex-col shrink-0">
+            {/* Search & Actions Bar */}
+            <div className="p-3 border-b border-card-border space-y-2.5">
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Pesquisar por título, conteúdo ou #tags..."
-                  className="w-full bg-card border border-card-border rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent"
+                  className="w-full bg-card border border-card-border rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent"
                 />
               </div>
 
-              {/* Topic Filters */}
-              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+              {/* Folders Filter / Header */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center space-x-1.5">
+                  <Folder className="w-3.5 h-3.5 text-accent-light" />
+                  <span>Pastas do Cofre ({allFolderNames.length})</span>
+                </span>
                 <button
-                  onClick={() => setSelectedSubject('all')}
-                  className={`px-2.5 py-1 rounded-lg whitespace-nowrap transition-all ${
-                    selectedSubject === 'all'
-                      ? 'bg-accent text-white font-semibold shadow-sm'
-                      : 'bg-card text-slate-400 hover:text-slate-200'
-                  }`}
+                  onClick={() => setIsCreatingFolder(true)}
+                  className="text-[11px] text-accent-light hover:text-white flex items-center space-x-1 font-semibold"
+                  title="Criar nova pasta no cofre"
                 >
-                  Todas ({notes.length})
+                  <FolderPlus className="w-3.5 h-3.5" />
+                  <span>+ Pasta</span>
                 </button>
-                {subjects.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setSelectedSubject(s)}
-                    className={`px-2.5 py-1 rounded-lg whitespace-nowrap transition-all ${
-                      selectedSubject === s
-                        ? 'bg-accent text-white font-semibold shadow-sm'
-                        : 'bg-card text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
               </div>
+
+              {/* Inline Create Folder Form */}
+              {isCreatingFolder && (
+                <form onSubmit={handleCreateFolder} className="p-2 bg-card rounded-xl border border-accent/40 space-y-2 animate-in fade-in">
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="Nome da pasta (ex: Estudos - Python)..."
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    className="w-full bg-panel border border-card-border rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-accent font-mono"
+                  />
+                  <div className="flex items-center justify-end space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingFolder(false)}
+                      className="px-2 py-0.5 rounded bg-panel hover:bg-card-border text-[10px] text-slate-400"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[10px]"
+                    >
+                      Criar Pasta
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
 
-            {/* Notes List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin scrollbar-thumb-card-border">
-              {filteredNotes.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-xs">
-                  Nenhuma anotação encontrada.
-                </div>
-              ) : (
-                filteredNotes.map((n) => {
-                  const isActive = activeNote?.id === n.id;
-                  return (
-                    <div
-                      key={n.id}
-                      onClick={() => selectNote(n)}
-                      className={`p-3 rounded-2xl border transition-all cursor-pointer group flex flex-col space-y-1.5 ${
-                        isActive
-                          ? 'bg-accent/15 border-accent text-white shadow-md shadow-accent/10'
-                          : 'bg-card border-card-border text-slate-300 hover:bg-card-border/40'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs truncate max-w-[190px] block text-slate-100">
-                          {n.title}
+            {/* Folders & Notes Hierarchical Tree */}
+            <div className="flex-1 overflow-y-auto p-2.5 space-y-3 scrollbar-thin scrollbar-thumb-card-border">
+              {allFolderNames.map((folderName) => {
+                const folderNotes = filteredNotes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
+                const isCollapsed = collapsedFolders[folderName];
+
+                return (
+                  <div key={folderName} className="space-y-1 rounded-2xl bg-panel/30 border border-card-border/60 p-1.5 overflow-hidden">
+                    {/* Folder Header */}
+                    <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group">
+                      <div
+                        onClick={() => toggleFolderCollapse(folderName)}
+                        className="flex items-center space-x-1.5 cursor-pointer flex-1 truncate select-none"
+                      >
+                        {isCollapsed ? (
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5 text-accent-light shrink-0" />
+                        )}
+                        <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="font-bold text-xs text-slate-200 truncate">
+                          {folderName}
                         </span>
-                        <span className="text-[10px] text-brand-cyan font-mono px-2 py-0.5 rounded-md bg-brand-cyan/10 border border-brand-cyan/20">
-                          {n.subject}
+                        <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                          ({folderNotes.length})
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 truncate line-clamp-2 leading-relaxed">
-                        {n.content.replace(/^#+.*?\n/, '').trim().slice(0, 90)}
-                      </p>
-                      {n.tags.length > 0 && (
-                        <div className="flex items-center space-x-1.5 pt-1 overflow-hidden">
-                          {n.tags.slice(0, 3).map(t => (
-                            <span key={t} className="text-[10px] text-emerald-400 font-mono">
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+
+                      {/* Folder Action Tools */}
+                      <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => handleReviewFolderWithAgent(folderName)}
+                          className="px-2 py-0.5 rounded-md bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-[10px] font-semibold flex items-center space-x-1 transition-all border border-accent/30"
+                          title="Revisar e aprimorar visualmente todas as notas desta pasta com o Agente"
+                        >
+                          <Wand2 className="w-3 h-3" />
+                          <span>Revisar com IA</span>
+                        </button>
+                        <button
+                          onClick={() => handleCreateNoteInFolder(folderName)}
+                          className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white"
+                          title={`Criar nova nota em "${folderName}"`}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                  );
-                })
-              )}
+
+                    {/* Notes in Folder */}
+                    {!isCollapsed && (
+                      <div className="pl-4 pr-1 space-y-1.5 pt-1">
+                        {folderNotes.length === 0 ? (
+                          <div className="p-2 text-[10px] text-slate-500 italic">
+                            Pasta vazia. Clique em + para criar notas.
+                          </div>
+                        ) : (
+                          folderNotes.map((n) => {
+                            const isActive = activeNote?.id === n.id;
+                            const isBibliography = n.title.includes('Referencias') || n.title.includes('Bibliografias') || n.filename.includes('99_');
+                            return (
+                              <div
+                                key={n.id}
+                                onClick={() => selectNote(n)}
+                                className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col space-y-1 ${
+                                  isActive
+                                    ? 'bg-accent/20 border-accent text-white shadow-sm'
+                                    : isBibliography
+                                    ? 'bg-amber-950/20 border-amber-500/30 text-amber-200 hover:bg-amber-950/30'
+                                    : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card-border/40'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-semibold text-xs truncate max-w-[170px] text-slate-100 flex items-center space-x-1">
+                                    {isBibliography ? (
+                                      <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
+                                    ) : (
+                                      <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                                    )}
+                                    <span className="truncate">{n.title}</span>
+                                  </span>
+                                  {isBibliography && (
+                                    <span className="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                      Bibliografia
+                                    </span>
+                                  )}
+                                </div>
+
+                                <p className="text-[10px] text-slate-400 truncate line-clamp-1 leading-relaxed">
+                                  {n.content.replace(/^#+.*?\n/, '').replace(/<!--.*?-->/g, '').trim().slice(0, 70)}
+                                </p>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -502,13 +794,13 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
                     className="font-bold text-base bg-transparent text-slate-100 focus:outline-none focus:border-b border-accent flex-1"
                   />
                   <div className="flex items-center space-x-1.5">
-                    <Folder className="w-4 h-4 text-slate-400" />
+                    <Folder className="w-4 h-4 text-amber-400" />
                     <input
                       type="text"
-                      value={editSubject}
-                      onChange={(e) => setEditSubject(e.target.value)}
-                      placeholder="Tema / Assunto"
-                      className="text-xs text-brand-cyan bg-panel border border-card-border px-3 py-1 rounded-xl w-36 focus:outline-none"
+                      value={editFolder}
+                      onChange={(e) => setEditFolder(e.target.value)}
+                      placeholder="Pasta / Categoria"
+                      className="text-xs text-amber-300 bg-panel border border-card-border px-3 py-1 rounded-xl w-44 focus:outline-none font-mono"
                     />
                   </div>
                 </div>
@@ -580,7 +872,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
                 >
                   <div className="max-w-3xl mx-auto space-y-6">
                     <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
-                      Visualização Formatada
+                      Visualização Formatada (Selecione texto para Estudar)
                     </span>
 
                     <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">

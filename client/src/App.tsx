@@ -529,7 +529,10 @@ export const App: React.FC = () => {
           <FrankNoteView
             onMentionInChat={(note) => {
               setMainViewMode('agent');
-              handleSendMessage(`Sobre a anotação [[${note.title}]]:\n\n${note.content}`);
+              handleNewSession();
+              setTimeout(() => {
+                handleSendMessage(note.content);
+              }, 100);
             }}
             onStudyTopic={(topic) => {
               setMainViewMode('agent');
