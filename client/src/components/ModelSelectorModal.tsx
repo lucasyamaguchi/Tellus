@@ -27,6 +27,8 @@ interface ModelSelectorModalProps {
   allModels: OpenRouterModel[];
   activeModel: string;
   onSelectModel: (modelId: string) => void;
+  title?: string;
+  subtitle?: string;
 }
 
 export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
@@ -35,7 +37,9 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
   curatedModels,
   allModels,
   activeModel,
-  onSelectModel
+  onSelectModel,
+  title,
+  subtitle
 }) => {
   const [search, setSearch] = useState('');
   const [customModelInput, setCustomModelInput] = useState('');
@@ -169,13 +173,13 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-100 flex items-center space-x-2">
-                <span>Catálogo Completo & Filtro de Preço por Token</span>
+                <span>{title || 'Catálogo Completo & Filtro de Preço por Token'}</span>
                 <span className="text-[10px] font-mono font-normal bg-panel px-2 py-0.5 rounded border border-card-border text-emerald-400">
                   {modelsPool.length} modelos
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                Ordene por menor valor de token, filtre por faixa de custo ou digite qualquer ID customizado.
+                {subtitle || 'Ordene por menor valor de token, filtre por faixa de custo ou digite qualquer ID customizado.'}
               </p>
             </div>
           </div>
