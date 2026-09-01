@@ -531,6 +531,13 @@ export const App: React.FC = () => {
               setMainViewMode('agent');
               handleSendMessage(`Sobre a anotação [[${note.title}]]:\n\n${note.content}`);
             }}
+            onStudyTopic={(topic) => {
+              setMainViewMode('agent');
+              handleNewSession();
+              setTimeout(() => {
+                handleSendMessage(`Quero estudar sobre ${topic}`);
+              }, 100);
+            }}
             onReturnToAgent={() => setMainViewMode('agent')}
           />
         </div>

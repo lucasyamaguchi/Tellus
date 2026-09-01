@@ -15,7 +15,12 @@ import {
   ArrowLeft,
   Copy,
   Check,
-  Tag
+  Tag,
+  GraduationCap,
+  MessageSquare,
+  HelpCircle,
+  ExternalLink,
+  BookOpen
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -24,11 +29,13 @@ import { api } from '../api';
 
 interface FrankNoteViewProps {
   onMentionInChat?: (note: FrankNote) => void;
+  onStudyTopic?: (topic: string) => void;
   onReturnToAgent?: () => void;
 }
 
 export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   onMentionInChat,
+  onStudyTopic,
   onReturnToAgent
 }) => {
   const [notes, setNotes] = useState<FrankNote[]>([]);
@@ -43,6 +50,21 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Text Selection & Context Menu for Study Engine
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [showFloatingAction, setShowFloatingAction] = useState<boolean>(false);
+  const [floatingActionPos, setFloatingActionPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      // Close context menu and floating action if clicked outside
+      setContextMenuPos(null);
+    };
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, []);
 
   const fetchNotes = async () => {
     try {
@@ -234,6 +256,40 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       cancelAnimationFrame(animationFrameId);
     };
   }, [viewMode, graphData]);
+
+  const handleTextSelection = () => {
+    setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim() || '';
+      if (text && text.length >= 2) {
+        setSelectedText(text);
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          setFloatingActionPos({
+            x: Math.min(Math.max(rect.left + rect.width / 2 - 130, 20), window.innerWidth - 320),
+            y: Math.max(rect.top - 48, 12)
+          });
+          setShowFloatingAction(true);
+        }
+      } else {
+        setShowFloatingAction(false);
+      }
+    }, 20);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const selection = window.getSelection()?.toString().trim();
+    if (selection && selection.length >= 2) {
+      e.preventDefault();
+      setSelectedText(selection);
+      setContextMenuPos({
+        x: Math.min(e.clientX, window.innerWidth - 260),
+        y: Math.min(e.clientY, window.innerHeight - 200)
+      });
+      setShowFloatingAction(false);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col bg-[#090a0f] text-slate-100 overflow-hidden select-none">
@@ -495,7 +551,11 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
               </div>
 
               {/* Document Split Body (Markdown Source + Formatted Preview) */}
-              <div className="flex-1 grid grid-cols-2 overflow-hidden">
+              <div 
+                className="flex-1 grid grid-cols-2 overflow-hidden select-text"
+                onMouseUp={handleTextSelection}
+                onContextMenu={handleContextMenu}
+              >
                 {/* Editor Column */}
                 <div className="border-r border-card-border p-6 flex flex-col bg-[#08090e]">
                   <div className="flex items-center justify-between text-[11px] uppercase font-bold text-slate-500 mb-3 font-mono">
@@ -505,19 +565,25 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
                   <textarea
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
+                    onMouseUp={handleTextSelection}
+                    onContextMenu={handleContextMenu}
                     placeholder="Escreva seu documento com formatação Markdown, tabelas, código e [[Conexões]]..."
-                    className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed"
+                    className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed select-text"
                   />
                 </div>
 
                 {/* Live Notion-style Preview Column */}
-                <div className="p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border">
+                <div 
+                  className="p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border select-text"
+                  onMouseUp={handleTextSelection}
+                  onContextMenu={handleContextMenu}
+                >
                   <div className="max-w-3xl mx-auto space-y-6">
                     <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
                       Visualização Formatada
                     </span>
 
-                    <div className="prose prose-invert max-w-none text-xs leading-relaxed">
+                    <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {editContent}
                       </ReactMarkdown>
