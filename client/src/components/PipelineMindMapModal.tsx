@@ -14,9 +14,13 @@ import {
   Layers, 
   Flame,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Search,
+  Filter,
+  ExternalLink
 } from 'lucide-react';
 import { AgentPipelineConfig, OpenRouterModel } from '../types';
+import { ModelSelectorModal } from './ModelSelectorModal';
 
 interface PipelineMindMapModalProps {
   isOpen: boolean;
@@ -48,6 +52,10 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
     reasoningModel: currentPipeline?.reasoningModel || '',
     fastToolsModel: currentPipeline?.fastToolsModel || ''
   });
+
+  // State to open ModelSelectorModal for a specific target node
+  const [pickingTarget, setPickingTarget] = useState<'primary' | 'plannerModel' | 'codingModel' | 'reasoningModel' | 'fastToolsModel' | null>(null);
+  const [inlineSearch, setInlineSearch] = useState<string>('');
 
   // Keep pipeline synchronized when primaryModel or currentPipeline updates
   React.useEffect(() => {
@@ -86,6 +94,19 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
   const handleSave = () => {
     onSavePipeline(pipelineState);
     onClose();
+  };
+
+  const handleModelSelectedFromPicker = (selectedModelId: string) => {
+    const cleanId = selectedModelId.replace(/:batch$/i, '').trim();
+    if (pickingTarget === 'primary') {
+      handlePrimaryChange(cleanId);
+    } else if (pickingTarget) {
+      setPipelineState(prev => ({
+        ...prev,
+        [pickingTarget]: cleanId
+      }));
+    }
+    setPickingTarget(null);
   };
 
   const roles = [
@@ -127,6 +148,31 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
     }
   ];
 
+  const getTargetModalTitle = () => {
+    switch (pickingTarget) {
+      case 'primary': return 'Selecionar Modelo Principal (Hub Central)';
+      case 'plannerModel': return 'Selecionar Modelo para Estruturação & Planner';
+      case 'codingModel': return 'Selecionar Modelo para Coding & Implementação';
+      case 'reasoningModel': return 'Selecionar Modelo para Deep Thinking & Debugging';
+      case 'fastToolsModel': return 'Selecionar Modelo para Fast Tools & Terminal';
+      default: return 'Catálogo Completo de Modelos';
+    }
+  };
+
+  const getActiveModelForPicker = () => {
+    if (pickingTarget === 'primary') return pipelineState.primaryModel;
+    if (pickingTarget) return pipelineState[pickingTarget] || pipelineState.primaryModel;
+    return primaryModel;
+  };
+
+  // Filtered pool for inline dropdowns based on inlineSearch
+  const filteredModelsPool = inlineSearch.trim()
+    ? modelsPool.filter(m => 
+        m.id.toLowerCase().includes(inlineSearch.toLowerCase()) ||
+        (m.name && m.name.toLowerCase().includes(inlineSearch.toLowerCase()))
+      )
+    : modelsPool;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
       <div className="bg-card border border-card-border rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
@@ -151,6 +197,39 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-card-border text-slate-400 hover:text-white transition-colors">
             <X className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Global Quick Search Filter Bar */}
+        <div className="px-5 py-2.5 bg-panel border-b border-card-border flex items-center justify-between gap-3 text-xs">
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={inlineSearch}
+              onChange={(e) => setInlineSearch(e.target.value)}
+              placeholder="Filtrar modelos rápidos (ex: gpt-4o, claude, luna, deepseek, gemini)..."
+              className="w-full bg-card border border-card-border rounded-xl pl-9 pr-8 py-1.5 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-accent"
+            />
+            {inlineSearch && (
+              <button
+                onClick={() => setInlineSearch('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              onClick={() => setPickingTarget('primary')}
+              className="px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent border border-accent/40 text-accent-light hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm"
+              title="Abrir catálogo com filtros de preço por token, provedor e busca avançada"
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Catálogo com Filtros & Preços</span>
+            </button>
+          </div>
         </div>
 
         {/* Mind Map Canvas / Interactive Pipeline View */}
@@ -181,12 +260,22 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
             </div>
 
             <div className="flex items-center space-x-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPickingTarget('primary')}
+                className="px-3 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-accent/20 transition-all"
+                title="Pesquisar e filtrar modelo no catálogo"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Pesquisar Modelo</span>
+              </button>
+
               <select
                 value={pipelineState.primaryModel}
                 onChange={(e) => handlePrimaryChange(e.target.value)}
-                className="bg-card border border-card-border rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-accent cursor-pointer max-w-[220px]"
+                className="bg-card border border-card-border rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-accent cursor-pointer max-w-[200px]"
               >
-                {modelsPool.map(m => (
+                {filteredModelsPool.map(m => (
                   <option key={m.id} value={m.id} className="bg-card text-slate-200">
                     {m.name || m.id}
                   </option>
@@ -255,6 +344,16 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
                     </div>
 
                     <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPickingTarget(r.key)}
+                        className="px-2.5 py-1.5 rounded-lg bg-accent/15 hover:bg-accent text-accent-light hover:text-white border border-accent/30 text-xs font-semibold flex items-center space-x-1 transition-all shrink-0"
+                        title="Abrir pesquisa e filtros para este agente"
+                      >
+                        <Search className="w-3 h-3" />
+                        <span>Buscar</span>
+                      </button>
+
                       <select
                         value={pipelineState[r.key] || ''}
                         onChange={(e) => {
@@ -269,7 +368,7 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
                         <option value="" className="bg-card text-slate-400">
                           (Herdar Modelo Principal: {pipelineState.primaryModel.split('/').pop()})
                         </option>
-                        {modelsPool.map(m => (
+                        {filteredModelsPool.map(m => (
                           <option key={m.id} value={m.id} className="bg-card text-slate-200">
                             {m.name || m.id}
                           </option>
@@ -280,7 +379,7 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setPipelineState(prev => ({ ...prev, [r.key]: '' }))}
-                          className="p-1.5 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-400 hover:text-white transition-colors"
+                          className="p-1.5 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-400 hover:text-white transition-colors shrink-0"
                           title="Restaurar para herdar modelo principal"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
@@ -344,6 +443,20 @@ export const PipelineMindMapModal: React.FC<PipelineMindMapModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Sub-modal: Reusable Rich Model Selector with Providers, Price Tiers & Search Filters */}
+      {pickingTarget && (
+        <ModelSelectorModal
+          isOpen={!!pickingTarget}
+          onClose={() => setPickingTarget(null)}
+          curatedModels={curatedModels}
+          allModels={allModels}
+          activeModel={getActiveModelForPicker()}
+          onSelectModel={handleModelSelectedFromPicker}
+          title={getTargetModalTitle()}
+          subtitle="Busque por nome, filtre por provedor (OpenAI, Anthropic, Google, DeepSeek) ou ordene por menor valor de token."
+        />
+      )}
     </div>
   );
 };
