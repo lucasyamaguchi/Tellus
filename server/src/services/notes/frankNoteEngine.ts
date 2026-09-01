@@ -87,6 +87,7 @@ export class FrankNoteEngine {
     // Extract subject/topic if marked with <!-- subject: xyz --> or default to parent directory
     const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
     const subject = subjectMatch ? subjectMatch[1].trim() : folderName;
+    const folder = (folderName && folderName !== 'Geral') ? folderName : (subject && subject !== 'Geral' ? subject : 'Geral');
 
     const tags = this.extractTags(content);
     const links = this.extractWikilinks(content);
@@ -95,7 +96,7 @@ export class FrankNoteEngine {
       id,
       title,
       filename,
-      folder: folderName,
+      folder,
       subject,
       tags,
       content,
@@ -152,15 +153,7 @@ export class FrankNoteEngine {
         title: 'Bem-vindo ao FrankMD Notes',
         folder: 'Início',
         subject: 'Início',
-        content: `# Bem-vindo ao FrankMD Notes
-
-Sistema de anotações seguras baseado no conceito **FrankMD** e no grafo de conhecimento do Obsidian.
-
-## 🛡️ Pastas e Organização
-- Arquivos organizados em pastas no seu cofre Obsidian.
-- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.
-- Use tags como #arquitetura, #estudos, #ideias.
-`,
+        content: `# Bem-vindo ao FrankMD Notes\n\nSistema de anotações seguras baseado no conceito **FrankMD** e no grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas no seu cofre Obsidian.\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n`,
         isProjectSpecific: false
       });
       return this.listNotes(projectPath);
@@ -172,19 +165,27 @@ Sistema de anotações seguras baseado no conceito **FrankMD** e no grafo de con
   }
 
   // List all folders in vault
-  public static listFolders(): string[] {
-    this.ensureDirs();
-    const folders: string[] = ['Geral'];
+  public static listFolders(projectPath?: string): string[] {
+    this.ensureDirs(projectPath);
+    const folders = new Set<string>(['Geral']);
 
     if (fs.existsSync(GLOBAL_NOTES_DIR)) {
       const entries = fs.readdirSync(GLOBAL_NOTES_DIR, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          folders.push(entry.name);
+          folders.add(entry.name);
         }
       }
     }
-    return Array.from(new Set(folders));
+
+    // Also include folders and subjects from all existing notes
+    const notes = this.listNotes(projectPath);
+    for (const note of notes) {
+      if (note.folder && !note.folder.startsWith('.')) folders.add(note.folder);
+      if (note.subject && !note.subject.startsWith('.')) folders.add(note.subject);
+    }
+
+    return Array.from(folders).filter(f => f && !f.startsWith('.'));
   }
 
   // Create new folder
