@@ -173,6 +173,19 @@ export const api = {
     return res.json();
   },
 
+  async moveNote(id: string, targetFolder: string): Promise<FrankNote> {
+    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(id)}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetFolder })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao mover nota' }));
+      throw new Error(err.error || 'Falha ao mover nota');
+    }
+    return res.json();
+  },
+
   async saveNote(data: { id?: string; title: string; folder?: string; subject?: string; content: string; isProjectSpecific?: boolean }): Promise<FrankNote> {
     const res = await fetch(`${API_BASE}/notes`, {
       method: 'POST',

@@ -27,7 +27,10 @@ import {
   Upload,
   Download,
   FolderOpen,
-  Wand2
+  Wand2,
+  FolderInput,
+  MoveRight,
+  GripVertical
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -64,6 +67,13 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
   const [newFolderName, setNewFolderName] = useState<string>('');
 
+  // Drag and Drop & Move Note State
+  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const [moveModalNote, setMoveModalNote] = useState<FrankNote | null>(null);
+  const [moveTargetFolder, setMoveTargetFolder] = useState<string>('Geral');
+  const [newMoveFolderName, setNewMoveFolderName] = useState<string>('');
+
   // Notion Import Modal State
   const [isNotionModalOpen, setIsNotionModalOpen] = useState<boolean>(false);
   const [notionPasteTitle, setNotionPasteTitle] = useState<string>('');
@@ -98,6 +108,20 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handleMoveNote = async (noteId: string, targetFolder: string) => {
+    try {
+      const updated = await api.moveNote(noteId, targetFolder);
+      await fetchNotesAndFolders();
+      if (activeNote?.id === noteId) {
+        setActiveNote(updated);
+        setEditFolder(updated.folder || updated.subject || targetFolder);
+      }
+      setMoveModalNote(null);
+    } catch (err: any) {
+      alert(`Erro ao mover nota: ${err.message}`);
     }
   };
 
@@ -439,6 +463,78 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         </div>
       )}
 
+      {/* Quick Move Note Modal */}
+      {moveModalNote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
+          <div className="bg-card border border-card-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                  <FolderInput className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Mover Anotação para Pasta</h3>
+                  <p className="text-[11px] text-slate-400 truncate max-w-[280px]">"{moveModalNote.title}"</p>
+                </div>
+              </div>
+              <button onClick={() => setMoveModalNote(null)} className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 text-xs">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block font-mono">Selecione a Pasta de Destino:</span>
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-card-border">
+                {allFolderNames.map(f => (
+                  <button
+                    key={f}
+                    onClick={() => handleMoveNote(moveModalNote.id, f)}
+                    className={`w-full text-left px-3 py-2 rounded-xl border flex items-center justify-between transition-all ${
+                      (moveModalNote.folder || moveModalNote.subject || 'Geral') === f
+                        ? 'bg-accent/20 border-accent text-accent-light font-semibold'
+                        : 'bg-panel border-card-border text-slate-300 hover:bg-card-border hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <Folder className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{f}</span>
+                    </div>
+                    {(moveModalNote.folder || moveModalNote.subject || 'Geral') === f && (
+                      <span className="text-[10px] text-accent-light font-mono">(Atual)</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-2 border-t border-card-border space-y-1.5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block font-mono">Ou criar e mover para nova pasta:</span>
+                <div className="flex items-center space-x-1.5">
+                  <input
+                    type="text"
+                    placeholder="Nome da nova pasta..."
+                    value={newMoveFolderName}
+                    onChange={(e) => setNewMoveFolderName(e.target.value)}
+                    className="flex-1 bg-panel border border-card-border rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-accent font-mono"
+                  />
+                  <button
+                    onClick={() => {
+                      if (newMoveFolderName.trim()) {
+                        handleMoveNote(moveModalNote.id, newMoveFolderName.trim());
+                        setNewMoveFolderName('');
+                      }
+                    }}
+                    disabled={!newMoveFolderName.trim()}
+                    className="px-3 py-1.5 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-semibold text-xs transition-all shadow-sm"
+                  >
+                    Mover
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Notion Import Modal */}
       {isNotionModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
@@ -614,7 +710,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
           <canvas ref={canvasRef} className="w-full h-full rounded-2xl border border-card-border/50 bg-[#06070a]" />
         </div>
       ) : (
-        /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE */
+        /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE & DRAG-AND-DROP */
         <div className="flex-1 flex overflow-hidden">
           {/* Notes & Folders Explorer Sidebar */}
           <div className="w-84 border-r border-card-border bg-sidebar flex flex-col shrink-0">
@@ -678,14 +774,40 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
               )}
             </div>
 
-            {/* Folders & Notes Hierarchical Tree */}
+            {/* Folders & Notes Hierarchical Tree (Drag & Drop Target) */}
             <div className="flex-1 overflow-y-auto p-2.5 space-y-3 scrollbar-thin scrollbar-thumb-card-border">
               {allFolderNames.map((folderName) => {
                 const folderNotes = filteredNotes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
                 const isCollapsed = collapsedFolders[folderName];
+                const isDragTarget = dragOverFolder === folderName;
 
                 return (
-                  <div key={folderName} className="space-y-1 rounded-2xl bg-panel/30 border border-card-border/60 p-1.5 overflow-hidden">
+                  <div 
+                    key={folderName} 
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverFolder !== folderName) setDragOverFolder(folderName);
+                    }}
+                    onDragLeave={(e) => {
+                      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                      setDragOverFolder(null);
+                    }}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      const noteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                      setDragOverFolder(null);
+                      setDraggedNoteId(null);
+                      if (noteId) {
+                        await handleMoveNote(noteId, folderName);
+                      }
+                    }}
+                    className={`space-y-1 rounded-2xl border p-1.5 transition-all duration-200 overflow-hidden ${
+                      isDragTarget
+                        ? 'bg-accent/20 border-accent ring-2 ring-accent scale-[1.01] shadow-lg'
+                        : 'bg-panel/30 border-card-border/60'
+                    }`}
+                  >
                     {/* Folder Header */}
                     <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group">
                       <div
@@ -704,6 +826,11 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         <span className="text-[10px] font-mono text-slate-500 shrink-0">
                           ({folderNotes.length})
                         </span>
+                        {isDragTarget && (
+                          <span className="text-[9px] font-bold text-accent-light uppercase px-1.5 py-0.5 rounded bg-accent/30 animate-pulse">
+                            Soltar aqui
+                          </span>
+                        )}
                       </div>
 
                       {/* Folder Action Tools */}
@@ -726,23 +853,37 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       </div>
                     </div>
 
-                    {/* Notes in Folder */}
+                    {/* Notes in Folder (Draggable) */}
                     {!isCollapsed && (
                       <div className="pl-4 pr-1 space-y-1.5 pt-1">
                         {folderNotes.length === 0 ? (
                           <div className="p-2 text-[10px] text-slate-500 italic">
-                            Pasta vazia. Clique em + para criar notas.
+                            {isDragTarget ? 'Solte a anotação aqui para mover' : 'Pasta vazia. Arraste notas para cá ou clique em +.'}
                           </div>
                         ) : (
                           folderNotes.map((n) => {
                             const isActive = activeNote?.id === n.id;
+                            const isBeingDragged = draggedNoteId === n.id;
                             const isBibliography = n.title.includes('Referencias') || n.title.includes('Bibliografias') || n.filename.includes('99_');
+                            
                             return (
                               <div
                                 key={n.id}
+                                draggable={true}
+                                onDragStart={(e) => {
+                                  e.dataTransfer.setData('text/plain', n.id);
+                                  e.dataTransfer.effectAllowed = 'move';
+                                  setDraggedNoteId(n.id);
+                                }}
+                                onDragEnd={() => {
+                                  setDraggedNoteId(null);
+                                  setDragOverFolder(null);
+                                }}
                                 onClick={() => selectNote(n)}
-                                className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col space-y-1 ${
-                                  isActive
+                                className={`p-2 rounded-xl border transition-all cursor-grab active:cursor-grabbing flex flex-col space-y-1 group/card ${
+                                  isBeingDragged
+                                    ? 'opacity-40 border-dashed border-accent scale-95'
+                                    : isActive
                                     ? 'bg-accent/20 border-accent text-white shadow-sm'
                                     : isBibliography
                                     ? 'bg-amber-950/20 border-amber-500/30 text-amber-200 hover:bg-amber-950/30'
@@ -750,7 +891,8 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                 }`}
                               >
                                 <div className="flex items-center justify-between">
-                                  <span className="font-semibold text-xs truncate max-w-[170px] text-slate-100 flex items-center space-x-1">
+                                  <span className="font-semibold text-xs truncate max-w-[150px] text-slate-100 flex items-center space-x-1.5">
+                                    <GripVertical className="w-3 h-3 text-slate-500 opacity-40 group-hover/card:opacity-100 shrink-0" />
                                     {isBibliography ? (
                                       <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
                                     ) : (
@@ -758,14 +900,27 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                     )}
                                     <span className="truncate">{n.title}</span>
                                   </span>
-                                  {isBibliography && (
-                                    <span className="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                      Bibliografia
-                                    </span>
-                                  )}
+
+                                  <div className="flex items-center space-x-1">
+                                    {isBibliography && (
+                                      <span className="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                        Bibliografia
+                                      </span>
+                                    )}
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setMoveModalNote(n);
+                                      }}
+                                      className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-amber-300 opacity-60 group-hover/card:opacity-100 transition-opacity"
+                                      title="Mover para outra pasta..."
+                                    >
+                                      <FolderInput className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 </div>
 
-                                <p className="text-[10px] text-slate-400 truncate line-clamp-1 leading-relaxed">
+                                <p className="text-[10px] text-slate-400 truncate line-clamp-1 leading-relaxed pl-4">
                                   {n.content.replace(/^#+.*?\n/, '').replace(/<!--.*?-->/g, '').trim().slice(0, 70)}
                                 </p>
                               </div>
@@ -783,7 +938,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
           {/* Active Note Notion-style Editor & Preview Panel */}
           {activeNote ? (
             <div className="flex-1 flex flex-col bg-[#0b0d13] overflow-hidden">
-              {/* Document Header */}
+              {/* Document Header with Interactive Folder Selector */}
               <div className="p-4 border-b border-card-border bg-sidebar/40 flex items-center justify-between shrink-0">
                 <div className="flex items-center space-x-3 flex-1 mr-6">
                   <input
@@ -793,19 +948,39 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     placeholder="Título da Anotação..."
                     className="font-bold text-base bg-transparent text-slate-100 focus:outline-none focus:border-b border-accent flex-1"
                   />
-                  <div className="flex items-center space-x-1.5">
-                    <Folder className="w-4 h-4 text-amber-400" />
-                    <input
-                      type="text"
+                  
+                  {/* Folder Switcher Dropdown */}
+                  <div className="flex items-center space-x-1.5 bg-panel border border-card-border px-2.5 py-1 rounded-xl">
+                    <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <select
                       value={editFolder}
-                      onChange={(e) => setEditFolder(e.target.value)}
-                      placeholder="Pasta / Categoria"
-                      className="text-xs text-amber-300 bg-panel border border-card-border px-3 py-1 rounded-xl w-44 focus:outline-none font-mono"
-                    />
+                      onChange={(e) => {
+                        const newF = e.target.value;
+                        setEditFolder(newF);
+                        handleMoveNote(activeNote.id, newF);
+                      }}
+                      className="bg-transparent text-xs text-amber-300 focus:outline-none font-mono cursor-pointer"
+                      title="Mover anotação para outra pasta"
+                    >
+                      {allFolderNames.map(f => (
+                        <option key={f} value={f} className="bg-card text-slate-200">
+                          📁 {f}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-2.5">
+                  <button
+                    onClick={() => setMoveModalNote(activeNote)}
+                    className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-amber-300 flex items-center space-x-1.5 transition-all"
+                    title="Mover esta anotação para outra pasta"
+                  >
+                    <FolderInput className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Mover</span>
+                  </button>
+
                   <button
                     onClick={() => copyNoteContent(editContent, activeNote.id)}
                     className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 flex items-center space-x-1.5 transition-all"
