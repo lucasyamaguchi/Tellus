@@ -287,6 +287,63 @@ export class SkillManager {
     return fullSkill;
   }
 
+  // Import skill from Markdown (.md / SKILL.md)
+  public static importMarkdownSkill(
+    filename: string,
+    content: string,
+    isProjectSpecific?: boolean,
+    projectPath?: string
+  ): TellusSkill {
+    let name = filename.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
+    let description = '';
+    let category = 'General';
+    let promptInstructions = content;
+
+    // 1. Check for YAML frontmatter
+    const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+    if (frontmatterMatch) {
+      const yamlContent = frontmatterMatch[1];
+      promptInstructions = frontmatterMatch[2].trim();
+
+      const nameMatch = yamlContent.match(/^name:\s*(.+)$/m);
+      if (nameMatch) name = nameMatch[1].trim().replace(/^["']|["']$/g, '');
+
+      const descMatch = yamlContent.match(/^description:\s*(.+)$/m);
+      if (descMatch) description = descMatch[1].trim().replace(/^["']|["']$/g, '');
+
+      const catMatch = yamlContent.match(/^category:\s*(.+)$/m);
+      if (catMatch) category = catMatch[1].trim().replace(/^["']|["']$/g, '');
+    } else {
+      // 2. Check for # Heading 1
+      const titleMatch = content.match(/^#\s+(.+)$/m);
+      if (titleMatch) {
+        name = titleMatch[1].trim();
+      }
+
+      // Check for first short paragraph as description
+      const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      if (lines.length > 0) {
+        description = lines[0].slice(0, 150);
+      }
+    }
+
+    const id = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 40) || 'imported-skill';
+
+    const skillData: TellusSkill = {
+      id,
+      name,
+      description: description || `Skill importada de ${filename}`,
+      category: category || 'General',
+      agentAssigned: 'all',
+      promptInstructions,
+      isProjectSpecific: !!isProjectSpecific,
+      isActive: true,
+      updatedAt: Date.now()
+    };
+
+    return this.saveSkill(skillData, projectPath);
+  }
+
   public static deleteSkill(id: string, isProjectSpecific?: boolean, projectPath?: string): boolean {
     const isProj = isProjectSpecific && projectPath;
     const targetDir = isProj

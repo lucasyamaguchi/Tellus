@@ -221,12 +221,13 @@ export const api = {
   },
 
   // Skills & Artifacts
-  async listSkills(): Promise<TellusSkill[]> {
-    const res = await fetch(`${API_BASE}/skills`);
+  async listSkills(projectPath?: string): Promise<TellusSkill[]> {
+    const url = projectPath ? `${API_BASE}/skills?projectPath=${encodeURIComponent(projectPath)}` : `${API_BASE}/skills`;
+    const res = await fetch(url);
     return res.json();
   },
 
-  async saveSkill(skill: Partial<TellusSkill>): Promise<TellusSkill> {
+  async saveSkill(skill: Partial<TellusSkill> & { targetProjectPath?: string }): Promise<TellusSkill> {
     const res = await fetch(`${API_BASE}/skills`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -235,17 +236,33 @@ export const api = {
     return res.json();
   },
 
-  async toggleSkill(skillId: string, isActive: boolean): Promise<{ success: boolean }> {
+  async importMarkdownSkill(data: { filename: string; content: string; isProjectSpecific?: boolean; targetProjectPath?: string }): Promise<TellusSkill> {
+    const res = await fetch(`${API_BASE}/skills/import-markdown`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao importar skill' }));
+      throw new Error(err.error || 'Falha ao importar skill');
+    }
+    return res.json();
+  },
+
+  async toggleSkill(skillId: string, isActive: boolean, targetProjectPath?: string): Promise<{ success: boolean }> {
     const res = await fetch(`${API_BASE}/skills/toggle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skillId, isActive })
+      body: JSON.stringify({ skillId, isActive, targetProjectPath })
     });
     return res.json();
   },
 
-  async deleteSkill(id: string, isProjectSpecific?: boolean): Promise<{ success: boolean }> {
-    const res = await fetch(`${API_BASE}/skills/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
+  async deleteSkill(id: string, isProjectSpecific?: boolean, projectPath?: string): Promise<{ success: boolean }> {
+    const url = projectPath 
+      ? `${API_BASE}/skills/${id}?isProjectSpecific=${!!isProjectSpecific}&projectPath=${encodeURIComponent(projectPath)}`
+      : `${API_BASE}/skills/${id}?isProjectSpecific=${!!isProjectSpecific}`;
+    const res = await fetch(url, {
       method: 'DELETE'
     });
     return res.json();
