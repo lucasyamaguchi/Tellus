@@ -260,6 +260,50 @@ export class FrankNoteEngine {
     return false;
   }
 
+  // Move note to a different folder
+  public static moveNote(id: string, targetFolder: string, projectPath?: string): FrankNote | null {
+    this.ensureDirs(projectPath);
+    const notes = this.listNotes(projectPath);
+    const note = notes.find(n => n.id === id || n.filename === `${id}.md`);
+    if (!note) return null;
+
+    const currentFilePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
+    if (!fs.existsSync(currentFilePath)) return null;
+
+    const cleanTargetFolder = this.sanitizeName(targetFolder) || 'Geral';
+    let targetDir = GLOBAL_NOTES_DIR;
+    if (cleanTargetFolder !== 'Geral') {
+      targetDir = path.join(GLOBAL_NOTES_DIR, cleanTargetFolder);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+    }
+
+    const newFilePath = path.join(targetDir, note.filename);
+
+    let content = fs.readFileSync(currentFilePath, 'utf-8');
+    // Update or insert <!-- subject: xyz -->
+    if (content.match(/<!--\s*subject:\s*(.*?)\s*-->/i)) {
+      content = content.replace(/<!--\s*subject:\s*(.*?)\s*-->/i, `<!-- subject: ${cleanTargetFolder} -->`);
+    } else {
+      content = `<!-- subject: ${cleanTargetFolder} -->\n${content}`;
+    }
+
+    // If source and target paths are different, move the file
+    if (path.resolve(currentFilePath) !== path.resolve(newFilePath)) {
+      fs.writeFileSync(newFilePath, content, 'utf-8');
+      try {
+        fs.unlinkSync(currentFilePath);
+      } catch {
+        // ignore if same file
+      }
+    } else {
+      fs.writeFileSync(newFilePath, content, 'utf-8');
+    }
+
+    return this.parseNote(newFilePath, cleanTargetFolder, note.isProjectSpecific);
+  }
+
   // Import notes from Notion
   public static importNotionNotes(items: Array<{ filename: string; content: string; folder?: string }>): { importedCount: number } {
     this.ensureDirs();

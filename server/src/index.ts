@@ -368,6 +368,23 @@ app.delete('/api/notes/:id', (req, res) => {
   }
 });
 
+app.post('/api/notes/:id/move', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { targetFolder } = req.body;
+    if (!targetFolder) {
+      return res.status(400).json({ error: 'targetFolder é obrigatório' });
+    }
+    const updatedNote = FrankNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
+    if (!updatedNote) {
+      return res.status(404).json({ error: 'Nota não encontrada' });
+    }
+    res.json(updatedNote);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/notes/folders', (req, res) => {
   try {
     const folders = FrankNoteEngine.listFolders();
