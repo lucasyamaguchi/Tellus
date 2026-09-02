@@ -20,17 +20,24 @@ import {
   ToggleLeft,
   ToggleRight,
   Code,
-  FileText
+  FileText,
+  Upload,
+  Download,
+  Folder,
+  FolderCheck,
+  FileUp
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { TellusSkill, TellusArtifact } from '../types';
+import { TellusSkill, TellusArtifact, ProjectOverview } from '../types';
 import { api } from '../api';
 
 export const SkillsAndArtifactsView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'skills' | 'artifacts'>('skills');
   const [skills, setSkills] = useState<TellusSkill[]>([]);
   const [artifacts, setArtifacts] = useState<TellusArtifact[]>([]);
+  const [projects, setProjects] = useState<ProjectOverview[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   
   // Scope Filters
   const [skillScopeFilter, setSkillScopeFilter] = useState<'all' | 'global' | 'project'>('all');
@@ -42,6 +49,18 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const [isCreatingArtifact, setIsCreatingArtifact] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Import Skill Modal State
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [importSkillFilename, setImportSkillFilename] = useState<string>('');
+  const [importSkillContent, setImportSkillContent] = useState<string>('');
+  const [importSkillParsedName, setImportSkillParsedName] = useState<string>('');
+  const [importSkillParsedDesc, setImportSkillParsedDesc] = useState<string>('');
+  const [importSkillParsedCat, setImportSkillParsedCat] = useState<string>('Custom');
+  const [importSkillParsedPrompt, setImportSkillParsedPrompt] = useState<string>('');
+  const [importSkillScope, setImportSkillScope] = useState<'global' | 'project'>('global');
+  const [importSkillTargetProject, setImportSkillTargetProject] = useState<string>('');
+  const [isImportingSkillLoading, setIsImportingSkillLoading] = useState<boolean>(false);
+
   // New Skill Form
   const [newSkillName, setNewSkillName] = useState('');
   const [newSkillCategory, setNewSkillCategory] = useState('Architecture');
@@ -49,6 +68,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const [newSkillDesc, setNewSkillDesc] = useState('');
   const [newSkillPrompt, setNewSkillPrompt] = useState('');
   const [newSkillIsProjectSpecific, setNewSkillIsProjectSpecific] = useState(false);
+  const [newSkillTargetProject, setNewSkillTargetProject] = useState('');
 
   // New Artifact Form
   const [newArtTitle, setNewArtTitle] = useState('');
@@ -57,14 +77,19 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const [newArtContent, setNewArtContent] = useState('');
   const [newArtIsGlobal, setNewArtIsGlobal] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (projectPath?: string) => {
     try {
-      const [skillsList, artifactsList] = await Promise.all([
-        api.listSkills(),
-        api.listArtifacts()
+      const [skillsList, artifactsList, openProjs] = await Promise.all([
+        api.listSkills(projectPath || selectedProjectId || undefined),
+        api.listArtifacts(),
+        api.getOpenProjects().catch(() => [])
       ]);
       setSkills(skillsList);
       setArtifacts(artifactsList);
+      setProjects(openProjs);
+      if (!selectedProjectId && openProjs.length > 0) {
+        setSelectedProjectId(openProjs[0].path);
+      }
       if (artifactsList.length > 0 && !selectedArtifact) {
         setSelectedArtifact(artifactsList[0]);
       }
@@ -82,10 +107,10 @@ export const SkillsAndArtifactsView: React.FC = () => {
     // Optimistic UI update
     setSkills(prev => prev.map(s => s.id === skillId ? { ...s, isActive: nextState } : s));
     try {
-      await api.toggleSkill(skillId, nextState);
+      await api.toggleSkill(skillId, nextState, selectedProjectId || undefined);
     } catch (err: any) {
       alert(`Erro ao alterar estado da skill: ${err.message}`);
-      loadData();
+      loadData(selectedProjectId || undefined);
     }
   };
 
@@ -101,23 +126,107 @@ export const SkillsAndArtifactsView: React.FC = () => {
         description: newSkillDesc,
         promptInstructions: newSkillPrompt,
         isProjectSpecific: newSkillIsProjectSpecific,
+        targetProjectPath: newSkillIsProjectSpecific ? (newSkillTargetProject || selectedProjectId || undefined) : undefined,
         isActive: true
       });
       setIsCreatingSkill(false);
       setNewSkillName('');
       setNewSkillDesc('');
       setNewSkillPrompt('');
-      loadData();
+      loadData(selectedProjectId || undefined);
     } catch (err: any) {
       alert(`Erro ao criar skill: ${err.message}`);
+    }
+  };
+
+  // Helper to parse Markdown skill files (.md / SKILL.md)
+  const parseMarkdownSkill = (rawContent: string, fileName: string) => {
+    let name = fileName.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
+    let desc = '';
+    let cat = 'Custom';
+    let prompt = rawContent;
+
+    const fmMatch = rawContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+    if (fmMatch) {
+      const yaml = fmMatch[1];
+      prompt = fmMatch[2].trim();
+
+      const n = yaml.match(/^name:\s*(.+)$/m);
+      if (n) name = n[1].trim().replace(/^["']|["']$/g, '');
+
+      const d = yaml.match(/^description:\s*(.+)$/m);
+      if (d) desc = d[1].trim().replace(/^["']|["']$/g, '');
+
+      const c = yaml.match(/^category:\s*(.+)$/m);
+      if (c) cat = c[1].trim().replace(/^["']|["']$/g, '');
+    } else {
+      const h1 = rawContent.match(/^#\s+(.+)$/m);
+      if (h1) name = h1[1].trim();
+
+      const lines = rawContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      if (lines.length > 0) desc = lines[0].slice(0, 150);
+    }
+
+    return { name, desc, cat, prompt };
+  };
+
+  const handleImportSkillFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      if (content) {
+        const parsed = parseMarkdownSkill(content, file.name);
+        setImportSkillFilename(file.name);
+        setImportSkillContent(content);
+        setImportSkillParsedName(parsed.name);
+        setImportSkillParsedDesc(parsed.desc);
+        setImportSkillParsedCat(parsed.cat);
+        setImportSkillParsedPrompt(parsed.prompt);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSaveImportedSkill = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importSkillParsedName.trim() || !importSkillParsedPrompt.trim()) return;
+
+    setIsImportingSkillLoading(true);
+    try {
+      const isProj = importSkillScope === 'project';
+      const targetProject = isProj ? (importSkillTargetProject || selectedProjectId || undefined) : undefined;
+
+      await api.saveSkill({
+        name: importSkillParsedName.trim(),
+        category: importSkillParsedCat || 'Custom',
+        agentAssigned: 'all',
+        description: importSkillParsedDesc.trim() || `Skill importada de ${importSkillFilename}`,
+        promptInstructions: importSkillParsedPrompt.trim(),
+        isProjectSpecific: isProj,
+        targetProjectPath: targetProject,
+        isActive: true
+      });
+
+      setIsImportModalOpen(false);
+      setImportSkillFilename('');
+      setImportSkillContent('');
+      setImportSkillParsedName('');
+      setImportSkillParsedDesc('');
+      setImportSkillParsedPrompt('');
+      await loadData(selectedProjectId || undefined);
+      alert('Skill importada com sucesso!');
+    } catch (err: any) {
+      alert(`Erro ao importar skill: ${err.message}`);
+    } finally {
+      setIsImportingSkillLoading(false);
     }
   };
 
   const handleDeleteSkill = async (id: string, isProjectSpecific?: boolean) => {
     if (!confirm('Deseja remover esta skill?')) return;
     try {
-      await api.deleteSkill(id, isProjectSpecific);
-      loadData();
+      await api.deleteSkill(id, isProjectSpecific, selectedProjectId || undefined);
+      loadData(selectedProjectId || undefined);
     } catch (err: any) {
       alert(`Erro ao deletar: ${err.message}`);
     }
@@ -188,7 +297,181 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const categories = ['all', 'Architecture', 'Debugging', 'Security', 'Frontend', 'Backend', 'Testing', 'Custom'];
 
   return (
-    <div className="h-full flex flex-col bg-background text-slate-200 overflow-hidden font-sans">
+    <div className="h-full flex flex-col bg-background text-slate-200 overflow-hidden font-sans select-none">
+      {/* Import Skill Markdown Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
+          <div className="bg-card border border-card-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center">
+                  <FileUp className="w-4 h-4 text-accent-light" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Importar Skill (.md / SKILL.md)</h3>
+                  <p className="text-[11px] text-slate-400">Importe arquivos Markdown de diretrizes de agentes para o Tellus.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsImportModalOpen(false)} 
+                className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveImportedSkill} className="p-5 space-y-4 text-xs overflow-y-auto scrollbar-thin scrollbar-thumb-card-border">
+              {/* File Upload Zone */}
+              <div className="p-4 rounded-2xl border-2 border-dashed border-card-border hover:border-accent/50 bg-panel/50 text-center space-y-2 cursor-pointer relative">
+                <input
+                  type="file"
+                  accept=".md,.txt"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImportSkillFile(file);
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <Upload className="w-6 h-6 text-accent-light mx-auto" />
+                <span className="font-bold text-slate-200 block">
+                  {importSkillFilename ? `Arquivo: ${importSkillFilename}` : 'Selecionar arquivo de Skill (.md / SKILL.md)'}
+                </span>
+                <span className="text-[11px] text-slate-400 block">Clique ou arraste o arquivo Markdown aqui</span>
+              </div>
+
+              {/* Destination Scope & Project Selector */}
+              <div className="p-3 rounded-xl bg-panel border border-card-border space-y-2">
+                <label className="text-[10px] uppercase font-bold text-slate-400 font-mono block">Onde salvar esta Skill:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setImportSkillScope('global')}
+                    className={`p-2.5 rounded-xl border flex items-center space-x-2 text-left transition-all ${
+                      importSkillScope === 'global'
+                        ? 'bg-accent/20 border-accent text-white font-semibold'
+                        : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <div>
+                      <span className="block text-xs">🌐 Global Padrão</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">Disponível em todos os projetos</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setImportSkillScope('project')}
+                    className={`p-2.5 rounded-xl border flex items-center space-x-2 text-left transition-all ${
+                      importSkillScope === 'project'
+                        ? 'bg-accent/20 border-accent text-white font-semibold'
+                        : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FolderGit2 className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <span className="block text-xs">📁 Por Projeto</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">Exclusiva para um projeto</span>
+                    </div>
+                  </button>
+                </div>
+
+                {importSkillScope === 'project' && (
+                  <div className="pt-2 border-t border-card-border/60">
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Selecione o Projeto Alvo:</label>
+                    <select
+                      value={importSkillTargetProject || selectedProjectId}
+                      onChange={(e) => setImportSkillTargetProject(e.target.value)}
+                      className="w-full bg-card border border-card-border rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-accent"
+                    >
+                      {projects.map(p => (
+                        <option key={p.path} value={p.path} className="bg-card text-slate-200">
+                          📁 {p.name} ({p.path})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Parsed Skill Details */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 block mb-1">Nome da Skill</label>
+                  <input
+                    type="text"
+                    required
+                    value={importSkillParsedName}
+                    onChange={(e) => setImportSkillParsedName(e.target.value)}
+                    placeholder="Ex: TDD & Clean Architecture"
+                    className="w-full bg-panel border border-card-border rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 block mb-1">Categoria</label>
+                  <select
+                    value={importSkillParsedCat}
+                    onChange={(e) => setImportSkillParsedCat(e.target.value)}
+                    className="w-full bg-panel border border-card-border rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                  >
+                    <option value="Architecture">Architecture</option>
+                    <option value="Debugging">Debugging</option>
+                    <option value="Security">Security</option>
+                    <option value="Frontend">Frontend</option>
+                    <option value="Backend">Backend</option>
+                    <option value="Testing">Testing</option>
+                    <option value="DevOps">DevOps</option>
+                    <option value="Custom">Custom</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 block mb-1">Descrição</label>
+                <input
+                  type="text"
+                  value={importSkillParsedDesc}
+                  onChange={(e) => setImportSkillParsedDesc(e.target.value)}
+                  placeholder="Finalidade e quando ativar..."
+                  className="w-full bg-panel border border-card-border rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 block mb-1">Instruções de Prompt da Skill</label>
+                <textarea
+                  rows={6}
+                  required
+                  value={importSkillParsedPrompt}
+                  onChange={(e) => setImportSkillParsedPrompt(e.target.value)}
+                  placeholder="Diretrizes e instruções em Markdown que o agente seguirá..."
+                  className="w-full bg-panel border border-card-border rounded-xl p-3 text-xs text-slate-100 font-mono focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-card-border">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-3.5 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-300 text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isImportingSkillLoading || !importSkillParsedName.trim() || !importSkillParsedPrompt.trim()}
+                  className="px-4 py-1.5 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-semibold text-xs transition-all shadow-md flex items-center space-x-1.5"
+                >
+                  <FileUp className="w-3.5 h-3.5" />
+                  <span>{isImportingSkillLoading ? 'Salvando...' : 'Importar & Salvar Skill'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar Tabs */}
       <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
         <div className="flex items-center space-x-2 bg-card rounded-lg p-0.5 border border-card-border text-xs">
@@ -217,13 +500,23 @@ export const SkillsAndArtifactsView: React.FC = () => {
         </div>
 
         {activeTab === 'skills' ? (
-          <button
-            onClick={() => setIsCreatingSkill(true)}
-            className="px-3 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition-all"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Nova Skill</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="px-3 py-1 rounded-lg bg-panel hover:bg-card border border-card-border text-xs text-slate-300 hover:text-white flex items-center space-x-1.5 transition-all"
+              title="Importar skill a partir de arquivo Markdown (.md ou SKILL.md)"
+            >
+              <FileUp className="w-3.5 h-3.5 text-accent-light" />
+              <span>Importar Skill (.md)</span>
+            </button>
+            <button
+              onClick={() => setIsCreatingSkill(true)}
+              className="px-3 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Nova Skill</span>
+            </button>
+          </div>
         ) : (
           <button
             onClick={() => setIsCreatingArtifact(true)}
@@ -237,10 +530,10 @@ export const SkillsAndArtifactsView: React.FC = () => {
 
       {/* TAB 1: SKILLS MANAGEMENT */}
       {activeTab === 'skills' && (
-        <div className="flex-1 flex flex-col p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-card-border space-y-4">
-          {/* Header Controls: Scope Filter, Category Filter, Search */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-card border border-card-border">
-            {/* Scope Selector: All vs Global vs Project */}
+        <div className="flex-1 flex flex-col p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-card-border space-y-3">
+          {/* Header Controls: Scope Filter, Search */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-card border border-card-border shrink-0">
+            {/* Scope Selector: All vs Global vs Por Projeto */}
             <div className="flex items-center space-x-1 bg-panel p-1 rounded-xl border border-card-border text-xs">
               <button
                 onClick={() => setSkillScopeFilter('all')}
@@ -275,10 +568,10 @@ export const SkillsAndArtifactsView: React.FC = () => {
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
-                title="Skills criadas exclusivamente para este projeto"
+                title="Skills configuradas por projeto"
               >
                 <FolderGit2 className="w-3 h-3 text-amber-400" />
-                <span>📁 Deste Projeto</span>
+                <span>📁 Por Projeto</span>
                 <span className="text-[10px] opacity-75">
                   ({skills.filter(s => s.isProjectSpecific).length})
                 </span>
@@ -286,41 +579,97 @@ export const SkillsAndArtifactsView: React.FC = () => {
             </div>
 
             {/* Search Bar */}
-            <div className="relative min-w-[200px]">
+            <div className="relative min-w-[240px]">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar skill por nome ou instrução..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-panel border border-card-border text-xs text-slate-200 focus:outline-none focus:border-accent"
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-panel border border-card-border text-xs text-slate-200 focus:outline-none focus:border-accent"
               />
             </div>
           </div>
 
-          {/* Category Chips */}
-          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
-            <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mr-1">Categoria:</span>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategoryFilter(cat)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                  selectedCategoryFilter === cat
-                    ? 'bg-accent/20 border border-accent text-accent-light'
-                    : 'bg-card border border-card-border text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {cat === 'all' ? 'Todas' : cat}
-              </button>
-            ))}
+          {/* Project Switcher Bar (when in 'Por Projeto' mode) */}
+          {skillScopeFilter === 'project' && (
+            <div className="p-3 rounded-2xl bg-amber-950/20 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                  <FolderGit2 className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-amber-200 block">Visualização Por Projeto</span>
+                  <span className="text-[11px] text-amber-300/70">
+                    Gerencie e configure quais skills e diretrizes locais (.agentic/skills/) se aplicam a cada projeto.
+                  </span>
+                </div>
+              </div>
+
+              {/* Project Selector Dropdown */}
+              <div className="flex items-center space-x-2 bg-panel border border-amber-500/40 px-3 py-1.5 rounded-xl">
+                <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => {
+                    const newProj = e.target.value;
+                    setSelectedProjectId(newProj);
+                    loadData(newProj);
+                  }}
+                  className="bg-transparent text-xs text-amber-200 focus:outline-none font-mono cursor-pointer"
+                >
+                  {projects.length === 0 ? (
+                    <option value="" className="bg-card text-slate-200">Projeto Atual</option>
+                  ) : (
+                    projects.map(p => (
+                      <option key={p.path} value={p.path} className="bg-card text-slate-200">
+                        📁 {p.name} ({p.path})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Category Chips Toolbar (Clean, non-overlapping banner) */}
+          <div className="p-2.5 rounded-2xl bg-card/70 border border-card-border flex flex-wrap items-center gap-2 shrink-0 select-none">
+            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider mr-1 flex items-center space-x-1">
+              <Layers className="w-3 h-3 text-accent-light" />
+              <span>Categorias:</span>
+            </span>
+            {categories.map((cat) => {
+              const count = cat === 'all' 
+                ? skills.length 
+                : skills.filter(s => s.category === cat).length;
+              const isSelected = selectedCategoryFilter === cat;
+
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategoryFilter(cat)}
+                  className={`px-3 py-1 rounded-xl text-xs font-medium transition-all flex items-center space-x-1.5 ${
+                    isSelected
+                      ? 'bg-accent/20 border border-accent text-accent-light shadow-xs font-semibold'
+                      : 'bg-panel border border-card-border text-slate-400 hover:text-slate-200 hover:bg-card-border/50'
+                  }`}
+                >
+                  <span>{cat === 'all' ? 'Todas' : cat}</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                    isSelected ? 'bg-accent/30 text-white' : 'bg-card text-slate-500'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* New Skill Modal / Inline Form */}
           {isCreatingSkill && (
             <form
               onSubmit={handleSaveNewSkill}
-              className="p-4 rounded-2xl bg-card border-2 border-accent/40 shadow-xl space-y-3.5 animate-in fade-in"
+              className="p-4 rounded-2xl bg-card border-2 border-accent/40 shadow-xl space-y-3.5 animate-in fade-in shrink-0"
             >
               <div className="flex items-center justify-between border-b border-card-border pb-2">
                 <span className="font-bold text-xs text-slate-100 flex items-center space-x-1.5">
@@ -342,7 +691,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
                   <span className="text-xs font-bold text-slate-200 block">Escopo da Skill</span>
                   <span className="text-[11px] text-slate-400">
                     {newSkillIsProjectSpecific
-                      ? 'Salvar no projeto atual (.agentic/skills/) — aplicável somente a este projeto.'
+                      ? 'Salvar no projeto selecionado (.agentic/skills/) — aplicável a este projeto.'
                       : 'Salvar globalmente (~/.tellus/skills/) — padrão e herdada por todos os projetos.'}
                   </span>
                 </div>
@@ -365,10 +714,27 @@ export const SkillsAndArtifactsView: React.FC = () => {
                     }`}
                   >
                     <FolderGit2 className="w-3 h-3 text-amber-300" />
-                    <span>Apenas este Projeto</span>
+                    <span>Por Projeto</span>
                   </button>
                 </div>
               </div>
+
+              {newSkillIsProjectSpecific && (
+                <div>
+                  <label className="text-[10px] text-slate-400 font-bold block mb-1">Projeto Destino</label>
+                  <select
+                    value={newSkillTargetProject || selectedProjectId}
+                    onChange={(e) => setNewSkillTargetProject(e.target.value)}
+                    className="w-full bg-panel border border-card-border rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-accent"
+                  >
+                    {projects.map(p => (
+                      <option key={p.path} value={p.path} className="bg-card text-slate-200">
+                        📁 {p.name} ({p.path})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -449,9 +815,9 @@ export const SkillsAndArtifactsView: React.FC = () => {
           )}
 
           {/* Skills Grid */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-6">
             {filteredSkills.length === 0 ? (
-              <div className="col-span-2 p-8 text-center bg-card border border-card-border rounded-2xl text-slate-500 text-xs">
+              <div className="col-span-full p-8 text-center bg-card border border-card-border rounded-2xl text-slate-500 text-xs">
                 Nenhuma skill encontrada com os filtros atuais.
               </div>
             ) : (
@@ -468,13 +834,13 @@ export const SkillsAndArtifactsView: React.FC = () => {
                   >
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-slate-100 flex items-center space-x-1.5 truncate max-w-[220px]">
-                          <Sparkles className={`w-3.5 h-3.5 ${isActive ? 'text-accent-light' : 'text-slate-500'}`} />
+                        <span className="font-bold text-xs text-slate-100 flex items-center space-x-1.5 truncate max-w-[180px]">
+                          <Sparkles className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-accent-light' : 'text-slate-500'}`} />
                           <span className="truncate">{skill.name}</span>
                         </span>
 
-                        {/* Scope Badge */}
-                        <div className="flex items-center space-x-1.5">
+                        {/* Scope Badge & Active Toggle */}
+                        <div className="flex items-center space-x-1.5 shrink-0">
                           {skill.isProjectSpecific ? (
                             <span className="text-[9px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center space-x-1">
                               <FolderGit2 className="w-2.5 h-2.5" />
@@ -483,19 +849,19 @@ export const SkillsAndArtifactsView: React.FC = () => {
                           ) : (
                             <span className="text-[9px] font-mono font-semibold px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 flex items-center space-x-1">
                               <Globe className="w-2.5 h-2.5" />
-                              <span>Global Padrão</span>
+                              <span>Global</span>
                             </span>
                           )}
 
                           {/* Active / Inactive Toggle Switch */}
                           <button
                             onClick={() => handleToggleSkill(skill.id, skill.isActive)}
-                            className={`p-1 rounded-lg border transition-all flex items-center space-x-1 text-[10px] font-semibold ${
+                            className={`p-1 px-1.5 rounded-lg border transition-all flex items-center space-x-1 text-[10px] font-semibold ${
                               isActive
                                 ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/50'
                                 : 'bg-rose-950/30 border-rose-500/30 text-rose-400 hover:bg-rose-900/40'
                             }`}
-                            title={isActive ? 'Desativar skill no projeto atual' : 'Ativar skill no projeto atual'}
+                            title={isActive ? 'Desativar skill neste contexto' : 'Ativar skill neste contexto'}
                           >
                             {isActive ? (
                               <>
@@ -512,7 +878,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
                         </div>
                       </div>
 
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                      <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2">
                         {skill.description}
                       </p>
                     </div>

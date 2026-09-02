@@ -516,8 +516,8 @@ Breve resumo dos objetivos, contexto e conclusões da discussão.
 // Skills & Artifacts Endpoints
 app.get('/api/skills', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
-    const skills = SkillManager.listSkills(currentPath);
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const skills = SkillManager.listSkills(targetPath);
     res.json(skills);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -526,8 +526,27 @@ app.get('/api/skills', (req, res) => {
 
 app.post('/api/skills', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
-    const skill = SkillManager.saveSkill(req.body, currentPath);
+    const targetPath = req.body.targetProjectPath || ProjectManager.getCurrentProject();
+    const skill = SkillManager.saveSkill(req.body, targetPath);
+    res.json(skill);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/skills/import-markdown', (req, res) => {
+  try {
+    const { filename, content, isProjectSpecific, targetProjectPath } = req.body;
+    const targetPath = targetProjectPath || ProjectManager.getCurrentProject();
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Conteúdo da skill é obrigatório' });
+    }
+    const skill = SkillManager.importMarkdownSkill(
+      filename || 'imported_skill.md',
+      content,
+      isProjectSpecific,
+      targetPath
+    );
     res.json(skill);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -536,9 +555,9 @@ app.post('/api/skills', (req, res) => {
 
 app.post('/api/skills/toggle', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
+    const targetPath = req.body.targetProjectPath || ProjectManager.getCurrentProject();
     const { skillId, isActive } = req.body;
-    SkillManager.toggleSkillActive(skillId, isActive, currentPath);
+    SkillManager.toggleSkillActive(skillId, isActive, targetPath);
     res.json({ success: true, skillId, isActive });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -547,9 +566,9 @@ app.post('/api/skills/toggle', (req, res) => {
 
 app.delete('/api/skills/:id', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
     const isProjectSpecific = req.query.isProjectSpecific === 'true';
-    const success = SkillManager.deleteSkill(req.params.id, isProjectSpecific, currentPath);
+    const success = SkillManager.deleteSkill(req.params.id, isProjectSpecific, targetPath);
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
