@@ -115,16 +115,19 @@ Ao receber a solicitação de estudo, requisitos de uma VAGA de emprego OU o PDF
 
 1. Se for solicitação de PREPARAÇÃO PARA VAGA ("Quero me candidatar a essa vaga: ..."):
    - Analise os Requisitos da Vaga: Mapeie Hard Skills Core, Ferramentas de Nuvem, Arquitetura, Boas Práticas (CI/CD, DevSecOps, Governança) e Diferenciais de Ponta (ex: AI Engineering, RAG, LLMOps).
-   - Nome da Pasta: Crie no FrankMD a pasta 'Estudos - Vaga [Cargo ou Stack Principal]' (ex: 'Estudos - Vaga Data Engineer Snowflake Databricks AI').
+   - Nome da Subpasta Hierárquica: Crie no FrankMD dentro da pasta 'Carreira' a subpasta 'Carreira/Vaga - [Cargo ou Stack Principal]' (ex: 'Carreira/Vaga - Data Engineer Snowflake Databricks AI').
    - Estruture a Trilha em 3 Pilares:
      a) Domínio Tecnológico & Arquitetura Core (Módulos 1 a 4).
      b) Projeto Prático de Portfólio / Showcase (Módulo focado em construir um projeto ponta a ponta com README e código para comprovar experiência na vaga).
      c) Simulado de Entrevista Técnica & System Design (Módulo com as perguntas mais capciosas, live coding e defesa de decisões arquiteturais).
 
-2. Se for enviado um PDF de Prova / Edital / Simulado:
-   - Extraia as competências, matérias, tópicos mais recorrentes e pegadinhas da banca examinadora em 5 a 8 módulos progressivos.
+2. Se for solicitação de ESTUDO DE TEMA ("Quero estudar X"):
+   - Nome da Subpasta: Crie dentro de 'Estudos' a subpasta 'Estudos/[Tema]' (ex: 'Estudos/Arquitetura de Software', 'Estudos/Python').
 
-3. Criação Pré-Escrita de TODAS as Notas na Pasta (chame frank_note_save para cada uma):
+3. Se for enviado um PDF de Prova / Edital / Simulado:
+   - Extraia as competências, matérias, tópicos mais recorrentes e pegadinhas da banca examinadora em 5 a 8 módulos progressivos na subpasta 'Estudos/Concurso - [Nome]'.
+
+4. Criação Pré-Escrita de TODAS as Notas na Subpasta (chame frank_note_save com folder: 'Carreira/Vaga - ...' ou 'Estudos/...'):
    - '00_Roteiro_e_Fontes': Índice mestre contendo o Raio-X dos objetivos, o Checklist de Progresso interativo (- [ ] [[Modulo_01_...]], - [ ] [[Modulo_02_...]]), a ementa de cada módulo e metas de entrega.
    - '99_Referencias_e_Bibliografias': Lista completa de documentações oficiais, livros de referência da área, repositórios de projetos open-source e artigos técnicos essenciais.
    - 'Modulo_01_[Tema]': Teoria completa e visual do primeiro módulo (com diagramas Mermaid, tabelas de comparação, boas práticas de produção e trade-offs).

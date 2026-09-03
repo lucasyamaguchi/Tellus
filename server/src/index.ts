@@ -407,6 +407,19 @@ app.post('/api/notes/folders', (req, res) => {
   }
 });
 
+app.post('/api/notes/folders/move', (req, res) => {
+  try {
+    const { sourceFolder, targetParentFolder } = req.body;
+    if (!sourceFolder) {
+      return res.status(400).json({ error: 'sourceFolder é obrigatório' });
+    }
+    const success = FrankNoteEngine.moveFolder(sourceFolder, targetParentFolder || '');
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/notes/import-notion', (req, res) => {
   try {
     const { items } = req.body; // Array<{ filename: string; content: string; folder?: string }>

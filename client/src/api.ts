@@ -164,6 +164,19 @@ export const api = {
     return res.json();
   },
 
+  async moveFolder(sourceFolder: string, targetParentFolder: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/notes/folders/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceFolder, targetParentFolder })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao mover pasta' }));
+      throw new Error(err.error || 'Falha ao mover pasta');
+    }
+    return res.json();
+  },
+
   async importNotionNotes(items: Array<{ filename: string; content: string; folder?: string }>): Promise<{ importedCount: number }> {
     const res = await fetch(`${API_BASE}/notes/import-notion`, {
       method: 'POST',
