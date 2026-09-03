@@ -30,7 +30,8 @@ import {
   Wand2,
   FolderInput,
   MoveRight,
-  GripVertical
+  GripVertical,
+  Eye
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -55,6 +56,10 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedFolderFilter, setSelectedFolderFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'editor' | 'graph'>('editor');
+  
+  // Note View Mode: 'preview' (Default) vs 'edit'
+  const [noteViewMode, setNoteViewMode] = useState<'preview' | 'edit'>('preview');
+
   const [editContent, setEditContent] = useState<string>('');
   const [editTitle, setEditTitle] = useState<string>('');
   const [editFolder, setEditFolder] = useState<string>('Geral');
@@ -67,8 +72,9 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
   const [newFolderName, setNewFolderName] = useState<string>('');
 
-  // Drag and Drop & Move Note State
+  // Drag and Drop & Move State (Notes & Folders)
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const [draggedFolderName, setDraggedFolderName] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
   const [moveModalNote, setMoveModalNote] = useState<FrankNote | null>(null);
   const [moveTargetFolder, setMoveTargetFolder] = useState<string>('Geral');
@@ -125,6 +131,15 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
   };
 
+  const handleMoveFolder = async (sourceFolder: string, targetParentFolder: string) => {
+    try {
+      await api.moveFolder(sourceFolder, targetParentFolder);
+      await fetchNotesAndFolders();
+    } catch (err: any) {
+      alert(`Erro ao mover pasta: ${err.message}`);
+    }
+  };
+
   const fetchGraph = async () => {
     try {
       const data = await api.getNotesGraph();
@@ -149,6 +164,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     setEditTitle(note.title);
     setEditFolder(note.folder || note.subject || 'Geral');
     setEditContent(note.content);
+    setNoteViewMode('preview'); // Always open in formatted preview first!
   };
 
   const handleCreateNoteInFolder = (folderName: string = 'Geral') => {
@@ -162,7 +178,11 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
 
     api.saveNote(newNoteTemplate).then((created) => {
       fetchNotesAndFolders();
-      selectNote(created);
+      setActiveNote(created);
+      setEditTitle(created.title);
+      setEditFolder(created.folder || folderName);
+      setEditContent(created.content);
+      setNoteViewMode('edit'); // Open new notes in edit mode
     });
   };
 
@@ -231,6 +251,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         isProjectSpecific: activeNote.isProjectSpecific
       });
       setActiveNote(updated);
+      setNoteViewMode('preview'); // Switch to preview after saving
       fetchNotesAndFolders();
     } catch (err: any) {
       alert(`Erro ao salvar: ${err.message}`);
@@ -774,16 +795,32 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
               )}
             </div>
 
-            {/* Folders & Notes Hierarchical Tree (Drag & Drop Target) */}
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-3 scrollbar-thin scrollbar-thumb-card-border">
+            {/* Folders & Notes Hierarchical Tree (Drag & Drop Target for Notes and Folders) */}
+            <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin scrollbar-thumb-card-border">
               {allFolderNames.map((folderName) => {
                 const folderNotes = filteredNotes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
                 const isCollapsed = collapsedFolders[folderName];
                 const isDragTarget = dragOverFolder === folderName;
+                
+                // Calculate folder path depth for nested subfolders
+                const pathSegments = folderName.split('/');
+                const depth = pathSegments.length - 1;
+                const displayName = pathSegments[pathSegments.length - 1] || folderName;
+                const isSubfolder = depth > 0;
 
                 return (
                   <div 
                     key={folderName} 
+                    draggable={true}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/x-tellus-folder', folderName);
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDraggedFolderName(folderName);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedFolderName(null);
+                      setDragOverFolder(null);
+                    }}
                     onDragOver={(e) => {
                       e.preventDefault();
                       e.dataTransfer.dropEffect = 'move';
@@ -795,21 +832,32 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     }}
                     onDrop={async (e) => {
                       e.preventDefault();
-                      const noteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                      const droppedFolder = e.dataTransfer.getData('application/x-tellus-folder') || draggedFolderName;
+                      const droppedNoteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                      
                       setDragOverFolder(null);
                       setDraggedNoteId(null);
-                      if (noteId) {
-                        await handleMoveNote(noteId, folderName);
+                      setDraggedFolderName(null);
+
+                      if (droppedFolder && droppedFolder !== folderName) {
+                        // Move folder into target folder as subfolder
+                        await handleMoveFolder(droppedFolder, folderName);
+                      } else if (droppedNoteId) {
+                        // Move note into target folder
+                        await handleMoveNote(droppedNoteId, folderName);
                       }
                     }}
+                    style={{ marginLeft: `${Math.min(depth * 14, 42)}px` }}
                     className={`space-y-1 rounded-2xl border p-1.5 transition-all duration-200 overflow-hidden ${
                       isDragTarget
                         ? 'bg-accent/20 border-accent ring-2 ring-accent scale-[1.01] shadow-lg'
-                        : 'bg-panel/30 border-card-border/60'
+                        : isSubfolder
+                        ? 'bg-panel/20 border-card-border/40'
+                        : 'bg-panel/40 border-card-border/70'
                     }`}
                   >
                     {/* Folder Header */}
-                    <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group">
+                    <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group cursor-grab active:cursor-grabbing">
                       <div
                         onClick={() => toggleFolderCollapse(folderName)}
                         className="flex items-center space-x-1.5 cursor-pointer flex-1 truncate select-none"
@@ -819,9 +867,9 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         ) : (
                           <ChevronDown className="w-3.5 h-3.5 text-accent-light shrink-0" />
                         )}
-                        <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span className="font-bold text-xs text-slate-200 truncate">
-                          {folderName}
+                        <Folder className={`w-3.5 h-3.5 shrink-0 ${isSubfolder ? 'text-cyan-400' : 'text-amber-400'}`} />
+                        <span className={`font-bold text-xs truncate ${isSubfolder ? 'text-cyan-200' : 'text-slate-200'}`} title={folderName}>
+                          {displayName}
                         </span>
                         <span className="text-[10px] font-mono text-slate-500 shrink-0">
                           ({folderNotes.length})
@@ -836,12 +884,23 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       {/* Folder Action Tools */}
                       <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition-opacity">
                         <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setNewFolderName(`${folderName}/`);
+                            setIsCreatingFolder(true);
+                          }}
+                          className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-cyan-300"
+                          title={`Criar subpasta dentro de "${folderName}"`}
+                        >
+                          <FolderPlus className="w-3 h-3" />
+                        </button>
+                        <button
                           onClick={() => handleReviewFolderWithAgent(folderName)}
-                          className="px-2 py-0.5 rounded-md bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-[10px] font-semibold flex items-center space-x-1 transition-all border border-accent/30"
+                          className="px-1.5 py-0.5 rounded-md bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-[9px] font-semibold flex items-center space-x-1 transition-all border border-accent/30"
                           title="Revisar e aprimorar visualmente todas as notas desta pasta com o Agente"
                         >
-                          <Wand2 className="w-3 h-3" />
-                          <span>Revisar com IA</span>
+                          <Wand2 className="w-2.5 h-2.5" />
+                          <span>IA</span>
                         </button>
                         <button
                           onClick={() => handleCreateNoteInFolder(folderName)}
@@ -855,10 +914,10 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
                     {/* Notes in Folder (Draggable) */}
                     {!isCollapsed && (
-                      <div className="pl-4 pr-1 space-y-1.5 pt-1">
+                      <div className="pl-3 pr-1 space-y-1.5 pt-1">
                         {folderNotes.length === 0 ? (
                           <div className="p-2 text-[10px] text-slate-500 italic">
-                            {isDragTarget ? 'Solte a anotação aqui para mover' : 'Pasta vazia. Arraste notas para cá ou clique em +.'}
+                            {isDragTarget ? 'Solte a anotação ou pasta aqui' : 'Vazia. Arraste notas para cá ou clique em +.'}
                           </div>
                         ) : (
                           folderNotes.map((n) => {
@@ -871,6 +930,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                 key={n.id}
                                 draggable={true}
                                 onDragStart={(e) => {
+                                  e.stopPropagation();
                                   e.dataTransfer.setData('text/plain', n.id);
                                   e.dataTransfer.effectAllowed = 'move';
                                   setDraggedNoteId(n.id);
@@ -894,9 +954,9 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                   <span className="font-semibold text-xs truncate max-w-[150px] text-slate-100 flex items-center space-x-1.5">
                                     <GripVertical className="w-3 h-3 text-slate-500 opacity-40 group-hover/card:opacity-100 shrink-0" />
                                     {isBibliography ? (
-                                      <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
+                                       <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
                                     ) : (
-                                      <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                                       <FileText className="w-3 h-3 text-slate-400 shrink-0" />
                                     )}
                                     <span className="truncate">{n.title}</span>
                                   </span>
@@ -935,122 +995,165 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </div>
           </div>
 
-          {/* Active Note Notion-style Editor & Preview Panel */}
+          {/* Active Note View & Editor Panel */}
           {activeNote ? (
             <div className="flex-1 flex flex-col bg-[#0b0d13] overflow-hidden">
-              {/* Document Header with Interactive Folder Selector */}
-              <div className="p-4 border-b border-card-border bg-sidebar/40 flex items-center justify-between shrink-0">
-                <div className="flex items-center space-x-3 flex-1 mr-6">
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="Título da Anotação..."
-                    className="font-bold text-base bg-transparent text-slate-100 focus:outline-none focus:border-b border-accent flex-1"
-                  />
+              {/* Document Header */}
+              <div className="p-3.5 border-b border-card-border bg-sidebar/40 flex items-center justify-between shrink-0">
+                <div className="flex items-center space-x-3 flex-1 mr-4 min-w-0">
+                  {noteViewMode === 'edit' ? (
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      placeholder="Título da Anotação..."
+                      className="font-bold text-base bg-transparent text-slate-100 focus:outline-none focus:border-b border-accent flex-1"
+                    />
+                  ) : (
+                    <div className="flex items-center space-x-2 truncate">
+                      <FileText className="w-5 h-5 text-accent-light shrink-0" />
+                      <h2 className="font-bold text-base text-slate-100 truncate">{editTitle}</h2>
+                    </div>
+                  )}
                   
-                  {/* Folder Switcher Dropdown */}
-                  <div className="flex items-center space-x-1.5 bg-panel border border-card-border px-2.5 py-1 rounded-xl">
+                  {/* Folder Breadcrumb & Switcher */}
+                  <div className="flex items-center space-x-1.5 bg-panel border border-card-border px-2.5 py-1 rounded-xl shrink-0">
                     <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <select
-                      value={editFolder}
-                      onChange={(e) => {
-                        const newF = e.target.value;
-                        setEditFolder(newF);
-                        handleMoveNote(activeNote.id, newF);
-                      }}
-                      className="bg-transparent text-xs text-amber-300 focus:outline-none font-mono cursor-pointer"
-                      title="Mover anotação para outra pasta"
-                    >
-                      {allFolderNames.map(f => (
-                        <option key={f} value={f} className="bg-card text-slate-200">
-                          📁 {f}
-                        </option>
-                      ))}
-                    </select>
+                    {noteViewMode === 'edit' ? (
+                      <select
+                        value={editFolder}
+                        onChange={(e) => {
+                          const newF = e.target.value;
+                          setEditFolder(newF);
+                          handleMoveNote(activeNote.id, newF);
+                        }}
+                        className="bg-transparent text-xs text-amber-300 focus:outline-none font-mono cursor-pointer max-w-[180px] truncate"
+                        title="Mover anotação para outra pasta"
+                      >
+                        {allFolderNames.map(f => (
+                          <option key={f} value={f} className="bg-card text-slate-200">
+                            📁 {f}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs text-amber-300 font-mono truncate max-w-[200px]" title={`Pasta: ${editFolder}`}>
+                        {editFolder}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2.5">
-                  <button
-                    onClick={() => setMoveModalNote(activeNote)}
-                    className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-amber-300 flex items-center space-x-1.5 transition-all"
-                    title="Mover esta anotação para outra pasta"
-                  >
-                    <FolderInput className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Mover</span>
-                  </button>
+                {/* Header Action Buttons */}
+                <div className="flex items-center space-x-2 shrink-0">
+                  {noteViewMode === 'preview' ? (
+                    <>
+                      <button
+                        onClick={() => setNoteViewMode('edit')}
+                        className="px-3.5 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-accent/20"
+                        title="Editar conteúdo da nota em Markdown"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Editar Nota</span>
+                      </button>
 
-                  <button
-                    onClick={() => copyNoteContent(editContent, activeNote.id)}
-                    className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 flex items-center space-x-1.5 transition-all"
-                  >
-                    {copiedId === activeNote.id ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-medium">Copiado!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copiar Markdown</span>
-                      </>
-                    )}
-                  </button>
+                      <button
+                        onClick={() => setMoveModalNote(activeNote)}
+                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-amber-300 flex items-center space-x-1.5 transition-all"
+                        title="Mover esta anotação para outra pasta"
+                      >
+                        <FolderInput className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Mover</span>
+                      </button>
 
-                  <button
-                    onClick={handleSaveActiveNote}
-                    disabled={isSaving}
-                    className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-emerald-950/30"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{isSaving ? 'Salvando...' : 'Salvar Alterações'}</span>
-                  </button>
+                      <button
+                        onClick={() => copyNoteContent(editContent, activeNote.id)}
+                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 flex items-center space-x-1.5 transition-all"
+                      >
+                        {copiedId === activeNote.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400 font-medium">Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar Markdown</span>
+                          </>
+                        )}
+                      </button>
 
-                  <button
-                    onClick={() => handleDeleteNote(activeNote.id, activeNote.isProjectSpecific)}
-                    className="p-2 rounded-xl hover:bg-card-border text-slate-400 hover:text-rose-400 transition-colors"
-                    title="Excluir anotação"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                      <button
+                        onClick={() => handleDeleteNote(activeNote.id, activeNote.isProjectSpecific)}
+                        className="p-2 rounded-xl hover:bg-card-border text-slate-400 hover:text-rose-400 transition-colors"
+                        title="Excluir anotação"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditContent(activeNote.content);
+                          setEditTitle(activeNote.title);
+                          setNoteViewMode('preview');
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 transition-all"
+                      >
+                        Cancelar
+                      </button>
+
+                      <button
+                        onClick={() => setNoteViewMode('preview')}
+                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-white flex items-center space-x-1.5 transition-all"
+                        title="Ver visualização formatada"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-accent-light" />
+                        <span>Modo Leitura</span>
+                      </button>
+
+                      <button
+                        onClick={handleSaveActiveNote}
+                        disabled={isSaving}
+                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-emerald-950/30"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>{isSaving ? 'Salvando...' : 'Salvar & Visualizar'}</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Document Split Body (Markdown Source + Formatted Preview) */}
-              <div 
-                className="flex-1 grid grid-cols-2 overflow-hidden select-text"
-                onMouseUp={handleTextSelection}
-                onContextMenu={handleContextMenu}
-              >
-                {/* Editor Column */}
-                <div className="border-r border-card-border p-6 flex flex-col bg-[#08090e]">
-                  <div className="flex items-center justify-between text-[11px] uppercase font-bold text-slate-500 mb-3 font-mono">
-                    <span>Editor Markdown (suporta [[Wikilinks]] e #tags)</span>
-                    <span className="text-emerald-400">● Protegido por Backup</span>
-                  </div>
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    onMouseUp={handleTextSelection}
-                    onContextMenu={handleContextMenu}
-                    placeholder="Escreva seu documento com formatação Markdown, tabelas, código e [[Conexões]]..."
-                    className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed select-text"
-                  />
-                </div>
-
-                {/* Live Notion-style Preview Column */}
+              {/* DOCUMENT BODY */}
+              {noteViewMode === 'preview' ? (
+                /* 1. FORMATTED PREVIEW VIEW (DEFAULT) */
                 <div 
-                  className="p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border select-text"
+                  className="flex-1 overflow-y-auto bg-[#0a0c12] p-8 scrollbar-thin scrollbar-thumb-card-border select-text"
                   onMouseUp={handleTextSelection}
                   onContextMenu={handleContextMenu}
+                  onDoubleClick={() => setNoteViewMode('edit')}
+                  title="Dê duplo clique para editar esta anotação"
                 >
-                  <div className="max-w-3xl mx-auto space-y-6">
-                    <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
-                      Visualização Formatada (Selecione texto para Estudar)
-                    </span>
+                  <div className="max-w-4xl mx-auto space-y-6">
+                    {/* Top banner info */}
+                    <div className="flex items-center justify-between pb-4 border-b border-card-border/60 text-xs text-slate-400 font-mono">
+                      <span className="flex items-center space-x-1.5">
+                        <Folder className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Caminho: <strong>{activeNote.relativePath || `${editFolder}/${activeNote.filename}`}</strong></span>
+                      </span>
+                      <button
+                        onClick={() => setNoteViewMode('edit')}
+                        className="text-[11px] text-accent-light hover:underline flex items-center space-x-1 font-sans"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Clique ou dê duplo-clique para editar</span>
+                      </button>
+                    </div>
 
-                    <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
+                    {/* Rendered Markdown Document */}
+                    <div className="prose prose-invert max-w-none text-sm leading-relaxed select-text space-y-4">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {editContent}
                       </ReactMarkdown>
@@ -1058,7 +1161,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
                     {/* Backlinks Section */}
                     {activeNote.backlinks && activeNote.backlinks.length > 0 && (
-                      <div className="mt-10 pt-6 border-t border-card-border">
+                      <div className="mt-12 pt-6 border-t border-card-border">
                         <div className="flex items-center space-x-2 text-xs font-bold text-accent-light mb-3">
                           <LinkIcon className="w-4 h-4" />
                           <span>Notas que mencionam esta ({activeNote.backlinks.length}):</span>
@@ -1074,7 +1177,49 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     )}
                   </div>
                 </div>
-              </div>
+              ) : (
+                /* 2. SPLIT-SCREEN EDIT MODE */
+                <div 
+                  className="flex-1 grid grid-cols-2 overflow-hidden select-text"
+                  onMouseUp={handleTextSelection}
+                  onContextMenu={handleContextMenu}
+                >
+                  {/* Editor Column */}
+                  <div className="border-r border-card-border p-6 flex flex-col bg-[#08090e]">
+                    <div className="flex items-center justify-between text-[11px] uppercase font-bold text-slate-500 mb-3 font-mono">
+                      <span>Editor Markdown (suporta [[Wikilinks]] e #tags)</span>
+                      <span className="text-emerald-400">● Protegido por Backup</span>
+                    </div>
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      onMouseUp={handleTextSelection}
+                      onContextMenu={handleContextMenu}
+                      placeholder="Escreva seu documento com formatação Markdown, tabelas, código e [[Conexões]]..."
+                      className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed select-text"
+                    />
+                  </div>
+
+                  {/* Live Preview Column */}
+                  <div 
+                    className="p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border select-text"
+                    onMouseUp={handleTextSelection}
+                    onContextMenu={handleContextMenu}
+                  >
+                    <div className="max-w-3xl mx-auto space-y-6">
+                      <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
+                        Pré-visualização em Tempo Real
+                      </span>
+
+                      <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {editContent}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-slate-500 text-xs">

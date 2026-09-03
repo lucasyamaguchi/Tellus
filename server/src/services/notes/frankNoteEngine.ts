@@ -66,9 +66,20 @@ export class FrankNoteEngine {
     return Array.from(new Set(matches.map(t => t.toLowerCase())));
   }
 
-  // Sanitize name for folders and files
+  // Sanitize name for individual file
   public static sanitizeName(name: string): string {
     return name.replace(/[<>:"/\\|?*]/g, '_').trim();
+  }
+
+  // Sanitize path for hierarchical subfolders (e.g. "Carreira/Vaga Data Engineer")
+  public static sanitizePath(folderPath: string): string {
+    if (!folderPath) return 'Geral';
+    return folderPath
+      .replace(/\\/g, '/')
+      .split('/')
+      .map(part => part.replace(/[<>:"|?*]/g, '_').trim())
+      .filter(part => part && part !== '.' && part !== '..')
+      .join('/') || 'Geral';
   }
 
   // Extract subject / category from frontmatter or default to "Geral"
@@ -77,17 +88,20 @@ export class FrankNoteEngine {
     const stat = fs.statSync(filePath);
     const filename = path.basename(filePath);
     const id = filename.replace(/\.md$/i, '');
-    const relativePath = path.relative(GLOBAL_NOTES_DIR, filePath);
+    const relativePath = path.relative(GLOBAL_NOTES_DIR, filePath).replace(/\\/g, '/');
 
     // Extract title from first H1 or filename
     const firstLine = content.split('\n')[0] || '';
     const titleMatch = firstLine.match(/^#+\s*(.*)/);
     const title = titleMatch ? titleMatch[1].trim() : id.replace(/[-_]/g, ' ');
 
-    // Extract subject/topic if marked with <!-- subject: xyz --> or default to parent directory
+    // Extract folder from physical directory or comment
+    const dirRelative = path.relative(GLOBAL_NOTES_DIR, path.dirname(filePath)).replace(/\\/g, '/');
+    const physicalFolder = dirRelative && dirRelative !== '.' ? dirRelative : 'Geral';
+
     const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
-    const subject = subjectMatch ? subjectMatch[1].trim() : folderName;
-    const folder = (folderName && folderName !== 'Geral') ? folderName : (subject && subject !== 'Geral' ? subject : 'Geral');
+    const subject = subjectMatch ? subjectMatch[1].trim() : physicalFolder;
+    const folder = physicalFolder !== 'Geral' ? physicalFolder : (folderName !== 'Geral' ? folderName : (subject !== 'Geral' ? subject : 'Geral'));
 
     const tags = this.extractTags(content);
     const links = this.extractWikilinks(content);
@@ -96,7 +110,7 @@ export class FrankNoteEngine {
       id,
       title,
       filename,
-      folder,
+      folder: this.sanitizePath(folder),
       subject,
       tags,
       content,
@@ -113,7 +127,7 @@ export class FrankNoteEngine {
     this.ensureDirs(projectPath);
     const notes: FrankNote[] = [];
 
-    const scanDir = (currentDir: string, currentFolder: string) => {
+    const scanDir = (currentDir: string) => {
       if (!fs.existsSync(currentDir)) return;
       const entries = fs.readdirSync(currentDir, { withFileTypes: true });
 
@@ -122,14 +136,16 @@ export class FrankNoteEngine {
 
         const fullPath = path.join(currentDir, entry.name);
         if (entry.isDirectory()) {
-          scanDir(fullPath, entry.name);
+          scanDir(fullPath);
         } else if (entry.isFile() && entry.name.endsWith('.md')) {
-          notes.push(this.parseNote(fullPath, currentFolder, false));
+          const relativeDir = path.relative(GLOBAL_NOTES_DIR, currentDir).replace(/\\/g, '/');
+          const folderName = relativeDir && relativeDir !== '.' ? relativeDir : 'Geral';
+          notes.push(this.parseNote(fullPath, folderName, false));
         }
       }
     };
 
-    scanDir(GLOBAL_NOTES_DIR, 'Geral');
+    scanDir(GLOBAL_NOTES_DIR);
 
     // 3. Compute Backlinks
     for (const note of notes) {
@@ -153,7 +169,7 @@ export class FrankNoteEngine {
         title: 'Bem-vindo ao FrankMD Notes',
         folder: 'Início',
         subject: 'Início',
-        content: `# Bem-vindo ao FrankMD Notes\n\nSistema de anotações seguras baseado no conceito **FrankMD** e no grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas no seu cofre Obsidian.\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n`,
+        content: `# Bem-vindo ao FrankMD Notes\n\nSistema de anotações seguras baseado no conceito **FrankMD** e no grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian.\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n`,
         isProjectSpecific: false
       });
       return this.listNotes(projectPath);
@@ -164,41 +180,76 @@ export class FrankNoteEngine {
     return notes.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  // List all folders in vault
+  // List all folders in vault (including nested subfolders)
   public static listFolders(projectPath?: string): string[] {
     this.ensureDirs(projectPath);
     const folders = new Set<string>(['Geral']);
 
-    if (fs.existsSync(GLOBAL_NOTES_DIR)) {
-      const entries = fs.readdirSync(GLOBAL_NOTES_DIR, { withFileTypes: true });
+    const scanFolders = (currentDir: string) => {
+      if (!fs.existsSync(currentDir)) return;
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          folders.add(entry.name);
+          const fullPath = path.join(currentDir, entry.name);
+          const relative = path.relative(GLOBAL_NOTES_DIR, fullPath).replace(/\\/g, '/');
+          if (relative) folders.add(relative);
+          scanFolders(fullPath);
         }
       }
-    }
+    };
+
+    scanFolders(GLOBAL_NOTES_DIR);
 
     // Also include folders and subjects from all existing notes
     const notes = this.listNotes(projectPath);
     for (const note of notes) {
-      if (note.folder && !note.folder.startsWith('.')) folders.add(note.folder);
-      if (note.subject && !note.subject.startsWith('.')) folders.add(note.subject);
+      if (note.folder && !note.folder.startsWith('.')) folders.add(this.sanitizePath(note.folder));
+      if (note.subject && !note.subject.startsWith('.')) folders.add(this.sanitizePath(note.subject));
     }
 
-    return Array.from(folders).filter(f => f && !f.startsWith('.'));
+    return Array.from(folders).filter(f => f && !f.startsWith('.')).sort();
   }
 
-  // Create new folder
+  // Create new folder or subfolder (e.g. "Carreira/Vaga Data Engineer")
   public static createFolder(folderName: string): boolean {
     this.ensureDirs();
-    const cleanName = this.sanitizeName(folderName);
-    if (!cleanName) return false;
+    const cleanPath = this.sanitizePath(folderName);
+    if (!cleanPath || cleanPath === 'Geral') return false;
 
-    const folderPath = path.join(GLOBAL_NOTES_DIR, cleanName);
+    const folderPath = path.join(GLOBAL_NOTES_DIR, cleanPath);
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
       return true;
     }
+    return true;
+  }
+
+  // Move an entire folder into another parent folder
+  public static moveFolder(sourceFolder: string, targetParentFolder: string): boolean {
+    this.ensureDirs();
+    const cleanSource = this.sanitizePath(sourceFolder);
+    const cleanTargetParent = this.sanitizePath(targetParentFolder);
+    if (!cleanSource || cleanSource === cleanTargetParent) return false;
+
+    const sourcePath = path.join(GLOBAL_NOTES_DIR, cleanSource);
+    if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isDirectory()) return false;
+
+    const folderBaseName = path.basename(sourcePath);
+    const targetDir = (cleanTargetParent === 'Geral' || !cleanTargetParent)
+      ? path.join(GLOBAL_NOTES_DIR, folderBaseName)
+      : path.join(GLOBAL_NOTES_DIR, cleanTargetParent, folderBaseName);
+
+    if (path.resolve(sourcePath) === path.resolve(targetDir)) return true;
+
+    // Prevent moving a folder into its own subfolder
+    if (path.resolve(targetDir).startsWith(path.resolve(sourcePath))) return false;
+
+    const targetParentDir = path.dirname(targetDir);
+    if (!fs.existsSync(targetParentDir)) {
+      fs.mkdirSync(targetParentDir, { recursive: true });
+    }
+
+    fs.renameSync(sourcePath, targetDir);
     return true;
   }
 
@@ -215,7 +266,7 @@ export class FrankNoteEngine {
     const safeTitle = data.title.trim() || 'Sem Título';
     const id = data.id || safeTitle.toLowerCase().replace(/[^a-z0-9\u00C0-\u00FF]/gi, '-').replace(/-+/g, '-').slice(0, 50);
     const filename = `${id}.md`;
-    const folder = data.folder ? this.sanitizeName(data.folder) : (data.subject ? this.sanitizeName(data.subject) : 'Geral');
+    const folder = data.folder ? this.sanitizePath(data.folder) : (data.subject ? this.sanitizePath(data.subject) : 'Geral');
 
     let targetDir = GLOBAL_NOTES_DIR;
     if (folder && folder !== 'Geral') {
@@ -260,7 +311,7 @@ export class FrankNoteEngine {
     return false;
   }
 
-  // Move note to a different folder
+  // Move note to a different folder / subfolder
   public static moveNote(id: string, targetFolder: string, projectPath?: string): FrankNote | null {
     this.ensureDirs(projectPath);
     const notes = this.listNotes(projectPath);
@@ -270,7 +321,7 @@ export class FrankNoteEngine {
     const currentFilePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
     if (!fs.existsSync(currentFilePath)) return null;
 
-    const cleanTargetFolder = this.sanitizeName(targetFolder) || 'Geral';
+    const cleanTargetFolder = this.sanitizePath(targetFolder) || 'Geral';
     let targetDir = GLOBAL_NOTES_DIR;
     if (cleanTargetFolder !== 'Geral') {
       targetDir = path.join(GLOBAL_NOTES_DIR, cleanTargetFolder);
