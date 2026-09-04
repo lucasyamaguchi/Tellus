@@ -361,7 +361,14 @@ export class AgentLoop {
   ): Promise<{ fullMessages: ChatMessage[] }> {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
     const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
-    const enrichedSystemPrompt = `${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    
+    // Strict Language Enforcement Anchor to prevent multilingual drift (e.g. Spanish/Portunhol bleed in fast models)
+    const languageAnchor = `[🌐 DIRETRIZ MANDATÓRIA DE IDIOMA - PORTUGUÊS DO BRASIL (pt-BR)]
+- Você DEVE SEMPRE responder, explicar, dialogar e redigir TODAS as anotações, planos de estudo, cadernos e notas do FrankMD estritamente em PORTUGUÊS DO BRASIL (pt-BR).
+- É ESTRITAMENTE PROIBIDO trocar para Espanhol, Portunhol ou qualquer outro idioma, mesmo ao analisar PDFs, editais, provas ou materiais técnicos.
+- Termos técnicos de exames e concursos devem ser sempre traduzidos e grafados no padrão oficial brasileiro (ex: "Gabarito Oficial" em vez de "hoja de respuestas", "Questões" em vez de "preguntas", "Direito Administrativo" em vez de "derecho", "Orçamento Público" em vez de "orzamento", "Despesas" em vez de "gastos").`;
+
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     const currentHistory: ChatMessage[] = [
       { role: 'system', content: enrichedSystemPrompt },
