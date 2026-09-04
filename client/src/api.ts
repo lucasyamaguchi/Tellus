@@ -177,6 +177,17 @@ export const api = {
     return res.json();
   },
 
+  async deleteFolder(folderName: string): Promise<{ success: boolean; deletedNotesCount: number }> {
+    const res = await fetch(`${API_BASE}/notes/folders?name=${encodeURIComponent(folderName)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao excluir pasta' }));
+      throw new Error(err.error || 'Falha ao excluir pasta');
+    }
+    return res.json();
+  },
+
   async importNotionNotes(items: Array<{ filename: string; content: string; folder?: string }>): Promise<{ importedCount: number }> {
     const res = await fetch(`${API_BASE}/notes/import-notion`, {
       method: 'POST',

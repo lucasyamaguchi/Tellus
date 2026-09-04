@@ -420,6 +420,20 @@ app.post('/api/notes/folders/move', (req, res) => {
   }
 });
 
+app.delete('/api/notes/folders', (req, res) => {
+  try {
+    const folderName = (req.query.name as string) || req.body?.name;
+    if (!folderName) {
+      return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const result = FrankNoteEngine.deleteFolder(folderName, currentPath);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/notes/import-notion', (req, res) => {
   try {
     const { items } = req.body; // Array<{ filename: string; content: string; folder?: string }>

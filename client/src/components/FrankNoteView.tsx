@@ -711,6 +711,47 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     }
   };
 
+  const handleDeleteFolder = async (folderName: string) => {
+    if (folderName === 'Geral') {
+      alert('A pasta padrão "Geral" não pode ser excluída.');
+      return;
+    }
+    const folderNotes = notes.filter(n => {
+      const f = n.folder || n.subject || 'Geral';
+      return f === folderName || f.startsWith(`${folderName}/`);
+    });
+    
+    const countMsg = folderNotes.length === 1 ? '1 nota' : `${folderNotes.length} notas`;
+    const confirmMessage = `Tem certeza que deseja excluir toda a pasta "${folderName}" e todas as suas ${countMsg}?\n\n` +
+      `🛡️ Todas as notas serão arquivadas no backup de segurança (.backups) do Obsidian antes da exclusão.`;
+
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      await api.deleteFolder(folderName);
+      await fetchNotesAndFolders();
+      if (viewMode === 'graph') {
+        fetchGraph();
+      }
+      if (activeNote) {
+        const activeNoteFolder = activeNote.folder || activeNote.subject || 'Geral';
+        if (activeNoteFolder === folderName || activeNoteFolder.startsWith(`${folderName}/`)) {
+          const remainingNotes = notes.filter(n => {
+            const f = n.folder || n.subject || 'Geral';
+            return f !== folderName && !f.startsWith(`${folderName}/`);
+          });
+          if (remainingNotes.length > 0) {
+            selectNote(remainingNotes[0]);
+          } else {
+            setActiveNote(null);
+          }
+        }
+      }
+    } catch (err: any) {
+      alert(`Erro ao excluir pasta: ${err.message}`);
+    }
+  };
+
   const handleImportNotionPaste = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!notionPasteTitle.trim() || !notionPasteContent.trim()) return;
@@ -1474,6 +1515,18 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         >
                           <Plus className="w-3 h-3" />
                         </button>
+                        {folderName !== 'Geral' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteFolder(folderName);
+                            }}
+                            className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
+                            title={`Excluir pasta "${folderName}" e todas as suas anotações`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
