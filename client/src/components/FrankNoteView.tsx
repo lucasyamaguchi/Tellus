@@ -31,7 +31,13 @@ import {
   FolderInput,
   MoveRight,
   GripVertical,
-  Eye
+  Eye,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  Filter,
+  Layers,
+  Maximize2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -67,6 +73,14 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Graph Controls State (Obsidian Style)
+  const [graphShowFolders, setGraphShowFolders] = useState<boolean>(true);
+  const [graphShowTags, setGraphShowTags] = useState<boolean>(true);
+  const [graphShowWikilinks, setGraphShowWikilinks] = useState<boolean>(true);
+  const [graphChargeStrength, setGraphChargeStrength] = useState<number>(280);
+  const [graphSearchFilter, setGraphSearchFilter] = useState<string>('');
+  const [hoveredGraphNode, setHoveredGraphNode] = useState<{ label: string; type: string; connections: number } | null>(null);
 
   // Folder Creation State
   const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
@@ -158,6 +172,417 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       fetchGraph();
     }
   }, [viewMode]);
+
+  // OBSIDIAN-STYLE FORCE-DIRECTED CANVAS SIMULATION ENGINE
+  useEffect(() => {
+    if (viewMode !== 'graph' || !canvasRef.current || !graphData) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animId: number;
+    let isRunning = true;
+
+    // Filter nodes based on user toggles and search query
+    const filteredRawNodes = graphData.nodes.filter(n => {
+      if (n.type === 'subject' && !graphShowFolders) return false;
+      if (n.type === 'tag' && !graphShowTags) return false;
+      if (graphSearchFilter.trim() && !n.label.toLowerCase().includes(graphSearchFilter.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+
+    const nodeIds = new Set(filteredRawNodes.map(n => n.id));
+
+    const filteredRawLinks = graphData.links.filter(l => {
+      if (!graphShowWikilinks && l.type === 'wikilink') return false;
+      if (!graphShowFolders && l.type === 'subject') return false;
+      if (!graphShowTags && l.type === 'tag') return false;
+      return nodeIds.has(l.source) && nodeIds.has(l.target);
+    });
+
+    // Resize canvas to match display size
+    const resizeCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+    };
+    resizeCanvas();
+
+    const rect = canvas.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+
+    // Initialize physics nodes
+    interface SimNode {
+      id: string;
+      label: string;
+      type: 'note' | 'subject' | 'tag';
+      val: number;
+      color: string;
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      radius: number;
+      connections: number;
+      isPinned?: boolean;
+    }
+
+    interface SimLink {
+      source: SimNode;
+      target: SimNode;
+      type: 'wikilink' | 'tag' | 'subject';
+    }
+
+    // Map raw nodes to simulation nodes
+    const simNodes: SimNode[] = filteredRawNodes.map((n, i) => {
+      const angle = (i / Math.max(filteredRawNodes.length, 1)) * 2 * Math.PI;
+      const dist = 100 + Math.random() * 200;
+      const radius = n.type === 'note' ? Math.max(6, Math.min(18, 5 + (n.val / 3))) : (n.type === 'subject' ? 9 : 7);
+      const defaultColor = n.type === 'note' ? '#818cf8' : (n.type === 'subject' ? '#f59e0b' : '#10b981');
+
+      return {
+        id: n.id,
+        label: n.label,
+        type: n.type,
+        val: n.val,
+        color: n.color || defaultColor,
+        x: centerX + Math.cos(angle) * dist + (Math.random() - 0.5) * 50,
+        y: centerY + Math.sin(angle) * dist + (Math.random() - 0.5) * 50,
+        vx: 0,
+        vy: 0,
+        radius,
+        connections: 0
+      };
+    });
+
+    const nodeMap = new Map<string, SimNode>();
+    simNodes.forEach(n => nodeMap.set(n.id, n));
+
+    const simLinks: SimLink[] = [];
+    filteredRawLinks.forEach(l => {
+      const s = nodeMap.get(l.source);
+      const t = nodeMap.get(l.target);
+      if (s && t) {
+        s.connections++;
+        t.connections++;
+        simLinks.push({ source: s, target: t, type: l.type });
+      }
+    });
+
+    // Viewport transform state
+    let panX = 0;
+    let panY = 0;
+    let zoom = 1;
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let draggedNode: SimNode | null = null;
+    let hoveredNode: SimNode | null = null;
+    let clickStartX = 0;
+    let clickStartY = 0;
+
+    const toWorldCoords = (clientX: number, clientY: number) => {
+      const bounds = canvas.getBoundingClientRect();
+      const screenX = clientX - bounds.left;
+      const screenY = clientY - bounds.top;
+      return {
+        x: (screenX - centerX - panX) / zoom + centerX,
+        y: (screenY - centerY - panY) / zoom + centerY
+      };
+    };
+
+    const findNodeAt = (worldX: number, worldY: number): SimNode | null => {
+      for (let i = simNodes.length - 1; i >= 0; i--) {
+        const n = simNodes[i];
+        const dx = n.x - worldX;
+        const dy = n.y - worldY;
+        if (dx * dx + dy * dy <= (n.radius + 6) * (n.radius + 6)) {
+          return n;
+        }
+      }
+      return null;
+    };
+
+    // Physics step
+    const updatePhysics = () => {
+      const currentRect = canvas.getBoundingClientRect();
+      const curCenterX = currentRect.width / 2;
+      const curCenterY = currentRect.height / 2;
+
+      // 1. Center Gravity
+      simNodes.forEach(n => {
+        if (n.isPinned) return;
+        const dx = curCenterX - n.x;
+        const dy = curCenterY - n.y;
+        n.vx += dx * 0.0015;
+        n.vy += dy * 0.0015;
+      });
+
+      // 2. Node-to-Node Repulsion
+      const charge = graphChargeStrength;
+      for (let i = 0; i < simNodes.length; i++) {
+        const a = simNodes[i];
+        for (let j = i + 1; j < simNodes.length; j++) {
+          const b = simNodes[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const distSq = dx * dx + dy * dy + 80;
+          const dist = Math.sqrt(distSq);
+          const force = (charge * 14) / distSq;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          if (!a.isPinned) { a.vx += fx; a.vy += fy; }
+          if (!b.isPinned) { b.vx -= fx; b.vy -= fy; }
+        }
+      }
+
+      // 3. Link Spring Attraction
+      simLinks.forEach(link => {
+        const s = link.source;
+        const t = link.target;
+        const dx = t.x - s.x;
+        const dy = t.y - s.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const targetDist = link.type === 'wikilink' ? 85 : 120;
+        const force = (dist - targetDist) * 0.035;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        if (!s.isPinned) { s.vx += fx; s.vy += fy; }
+        if (!t.isPinned) { t.vx -= fx; t.vy -= fy; }
+      });
+
+      // 4. Integrate & Dampen
+      simNodes.forEach(n => {
+        if (n.isPinned) return;
+        n.vx *= 0.86;
+        n.vy *= 0.86;
+        n.x += n.vx;
+        n.y += n.vy;
+      });
+    };
+
+    // Render loop
+    const render = () => {
+      if (!isRunning) return;
+      updatePhysics();
+
+      const currentRect = canvas.getBoundingClientRect();
+      const w = currentRect.width;
+      const h = currentRect.height;
+      const curCenterX = w / 2;
+      const curCenterY = h / 2;
+
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.save();
+      // Apply Pan & Zoom around center
+      ctx.translate(curCenterX + panX, curCenterY + panY);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-curCenterX, -curCenterY);
+
+      // Connected nodes set for hover highlighting
+      const connectedNodeIds = new Set<string>();
+      if (hoveredNode) {
+        connectedNodeIds.add(hoveredNode.id);
+        simLinks.forEach(l => {
+          if (l.source.id === hoveredNode?.id) connectedNodeIds.add(l.target.id);
+          if (l.target.id === hoveredNode?.id) connectedNodeIds.add(l.source.id);
+        });
+      }
+
+      // 1. Draw Links
+      simLinks.forEach(l => {
+        const isHighlighted = hoveredNode && (l.source.id === hoveredNode.id || l.target.id === hoveredNode.id);
+        const isDimmed = hoveredNode && !isHighlighted;
+
+        ctx.beginPath();
+        ctx.moveTo(l.source.x, l.source.y);
+        ctx.lineTo(l.target.x, l.target.y);
+
+        if (isHighlighted) {
+          ctx.strokeStyle = '#a5b4fc';
+          ctx.lineWidth = 2.2;
+          ctx.globalAlpha = 0.95;
+        } else if (isDimmed) {
+          ctx.strokeStyle = '#1e293b';
+          ctx.lineWidth = 0.8;
+          ctx.globalAlpha = 0.15;
+        } else {
+          ctx.strokeStyle = l.type === 'wikilink' ? '#4f46e5' : (l.type === 'subject' ? '#92400e' : '#065f46');
+          ctx.lineWidth = l.type === 'wikilink' ? 1.4 : 1.0;
+          ctx.globalAlpha = 0.45;
+        }
+        ctx.stroke();
+      });
+
+      // 2. Draw Nodes
+      simNodes.forEach(n => {
+        const isHovered = hoveredNode?.id === n.id;
+        const isConnected = connectedNodeIds.has(n.id);
+        const isDimmed = hoveredNode && !isConnected;
+
+        ctx.globalAlpha = isDimmed ? 0.2 : 1.0;
+
+        // Halo / Glow
+        if (isHovered || isConnected) {
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.radius + 7, 0, 2 * Math.PI);
+          ctx.fillStyle = isHovered ? 'rgba(99, 102, 241, 0.35)' : 'rgba(165, 180, 252, 0.2)';
+          ctx.fill();
+        }
+
+        // Main Node Circle
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.radius, 0, 2 * Math.PI);
+        ctx.fillStyle = n.color;
+        ctx.shadowColor = n.color;
+        ctx.shadowBlur = isHovered ? 14 : (isDimmed ? 0 : 6);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Border ring
+        ctx.strokeStyle = isHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.25)';
+        ctx.lineWidth = isHovered ? 2 : 1;
+        ctx.stroke();
+
+        // Node Label
+        const shouldShowLabel = isHovered || isConnected || zoom > 0.85 || n.type === 'subject' || n.val > 14;
+        if (shouldShowLabel && !isDimmed) {
+          ctx.font = `${isHovered ? 'bold 11px' : '10px'} system-ui, -apple-system, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const textY = n.y + n.radius + 10;
+          const textMetrics = ctx.measureText(n.label);
+          const bgPad = 3;
+
+          // Background pill for readability
+          ctx.fillStyle = 'rgba(11, 13, 19, 0.85)';
+          ctx.fillRect(
+            n.x - textMetrics.width / 2 - bgPad,
+            textY - 6 - bgPad,
+            textMetrics.width + bgPad * 2,
+            12 + bgPad * 2
+          );
+
+          ctx.fillStyle = isHovered ? '#ffffff' : (n.type === 'subject' ? '#fde68a' : (n.type === 'tag' ? '#6ee7b7' : '#cbd5e1'));
+          ctx.fillText(n.label, n.x, textY);
+        }
+      });
+
+      ctx.restore();
+      animId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    // Event Handlers
+    const handleMouseDown = (e: MouseEvent) => {
+      clickStartX = e.clientX;
+      clickStartY = e.clientY;
+      const world = toWorldCoords(e.clientX, e.clientY);
+      const hit = findNodeAt(world.x, world.y);
+
+      if (hit) {
+        draggedNode = hit;
+        hit.isPinned = true;
+      } else {
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const world = toWorldCoords(e.clientX, e.clientY);
+
+      if (draggedNode) {
+        draggedNode.x = world.x;
+        draggedNode.y = world.y;
+        draggedNode.vx = 0;
+        draggedNode.vy = 0;
+      } else if (isPanning) {
+        panX += e.clientX - panStartX;
+        panY += e.clientY - panStartY;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+      } else {
+        const hit = findNodeAt(world.x, world.y);
+        hoveredNode = hit;
+        if (hit) {
+          setHoveredGraphNode({
+            label: hit.label,
+            type: hit.type,
+            connections: hit.connections
+          });
+          canvas.style.cursor = 'pointer';
+        } else {
+          setHoveredGraphNode(null);
+          canvas.style.cursor = isPanning ? 'grabbing' : 'grab';
+        }
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      const distMoved = Math.hypot(e.clientX - clickStartX, e.clientY - clickStartY);
+
+      if (draggedNode) {
+        draggedNode.isPinned = false;
+        // If it was a quick click on a note without dragging
+        if (distMoved < 5) {
+          const clickedNode = draggedNode;
+          if (clickedNode.type === 'note') {
+            const rawId = clickedNode.id.replace(/^note_/, '');
+            const targetNote = notes.find(n => n.id === rawId || n.filename === `${rawId}.md`);
+            if (targetNote) {
+              selectNote(targetNote);
+              setViewMode('editor');
+            }
+          } else if (clickedNode.type === 'subject') {
+            setSelectedFolderFilter(clickedNode.label);
+            setViewMode('editor');
+          } else if (clickedNode.type === 'tag') {
+            setSearchQuery(clickedNode.label);
+            setViewMode('editor');
+          }
+        }
+        draggedNode = null;
+      }
+
+      isPanning = false;
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+      const newZoom = Math.max(0.2, Math.min(4.0, zoom * zoomFactor));
+      zoom = newZoom;
+    };
+
+    canvas.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('resize', resizeCanvas);
+
+    return () => {
+      isRunning = false;
+      cancelAnimationFrame(animId);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, [viewMode, graphData, graphShowFolders, graphShowTags, graphShowWikilinks, graphChargeStrength, graphSearchFilter, notes]);
 
   const selectNote = (note: FrankNote) => {
     setActiveNote(note);
@@ -693,15 +1118,19 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
               <span>Notas ({notes.length})</span>
             </button>
             <button
-              onClick={() => setViewMode('graph')}
+              onClick={() => {
+                setViewMode('graph');
+                fetchGraph();
+              }}
               className={`px-3 py-1 rounded-md transition-all flex items-center space-x-1.5 ${
                 viewMode === 'graph'
-                  ? 'bg-accent text-white font-semibold shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-cyan-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-cyan-300'
               }`}
+              title="Abrir Visualização em Grafo do Cofre Obsidian"
             >
-              <Network className="w-3 h-3 text-cyan-400" />
-              <span>Grafo</span>
+              <Network className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Visualizar Grafo</span>
             </button>
           </div>
 
@@ -718,17 +1147,140 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       {/* VIEW MODES */}
       {viewMode === 'graph' ? (
         /* OBSIDIAN-STYLE INTERACTIVE GRAPH */
-        <div className="flex-1 p-6 flex flex-col bg-background relative overflow-hidden">
-          <div className="absolute top-8 left-8 z-10 p-4 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-xl space-y-1.5 max-w-sm">
-            <div className="flex items-center space-x-2 font-bold text-xs text-slate-100">
-              <Network className="w-4 h-4 text-cyan-400" />
-              <span>Grafo de Conexões de Conhecimento</span>
+        <div className="flex-1 p-4 flex flex-col bg-[#050608] relative overflow-hidden select-none">
+          {/* Top Left Info Banner */}
+          <div className="absolute top-6 left-6 z-10 p-4 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-2xl space-y-2 max-w-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 font-bold text-xs text-slate-100">
+                <Network className="w-4 h-4 text-cyan-400" />
+                <span>Grafo de Conhecimento (Obsidian)</span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-300 border border-cyan-500/30">
+                Interativo
+              </span>
             </div>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Visualização de todos os conceitos, pastas, wikilinks <code className="text-accent-light">[[Ideia]]</code> e tags entre seus projetos.
+              Arraste nós para reorganizar, use o scroll do mouse para Zoom e <strong>clique em qualquer nota para abri-la diretamente</strong>.
             </p>
+            <div className="flex items-center space-x-3 pt-1 text-[10px] font-mono text-slate-400 border-t border-card-border/50">
+              <span className="flex items-center space-x-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 inline-block shadow-xs shadow-indigo-400"></span>
+                <span>Notas</span>
+              </span>
+              <span className="flex items-center space-x-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block shadow-xs shadow-amber-400"></span>
+                <span>Pastas</span>
+              </span>
+              <span className="flex items-center space-x-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-xs shadow-emerald-400"></span>
+                <span>Tags</span>
+              </span>
+            </div>
           </div>
-          <canvas ref={canvasRef} className="w-full h-full rounded-2xl border border-card-border/50 bg-[#06070a]" />
+
+          {/* Top Right Obsidian Control Toolbar */}
+          <div className="absolute top-6 right-6 z-10 p-3 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-2xl space-y-3 w-72 text-xs">
+            <div className="flex items-center justify-between font-bold text-[11px] text-slate-300 uppercase tracking-wider font-mono">
+              <span className="flex items-center space-x-1.5">
+                <Filter className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Filtros do Grafo</span>
+              </span>
+              <button
+                onClick={() => setViewMode('editor')}
+                className="text-[10px] text-accent-light hover:underline font-sans"
+              >
+                Voltar às Notas
+              </button>
+            </div>
+
+            {/* Quick Search within Graph */}
+            <div className="relative">
+              <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Filtrar nós no grafo..."
+                value={graphSearchFilter}
+                onChange={(e) => setGraphSearchFilter(e.target.value)}
+                className="w-full bg-panel border border-card-border rounded-xl pl-7 pr-2.5 py-1 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+
+            {/* Visibility Toggles */}
+            <div className="space-y-1.5 pt-1">
+              <label className="flex items-center justify-between text-slate-300 cursor-pointer hover:text-white">
+                <span className="flex items-center space-x-1.5">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                  <span>Conexões [[Wikilinks]]</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={graphShowWikilinks}
+                  onChange={(e) => setGraphShowWikilinks(e.target.checked)}
+                  className="rounded border-card-border text-cyan-500 focus:ring-0"
+                />
+              </label>
+
+              <label className="flex items-center justify-between text-slate-300 cursor-pointer hover:text-white">
+                <span className="flex items-center space-x-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                  <span>Nós de Pastas / Assuntos</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={graphShowFolders}
+                  onChange={(e) => setGraphShowFolders(e.target.checked)}
+                  className="rounded border-card-border text-amber-500 focus:ring-0"
+                />
+              </label>
+
+              <label className="flex items-center justify-between text-slate-300 cursor-pointer hover:text-white">
+                <span className="flex items-center space-x-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>Nós de #Tags</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={graphShowTags}
+                  onChange={(e) => setGraphShowTags(e.target.checked)}
+                  className="rounded border-card-border text-emerald-500 focus:ring-0"
+                />
+              </label>
+            </div>
+
+            {/* Repulsion Force Slider */}
+            <div className="pt-2 border-t border-card-border/60 space-y-1">
+              <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                <span>Força de Repulsão:</span>
+                <span className="text-cyan-400">{graphChargeStrength}</span>
+              </div>
+              <input
+                type="range"
+                min="100"
+                max="600"
+                step="20"
+                value={graphChargeStrength}
+                onChange={(e) => setGraphChargeStrength(Number(e.target.value))}
+                className="w-full accent-cyan-500 cursor-pointer h-1.5 bg-panel rounded-lg"
+              />
+            </div>
+          </div>
+
+          {/* Bottom Left Hovered Node Info Pill */}
+          {hoveredGraphNode && (
+            <div className="absolute bottom-6 left-6 z-10 p-3 rounded-2xl bg-card/95 backdrop-blur-md border border-cyan-500/40 shadow-2xl flex items-center space-x-3 text-xs animate-in fade-in">
+              <div className="p-2 rounded-xl bg-cyan-950/60 border border-cyan-500/30 text-cyan-400">
+                <Network className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-bold text-slate-100 block">{hoveredGraphNode.label}</span>
+                <span className="text-[10px] text-slate-400 block font-mono">
+                  Tipo: <strong className="uppercase text-cyan-300">{hoveredGraphNode.type}</strong> • {hoveredGraphNode.connections} conexões • <em className="text-accent-light">Clique para abrir</em>
+                </span>
+              </div>
+            </div>
+          )}
+
+          <canvas ref={canvasRef} className="w-full h-full rounded-2xl border border-card-border/40 bg-[#06070a] cursor-grab active:cursor-grabbing" />
         </div>
       ) : (
         /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE & DRAG-AND-DROP */
