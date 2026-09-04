@@ -203,13 +203,12 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       return nodeIds.has(l.source) && nodeIds.has(l.target);
     });
 
-    // Resize canvas to match display size
+    // Resize canvas to match display size and high-DPI
     const resizeCanvas = () => {
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
     };
     resizeCanvas();
 
@@ -242,8 +241,8 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     // Map raw nodes to simulation nodes
     const simNodes: SimNode[] = filteredRawNodes.map((n, i) => {
       const angle = (i / Math.max(filteredRawNodes.length, 1)) * 2 * Math.PI;
-      const dist = 100 + Math.random() * 200;
-      const radius = n.type === 'note' ? Math.max(6, Math.min(18, 5 + (n.val / 3))) : (n.type === 'subject' ? 9 : 7);
+      const dist = 120 + Math.random() * 220;
+      const radius = n.type === 'note' ? Math.max(7, Math.min(20, 6 + (n.val / 3))) : (n.type === 'subject' ? 10 : 8);
       const defaultColor = n.type === 'note' ? '#818cf8' : (n.type === 'subject' ? '#f59e0b' : '#10b981');
 
       return {
@@ -291,9 +290,11 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       const bounds = canvas.getBoundingClientRect();
       const screenX = clientX - bounds.left;
       const screenY = clientY - bounds.top;
+      const curCenterX = bounds.width / 2;
+      const curCenterY = bounds.height / 2;
       return {
-        x: (screenX - centerX - panX) / zoom + centerX,
-        y: (screenY - centerY - panY) / zoom + centerY
+        x: (screenX - curCenterX - panX) / zoom + curCenterX,
+        y: (screenY - curCenterY - panY) / zoom + curCenterY
       };
     };
 
@@ -350,7 +351,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
         const dx = t.x - s.x;
         const dy = t.y - s.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const targetDist = link.type === 'wikilink' ? 85 : 120;
+        const targetDist = link.type === 'wikilink' ? 90 : 130;
         const force = (dist - targetDist) * 0.035;
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
@@ -369,21 +370,33 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       });
     };
 
-    // Render loop
+    // Render loop with high-DPI preservation
     const render = () => {
       if (!isRunning) return;
       updatePhysics();
 
       const currentRect = canvas.getBoundingClientRect();
-      const w = currentRect.width;
-      const h = currentRect.height;
-      const curCenterX = w / 2;
-      const curCenterY = h / 2;
+      const cssWidth = currentRect.width;
+      const cssHeight = currentRect.height;
+      const dpr = window.devicePixelRatio || 1;
 
-      ctx.clearRect(0, 0, w, h);
+      // Match canvas internal resolution to physical device pixels
+      const targetPixelWidth = Math.round(cssWidth * dpr);
+      const targetPixelHeight = Math.round(cssHeight * dpr);
+      if (canvas.width !== targetPixelWidth || canvas.height !== targetPixelHeight) {
+        canvas.width = targetPixelWidth;
+        canvas.height = targetPixelHeight;
+      }
+
+      const curCenterX = cssWidth / 2;
+      const curCenterY = cssHeight / 2;
 
       ctx.save();
-      // Apply Pan & Zoom around center
+      // Apply High-DPI scaling
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      // Apply Pan & Zoom around center in CSS space
       ctx.translate(curCenterX + panX, curCenterY + panY);
       ctx.scale(zoom, zoom);
       ctx.translate(-curCenterX, -curCenterY);
@@ -1146,8 +1159,8 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
       {/* VIEW MODES */}
       {viewMode === 'graph' ? (
-        /* OBSIDIAN-STYLE INTERACTIVE GRAPH */
-        <div className="flex-1 p-4 flex flex-col bg-[#050608] relative overflow-hidden select-none">
+        /* OBSIDIAN-STYLE INTERACTIVE GRAPH (FULL PAGE) */
+        <div className="flex-1 w-full h-full flex flex-col bg-[#050608] relative overflow-hidden select-none">
           {/* Top Left Info Banner */}
           <div className="absolute top-6 left-6 z-10 p-4 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-2xl space-y-2 max-w-sm">
             <div className="flex items-center justify-between">
@@ -1280,7 +1293,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </div>
           )}
 
-          <canvas ref={canvasRef} className="w-full h-full rounded-2xl border border-card-border/40 bg-[#06070a] cursor-grab active:cursor-grabbing" />
+          <canvas ref={canvasRef} className="w-full h-full bg-[#06070a] cursor-grab active:cursor-grabbing block" />
         </div>
       ) : (
         /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE & DRAG-AND-DROP */
