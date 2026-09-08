@@ -256,7 +256,7 @@ export class FrankNoteEngine {
   // Delete an entire folder and all its notes (with safety backups)
   public static deleteFolder(folderName: string, projectPath?: string): { success: boolean; deletedNotesCount: number } {
     this.ensureDirs(projectPath);
-    const cleanPath = this.sanitizePath(folderName);
+    const cleanPath = this.sanitizePath(folderName).normalize('NFC');
     if (!cleanPath || cleanPath === 'Geral') {
       return { success: false, deletedNotesCount: 0 };
     }
@@ -264,31 +264,52 @@ export class FrankNoteEngine {
     const folderPath = path.join(GLOBAL_NOTES_DIR, cleanPath);
     let count = 0;
 
-    // 1. Find all notes within this folder and its subfolders
+    // 1. Find and backup all notes within this folder and its subfolders
     const notes = this.listNotes(projectPath);
     const notesToDelete = notes.filter(n => {
-      const f = n.folder || n.subject || 'Geral';
+      const f = (n.folder || n.subject || 'Geral').normalize('NFC');
       return f === cleanPath || f.startsWith(`${cleanPath}/`);
     });
 
     for (const note of notesToDelete) {
       const filePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
       if (fs.existsSync(filePath)) {
-        const existingContent = fs.readFileSync(filePath, 'utf-8');
-        const backupFilename = `${note.id}_deleted_folder_${Date.now()}.md`;
-        fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
         try {
+          const existingContent = fs.readFileSync(filePath, 'utf-8');
+          const backupFilename = `${note.id}_deleted_folder_${Date.now()}.md`;
+          fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
           fs.unlinkSync(filePath);
+          count++;
         } catch (e) {
           console.error(`Error deleting note file ${filePath}:`, e);
         }
-        count++;
       }
     }
 
-    // 2. Remove physical directory recursively if it exists
+    // 2. Also scan physical folder directly for any leftover .md files to backup before folder deletion
     if (fs.existsSync(folderPath)) {
+      const backupRemainingFiles = (dir: string) => {
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              backupRemainingFiles(fullPath);
+            } else if (entry.isFile() && entry.name.endsWith('.md')) {
+              const existingContent = fs.readFileSync(fullPath, 'utf-8');
+              const fileId = entry.name.replace(/\.md$/i, '');
+              const backupFilename = `${fileId}_deleted_folder_${Date.now()}.md`;
+              fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
+              count++;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      };
+
       try {
+        backupRemainingFiles(folderPath);
         fs.rmSync(folderPath, { recursive: true, force: true });
       } catch (e) {
         console.error(`Error removing folder directory ${folderPath}:`, e);
