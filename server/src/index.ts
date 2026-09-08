@@ -357,34 +357,7 @@ app.post('/api/notes', (req, res) => {
   }
 });
 
-app.delete('/api/notes/:id', (req, res) => {
-  try {
-    const currentPath = ProjectManager.getCurrentProject();
-    const isProjectSpecific = req.query.isProjectSpecific === 'true';
-    const success = FrankNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
-    res.json({ success });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/notes/:id/move', (req, res) => {
-  try {
-    const currentPath = ProjectManager.getCurrentProject();
-    const { targetFolder } = req.body;
-    if (!targetFolder) {
-      return res.status(400).json({ error: 'targetFolder é obrigatório' });
-    }
-    const updatedNote = FrankNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
-    if (!updatedNote) {
-      return res.status(404).json({ error: 'Nota não encontrada' });
-    }
-    res.json(updatedNote);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// Folders Management Routes (Declared BEFORE :id to prevent route hijacking)
 app.get('/api/notes/folders', (req, res) => {
   try {
     const folders = FrankNoteEngine.listFolders();
@@ -452,6 +425,35 @@ app.get('/api/notes/graph', (req, res) => {
     const currentPath = ProjectManager.getCurrentProject();
     const graphData = FrankNoteEngine.getGraphData(currentPath);
     res.json(graphData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Parameterized Individual Note Routes
+app.post('/api/notes/:id/move', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { targetFolder } = req.body;
+    if (!targetFolder) {
+      return res.status(400).json({ error: 'targetFolder é obrigatório' });
+    }
+    const updatedNote = FrankNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
+    if (!updatedNote) {
+      return res.status(404).json({ error: 'Nota não encontrada' });
+    }
+    res.json(updatedNote);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notes/:id', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const isProjectSpecific = req.query.isProjectSpecific === 'true';
+    const success = FrankNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
+    res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
