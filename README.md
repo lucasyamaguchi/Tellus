@@ -28,27 +28,27 @@ Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus t
 
 <div align="center">
 
-### 💻 1. Workspace Agêntico & Chat Antigravity
-*Interface moderna com pipeline multi-modelo, visualizador de código, terminal e inspeção de memória.*
-<img src="docs/assets/tellus_ide_overview.png" alt="Tellus IDE Overview" width="95%" />
+### 💻 1. Workspace Agêntico, Engenharia de Carreira & Links Clicáveis
+*Interface moderna de chat com renderização rica de estratégias de vagas, links interativos para notas no Vault e painel lateral.*
+<img src="docs/assets/tellus_ide_overview.png" alt="Tellus Workspace & Career Engineering" width="95%" />
 
 ---
 
-### 📚 2. FrankMD Vault & Gestor de Pastas Obsidian
-*Visualização formatada de documentos, suporte a subpastas, drag-and-drop e compatibilidade nativa com Obsidian.*
-<img src="docs/assets/tellus_frankmd_vault.png" alt="Tellus FrankMD Vault" width="95%" />
+### 📚 2. FrankMD Vault, Pastas Obsidian & Lixeira com Retenção
+*Cofre compatível com Obsidian, árvore de pastas hierárquica e controle completo de retenção da lixeira.*
+<img src="docs/assets/tellus_frankmd_vault.png" alt="Tellus FrankMD Vault & Folders" width="95%" />
 
 ---
 
-### 🧭 3. Orquestração de Pipelines Multi-Agente & Rotinas Especializadas
-*Mindmap visual para divisão de responsabilidades entre modelos (Planner, Coder, Reasoning, Tools).*
-<img src="docs/assets/tellus_pipeline_mindmap.png" alt="Tellus Pipeline Mindmap" width="95%" />
+### 🧭 3. Orquestração Multi-Agente Visual (Pipeline Mind Map)
+*Mapeamento visual e especialização de papéis entre modelos (Hub Central, Planner, Coding, Deep Thinking, Fast Tools).*
+<img src="docs/assets/tellus_pipeline_mindmap.png" alt="Tellus Multi-Agent Pipeline Mind Map" width="95%" />
 
 ---
 
-### 🎯 4. Planos de Estudo e Roteiros de Carreira
-*Geração automática de módulos estruturados, atividades práticas e projetos guiados por requisitos de vagas.*
-<img src="docs/assets/tellus_study_career.png" alt="Tellus Career & Study Engine" width="95%" />
+### ⚡ 4. Raciocínio Profundo (Deep Thought) & Barra de Ações Rápidas
+*Streaming em tempo real com processo analítico de raciocínio, citação de mensagens, atualização de contexto e modo eficiência.*
+<img src="docs/assets/tellus_deep_reasoning.png" alt="Tellus Deep Thought & Streaming" width="95%" />
 
 </div>
 
