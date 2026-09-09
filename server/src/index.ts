@@ -430,6 +430,64 @@ app.get('/api/notes/graph', (req, res) => {
   }
 });
 
+// Trash & Retention Endpoints
+app.get('/api/notes/trash', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const config = ConfigManager.getConfig();
+    // Run automated background cleanup on query
+    if (config.deletedNotesRetention) {
+      FrankNoteEngine.cleanupExpiredBackups(config.deletedNotesRetention);
+    }
+    const items = FrankNoteEngine.listDeletedNotes(currentPath);
+    res.json({ items, retention: config.deletedNotesRetention || '90_days' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/trash/restore', (req, res) => {
+  try {
+    const { backupFilename } = req.body;
+    if (!backupFilename) {
+      return res.status(400).json({ error: 'backupFilename é obrigatório' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const restoredNote = FrankNoteEngine.restoreDeletedNote(backupFilename, currentPath);
+    if (!restoredNote) {
+      return res.status(404).json({ error: 'Arquivo de backup não encontrado' });
+    }
+    res.json({ success: true, note: restoredNote });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notes/trash', (req, res) => {
+  try {
+    const backupFilename = (req.query.backupFilename as string) || req.body?.backupFilename;
+    if (backupFilename) {
+      const success = FrankNoteEngine.permanentlyDeleteNote(backupFilename);
+      return res.json({ success });
+    }
+    const result = FrankNoteEngine.emptyTrash();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/trash/cleanup', (req, res) => {
+  try {
+    const config = ConfigManager.getConfig();
+    const retention = req.body.retention || config.deletedNotesRetention || '90_days';
+    const cleanedCount = FrankNoteEngine.cleanupExpiredBackups(retention);
+    res.json({ success: true, cleanedCount, retention });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Parameterized Individual Note Routes
 app.post('/api/notes/:id/move', (req, res) => {
   try {

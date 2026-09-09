@@ -37,23 +37,28 @@ import {
   ZoomOut,
   Filter,
   Layers,
-  Maximize2
+  Maximize2,
+  Clock,
+  Archive,
+  RefreshCw
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FrankNote, GraphData } from '../types';
+import { FrankNote, GraphData, DeletedNoteItem } from '../types';
 import { api } from '../api';
 
 interface FrankNoteViewProps {
   onMentionInChat?: (note: FrankNote) => void;
   onStudyTopic?: (topic: string) => void;
   onReturnToAgent?: () => void;
+  targetNoteIdOrTitle?: string | null;
 }
 
 export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   onMentionInChat,
   onStudyTopic,
-  onReturnToAgent
+  onReturnToAgent,
+  targetNoteIdOrTitle
 }) => {
   const [notes, setNotes] = useState<FrankNote[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -65,6 +70,13 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   
   // Note View Mode: 'preview' (Default) vs 'edit'
   const [noteViewMode, setNoteViewMode] = useState<'preview' | 'edit'>('preview');
+
+  // Sidebar Tab: 'folders' (Active Notes) vs 'trash' (Deleted Notes)
+  const [sidebarTab, setSidebarTab] = useState<'folders' | 'trash'>('folders');
+  const [deletedNotes, setDeletedNotes] = useState<DeletedNoteItem[]>([]);
+  const [retentionPolicy, setRetentionPolicy] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
+  const [selectedDeletedNote, setSelectedDeletedNote] = useState<DeletedNoteItem | null>(null);
+  const [isLoadingTrash, setIsLoadingTrash] = useState<boolean>(false);
 
   const [editContent, setEditContent] = useState<string>('');
   const [editTitle, setEditTitle] = useState<string>('');
@@ -163,9 +175,98 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
   };
 
+  const fetchDeletedNotes = async () => {
+    setIsLoadingTrash(true);
+    try {
+      const data = await api.listDeletedNotes();
+      setDeletedNotes(data.items || []);
+      if (data.retention) {
+        setRetentionPolicy(data.retention as any);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingTrash(false);
+    }
+  };
+
+  const handleRestoreNote = async (backupFilename: string) => {
+    try {
+      const result = await api.restoreDeletedNote(backupFilename);
+      await fetchNotesAndFolders();
+      await fetchDeletedNotes();
+      if (result.note) {
+        selectNote(result.note);
+        setSidebarTab('folders');
+      }
+    } catch (err: any) {
+      alert(`Erro ao restaurar nota: ${err.message}`);
+    }
+  };
+
+  const handlePermanentlyDeleteNote = async (backupFilename: string) => {
+    if (!confirm('Deseja excluir permanentemente este arquivo? Esta ação não pode ser desfeita.')) return;
+    try {
+      await api.permanentlyDeleteNote(backupFilename);
+      await fetchDeletedNotes();
+      if (selectedDeletedNote?.backupFilename === backupFilename) {
+        setSelectedDeletedNote(null);
+      }
+    } catch (err: any) {
+      alert(`Erro ao excluir permanentemente: ${err.message}`);
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    if (!confirm('Tem certeza que deseja esvaziar a lixeira e apagar todas as notas excluídas permanentemente?')) return;
+    try {
+      await api.emptyTrash();
+      await fetchDeletedNotes();
+      setSelectedDeletedNote(null);
+    } catch (err: any) {
+      alert(`Erro ao esvaziar lixeira: ${err.message}`);
+    }
+  };
+
+  const handleChangeRetention = async (newRetention: '30_days' | '90_days' | '120_days' | '1_year' | 'never') => {
+    setRetentionPolicy(newRetention);
+    try {
+      await api.updateConfig({ deletedNotesRetention: newRetention });
+      await api.cleanupTrash(newRetention);
+      await fetchDeletedNotes();
+    } catch (err: any) {
+      alert(`Erro ao atualizar retenção: ${err.message}`);
+    }
+  };
+
   useEffect(() => {
     fetchNotesAndFolders();
+    fetchDeletedNotes();
   }, []);
+
+  useEffect(() => {
+    if (sidebarTab === 'trash') {
+      fetchDeletedNotes();
+    }
+  }, [sidebarTab]);
+
+  useEffect(() => {
+    if (!targetNoteIdOrTitle || notes.length === 0) return;
+    const cleanTarget = targetNoteIdOrTitle.replace(/\.md$/i, '').trim().toLowerCase();
+    const found = notes.find(n => 
+      n.id.toLowerCase() === cleanTarget ||
+      n.title.toLowerCase() === cleanTarget ||
+      n.filename.toLowerCase() === `${cleanTarget}.md` ||
+      (n.relativePath && n.relativePath.toLowerCase().endsWith(cleanTarget)) ||
+      (n.relativePath && n.relativePath.toLowerCase().endsWith(`${cleanTarget}.md`))
+    );
+    if (found) {
+      selectNote(found);
+      setNoteViewMode('preview');
+      setViewMode('editor');
+      setSidebarTab('folders');
+    }
+  }, [targetNoteIdOrTitle, notes]);
 
   useEffect(() => {
     if (viewMode === 'graph') {
@@ -1341,276 +1442,437 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         <div className="flex-1 flex overflow-hidden">
           {/* Notes & Folders Explorer Sidebar */}
           <div className="w-84 border-r border-card-border bg-sidebar flex flex-col shrink-0">
+            {/* Sidebar Navigation Tabs (Pastas vs Lixeira) */}
+            <div className="flex items-center p-1.5 bg-panel border-b border-card-border gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarTab('folders');
+                  setSelectedDeletedNote(null);
+                }}
+                className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all ${
+                  sidebarTab === 'folders'
+                    ? 'bg-card text-accent-light shadow-sm border border-card-border'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Folder className="w-3.5 h-3.5" />
+                <span>Pastas</span>
+                <span className="text-[10px] opacity-70">({allFolderNames.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSidebarTab('trash');
+                  fetchDeletedNotes();
+                }}
+                className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all ${
+                  sidebarTab === 'trash'
+                    ? 'bg-card text-rose-400 shadow-sm border border-card-border'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Lixeira</span>
+                {deletedNotes.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                    {deletedNotes.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
             {/* Search & Actions Bar */}
-            <div className="p-3 border-b border-card-border space-y-2.5">
+            <div className="p-3 border-b border-card-border space-y-2.5 shrink-0">
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Pesquisar por título, conteúdo ou #tags..."
+                  placeholder={sidebarTab === 'trash' ? "Pesquisar notas na lixeira..." : "Pesquisar por título, conteúdo ou #tags..."}
                   className="w-full bg-card border border-card-border rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent"
                 />
               </div>
 
-              {/* Folders Filter / Header */}
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center space-x-1.5">
-                  <Folder className="w-3.5 h-3.5 text-accent-light" />
-                  <span>Pastas do Cofre ({allFolderNames.length})</span>
-                </span>
-                <button
-                  onClick={() => setIsCreatingFolder(true)}
-                  className="text-[11px] text-accent-light hover:text-white flex items-center space-x-1 font-semibold"
-                  title="Criar nova pasta no cofre"
-                >
-                  <FolderPlus className="w-3.5 h-3.5" />
-                  <span>+ Pasta</span>
-                </button>
-              </div>
-
-              {/* Inline Create Folder Form */}
-              {isCreatingFolder && (
-                <form onSubmit={handleCreateFolder} className="p-2 bg-card rounded-xl border border-accent/40 space-y-2 animate-in fade-in">
-                  <input
-                    type="text"
-                    required
-                    autoFocus
-                    placeholder="Nome da pasta (ex: Estudos - Python)..."
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    className="w-full bg-panel border border-card-border rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-accent font-mono"
-                  />
-                  <div className="flex items-center justify-end space-x-1.5">
+              {sidebarTab === 'folders' ? (
+                <>
+                  {/* Folders Filter / Header */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 font-mono flex items-center space-x-1.5">
+                      <Folder className="w-3.5 h-3.5 text-accent-light" />
+                      <span>Pastas do Cofre ({allFolderNames.length})</span>
+                    </span>
                     <button
-                      type="button"
-                      onClick={() => setIsCreatingFolder(false)}
-                      className="px-2 py-0.5 rounded bg-panel hover:bg-card-border text-[10px] text-slate-400"
+                      onClick={() => setIsCreatingFolder(true)}
+                      className="text-[11px] text-accent-light hover:text-white flex items-center space-x-1 font-semibold"
+                      title="Criar nova pasta no cofre"
                     >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[10px]"
-                    >
-                      Criar Pasta
+                      <FolderPlus className="w-3.5 h-3.5" />
+                      <span>+ Pasta</span>
                     </button>
                   </div>
-                </form>
+
+                  {/* Inline Create Folder Form */}
+                  {isCreatingFolder && (
+                    <form onSubmit={handleCreateFolder} className="p-2 bg-card rounded-xl border border-accent/40 space-y-2 animate-in fade-in">
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        placeholder="Nome da pasta (ex: Estudos - Python)..."
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        className="w-full bg-panel border border-card-border rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-accent font-mono"
+                      />
+                      <div className="flex items-center justify-end space-x-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setIsCreatingFolder(false)}
+                          className="px-2 py-0.5 rounded bg-panel hover:bg-card-border text-[10px] text-slate-400"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[10px]"
+                        >
+                          Criar Pasta
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </>
+              ) : (
+                /* Trash Retention Configuration Bar */
+                <div className="p-2.5 bg-panel/60 border border-card-border/80 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-300 flex items-center space-x-1.5 text-[11px]">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Retenção da Lixeira</span>
+                    </span>
+                    {deletedNotes.length > 0 && (
+                      <button
+                        onClick={handleEmptyTrash}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold flex items-center space-x-1"
+                        title="Esvaziar todas as notas da lixeira permanentemente"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Esvaziar</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] text-slate-400 shrink-0">Excluir após:</span>
+                    <select
+                      value={retentionPolicy}
+                      onChange={(e) => handleChangeRetention(e.target.value as any)}
+                      className="flex-1 bg-card border border-card-border rounded-lg px-2 py-1 text-[11px] text-amber-300 focus:outline-none focus:border-accent font-medium cursor-pointer"
+                    >
+                      <option value="30_days">30 dias</option>
+                      <option value="90_days">90 dias (Padrão)</option>
+                      <option value="120_days">120 dias</option>
+                      <option value="1_year">1 ano</option>
+                      <option value="never">Sempre (Nunca excluir)</option>
+                    </select>
+                  </div>
+                </div>
               )}
             </div>
 
-            {/* Folders & Notes Hierarchical Tree (Drag & Drop Target for Notes and Folders) */}
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin scrollbar-thumb-card-border">
-              {allFolderNames.map((folderName) => {
-                const folderNotes = filteredNotes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
-                const isCollapsed = collapsedFolders[folderName];
-                const isDragTarget = dragOverFolder === folderName;
-                
-                // Calculate folder path depth for nested subfolders
-                const pathSegments = folderName.split('/');
-                const depth = pathSegments.length - 1;
-                const displayName = pathSegments[pathSegments.length - 1] || folderName;
-                const isSubfolder = depth > 0;
+            {/* TAB CONTENT: Folders View OR Trash View */}
+            {sidebarTab === 'folders' ? (
+              /* Folders & Notes Hierarchical Tree (Drag & Drop Target for Notes and Folders) */
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin scrollbar-thumb-card-border">
+                {allFolderNames.map((folderName) => {
+                  const folderNotes = filteredNotes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
+                  const isCollapsed = collapsedFolders[folderName];
+                  const isDragTarget = dragOverFolder === folderName;
+                  
+                  // Calculate folder path depth for nested subfolders
+                  const pathSegments = folderName.split('/');
+                  const depth = pathSegments.length - 1;
+                  const displayName = pathSegments[pathSegments.length - 1] || folderName;
+                  const isSubfolder = depth > 0;
 
-                return (
-                  <div 
-                    key={folderName} 
-                    draggable={true}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('application/x-tellus-folder', folderName);
-                      e.dataTransfer.effectAllowed = 'move';
-                      setDraggedFolderName(folderName);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedFolderName(null);
-                      setDragOverFolder(null);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = 'move';
-                      if (dragOverFolder !== folderName) setDragOverFolder(folderName);
-                    }}
-                    onDragLeave={(e) => {
-                      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                      setDragOverFolder(null);
-                    }}
-                    onDrop={async (e) => {
-                      e.preventDefault();
-                      const droppedFolder = e.dataTransfer.getData('application/x-tellus-folder') || draggedFolderName;
-                      const droppedNoteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
-                      
-                      setDragOverFolder(null);
-                      setDraggedNoteId(null);
-                      setDraggedFolderName(null);
+                  return (
+                    <div 
+                      key={folderName} 
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/x-tellus-folder', folderName);
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDraggedFolderName(folderName);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedFolderName(null);
+                        setDragOverFolder(null);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (dragOverFolder !== folderName) setDragOverFolder(folderName);
+                      }}
+                      onDragLeave={(e) => {
+                        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                        setDragOverFolder(null);
+                      }}
+                      onDrop={async (e) => {
+                        e.preventDefault();
+                        const droppedFolder = e.dataTransfer.getData('application/x-tellus-folder') || draggedFolderName;
+                        const droppedNoteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                        
+                        setDragOverFolder(null);
+                        setDraggedNoteId(null);
+                        setDraggedFolderName(null);
 
-                      if (droppedFolder && droppedFolder !== folderName) {
-                        // Move folder into target folder as subfolder
-                        await handleMoveFolder(droppedFolder, folderName);
-                      } else if (droppedNoteId) {
-                        // Move note into target folder
-                        await handleMoveNote(droppedNoteId, folderName);
-                      }
-                    }}
-                    style={{ marginLeft: `${Math.min(depth * 14, 42)}px` }}
-                    className={`space-y-1 rounded-2xl border p-1.5 transition-all duration-200 overflow-hidden ${
-                      isDragTarget
-                        ? 'bg-accent/20 border-accent ring-2 ring-accent scale-[1.01] shadow-lg'
-                        : isSubfolder
-                        ? 'bg-panel/20 border-card-border/40'
-                        : 'bg-panel/40 border-card-border/70'
-                    }`}
-                  >
-                    {/* Folder Header */}
-                    <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group cursor-grab active:cursor-grabbing">
-                      <div
-                        onClick={() => toggleFolderCollapse(folderName)}
-                        className="flex items-center space-x-1.5 cursor-pointer flex-1 truncate select-none"
-                      >
-                        {isCollapsed ? (
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        ) : (
-                          <ChevronDown className="w-3.5 h-3.5 text-accent-light shrink-0" />
-                        )}
-                        <Folder className={`w-3.5 h-3.5 shrink-0 ${isSubfolder ? 'text-cyan-400' : 'text-amber-400'}`} />
-                        <span className={`font-bold text-xs truncate ${isSubfolder ? 'text-cyan-200' : 'text-slate-200'}`} title={folderName}>
-                          {displayName}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500 shrink-0">
-                          ({folderNotes.length})
-                        </span>
-                        {isDragTarget && (
-                          <span className="text-[9px] font-bold text-accent-light uppercase px-1.5 py-0.5 rounded bg-accent/30 animate-pulse">
-                            Soltar aqui
+                        if (droppedFolder && droppedFolder !== folderName) {
+                          // Move folder into target folder as subfolder
+                          await handleMoveFolder(droppedFolder, folderName);
+                        } else if (droppedNoteId) {
+                          // Move note into target folder
+                          await handleMoveNote(droppedNoteId, folderName);
+                        }
+                      }}
+                      style={{ marginLeft: `${Math.min(depth * 14, 42)}px` }}
+                      className={`space-y-1 rounded-2xl border p-1.5 transition-all duration-200 overflow-hidden ${
+                        isDragTarget
+                          ? 'bg-accent/20 border-accent ring-2 ring-accent scale-[1.01] shadow-lg'
+                          : isSubfolder
+                          ? 'bg-panel/20 border-card-border/40'
+                          : 'bg-panel/40 border-card-border/70'
+                      }`}
+                    >
+                      {/* Folder Header */}
+                      <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group cursor-grab active:cursor-grabbing">
+                        <div
+                          onClick={() => toggleFolderCollapse(folderName)}
+                          className="flex items-center space-x-1.5 cursor-pointer flex-1 truncate select-none"
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 text-accent-light shrink-0" />
+                          )}
+                          <Folder className={`w-3.5 h-3.5 shrink-0 ${isSubfolder ? 'text-cyan-400' : 'text-amber-400'}`} />
+                          <span className={`font-bold text-xs truncate ${isSubfolder ? 'text-cyan-200' : 'text-slate-200'}`} title={folderName}>
+                            {displayName}
                           </span>
-                        )}
-                      </div>
+                          <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                            ({folderNotes.length})
+                          </span>
+                          {isDragTarget && (
+                            <span className="text-[9px] font-bold text-accent-light uppercase px-1.5 py-0.5 rounded bg-accent/30 animate-pulse">
+                              Soltar aqui
+                            </span>
+                          )}
+                        </div>
 
-                      {/* Folder Action Tools */}
-                      <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setNewFolderName(`${folderName}/`);
-                            setIsCreatingFolder(true);
-                          }}
-                          className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-cyan-300"
-                          title={`Criar subpasta dentro de "${folderName}"`}
-                        >
-                          <FolderPlus className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => handleReviewFolderWithAgent(folderName)}
-                          className="px-1.5 py-0.5 rounded-md bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-[9px] font-semibold flex items-center space-x-1 transition-all border border-accent/30"
-                          title="Revisar e aprimorar visualmente todas as notas desta pasta com o Agente"
-                        >
-                          <Wand2 className="w-2.5 h-2.5" />
-                          <span>IA</span>
-                        </button>
-                        <button
-                          onClick={() => handleCreateNoteInFolder(folderName)}
-                          className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white"
-                          title={`Criar nova nota em "${folderName}"`}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                        {folderName !== 'Geral' && (
+                        {/* Folder Action Tools */}
+                        <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteFolder(folderName);
+                              setNewFolderName(`${folderName}/`);
+                              setIsCreatingFolder(true);
                             }}
-                            className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
-                            title={`Excluir pasta "${folderName}" e todas as suas anotações`}
+                            className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-cyan-300"
+                            title={`Criar subpasta dentro de "${folderName}"`}
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <FolderPlus className="w-3 h-3" />
                           </button>
-                        )}
+                          <button
+                            onClick={() => handleReviewFolderWithAgent(folderName)}
+                            className="px-1.5 py-0.5 rounded-md bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-[9px] font-semibold flex items-center space-x-1 transition-all border border-accent/30"
+                            title="Revisar e aprimorar visualmente todas as notas desta pasta com o Agente"
+                          >
+                            <Wand2 className="w-2.5 h-2.5" />
+                            <span>IA</span>
+                          </button>
+                          <button
+                            onClick={() => handleCreateNoteInFolder(folderName)}
+                            className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white"
+                            title={`Criar nova nota em "${folderName}"`}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          {folderName !== 'Geral' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteFolder(folderName);
+                              }}
+                              className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
+                              title={`Excluir pasta "${folderName}" e todas as suas anotações`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Notes in Folder (Draggable) */}
-                    {!isCollapsed && (
-                      <div className="pl-3 pr-1 space-y-1.5 pt-1">
-                        {folderNotes.length === 0 ? (
-                          <div className="p-2 text-[10px] text-slate-500 italic">
-                            {isDragTarget ? 'Solte a anotação ou pasta aqui' : 'Vazia. Arraste notas para cá ou clique em +.'}
-                          </div>
-                        ) : (
-                          folderNotes.map((n) => {
-                            const isActive = activeNote?.id === n.id;
-                            const isBeingDragged = draggedNoteId === n.id;
-                            const isBibliography = n.title.includes('Referencias') || n.title.includes('Bibliografias') || n.filename.includes('99_');
-                            
-                            return (
-                              <div
-                                key={n.id}
-                                draggable={true}
-                                onDragStart={(e) => {
-                                  e.stopPropagation();
-                                  e.dataTransfer.setData('text/plain', n.id);
-                                  e.dataTransfer.effectAllowed = 'move';
-                                  setDraggedNoteId(n.id);
-                                }}
-                                onDragEnd={() => {
-                                  setDraggedNoteId(null);
-                                  setDragOverFolder(null);
-                                }}
-                                onClick={() => selectNote(n)}
-                                className={`p-2 rounded-xl border transition-all cursor-grab active:cursor-grabbing flex flex-col space-y-1 group/card ${
-                                  isBeingDragged
-                                    ? 'opacity-40 border-dashed border-accent scale-95'
-                                    : isActive
-                                    ? 'bg-accent/20 border-accent text-white shadow-sm'
-                                    : isBibliography
-                                    ? 'bg-amber-950/20 border-amber-500/30 text-amber-200 hover:bg-amber-950/30'
-                                    : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card-border/40'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="font-semibold text-xs truncate max-w-[150px] text-slate-100 flex items-center space-x-1.5">
-                                    <GripVertical className="w-3 h-3 text-slate-500 opacity-40 group-hover/card:opacity-100 shrink-0" />
-                                    {isBibliography ? (
-                                       <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
-                                    ) : (
-                                       <FileText className="w-3 h-3 text-slate-400 shrink-0" />
-                                    )}
-                                    <span className="truncate">{n.title}</span>
-                                  </span>
+                      {/* Notes in Folder (Draggable) */}
+                      {!isCollapsed && (
+                        <div className="pl-3 pr-1 space-y-1.5 pt-1">
+                          {folderNotes.length === 0 ? (
+                            <div className="p-2 text-[10px] text-slate-500 italic">
+                              {isDragTarget ? 'Solte a anotação ou pasta aqui' : 'Vazia. Arraste notas para cá ou clique em +.'}
+                            </div>
+                          ) : (
+                            folderNotes.map((n) => {
+                              const isActive = activeNote?.id === n.id;
+                              const isBeingDragged = draggedNoteId === n.id;
+                              const isBibliography = n.title.includes('Referencias') || n.title.includes('Bibliografias') || n.filename.includes('99_');
+                              
+                              return (
+                                <div
+                                  key={n.id}
+                                  draggable={true}
+                                  onDragStart={(e) => {
+                                    e.stopPropagation();
+                                    e.dataTransfer.setData('text/plain', n.id);
+                                    e.dataTransfer.effectAllowed = 'move';
+                                    setDraggedNoteId(n.id);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggedNoteId(null);
+                                    setDragOverFolder(null);
+                                  }}
+                                  onClick={() => selectNote(n)}
+                                  className={`p-2 rounded-xl border transition-all cursor-grab active:cursor-grabbing flex flex-col space-y-1 group/card ${
+                                    isBeingDragged
+                                      ? 'opacity-40 border-dashed border-accent scale-95'
+                                      : isActive
+                                      ? 'bg-accent/20 border-accent text-white shadow-sm'
+                                      : isBibliography
+                                      ? 'bg-amber-950/20 border-amber-500/30 text-amber-200 hover:bg-amber-950/30'
+                                      : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card-border/40'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-xs truncate max-w-[150px] text-slate-100 flex items-center space-x-1.5">
+                                      <GripVertical className="w-3 h-3 text-slate-500 opacity-40 group-hover/card:opacity-100 shrink-0" />
+                                      {isBibliography ? (
+                                         <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
+                                      ) : (
+                                         <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                                      )}
+                                      <span className="truncate">{n.title}</span>
+                                    </span>
 
-                                  <div className="flex items-center space-x-1">
-                                    {isBibliography && (
-                                      <span className="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                        Bibliografia
-                                      </span>
-                                    )}
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setMoveModalNote(n);
-                                      }}
-                                      className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-amber-300 opacity-60 group-hover/card:opacity-100 transition-opacity"
-                                      title="Mover para outra pasta..."
-                                    >
-                                      <FolderInput className="w-3 h-3" />
-                                    </button>
+                                    <div className="flex items-center space-x-1">
+                                      {isBibliography && (
+                                        <span className="text-[8px] font-mono uppercase px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                          Bibliografia
+                                        </span>
+                                      )}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setMoveModalNote(n);
+                                        }}
+                                        className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-amber-300 opacity-60 group-hover/card:opacity-100 transition-opacity"
+                                        title="Mover para outra pasta..."
+                                      >
+                                        <FolderInput className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   </div>
-                                </div>
 
-                                <p className="text-[10px] text-slate-400 truncate line-clamp-1 leading-relaxed pl-4">
-                                  {n.content.replace(/^#+.*?\n/, '').replace(/<!--.*?-->/g, '').trim().slice(0, 70)}
-                                </p>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
+                                  <p className="text-[10px] text-slate-400 truncate line-clamp-1 leading-relaxed pl-4">
+                                    {n.content.replace(/^#+.*?\n/, '').replace(/<!--.*?-->/g, '').trim().slice(0, 70)}
+                                  </p>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Trash Bin List */
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-2 scrollbar-thin scrollbar-thumb-card-border">
+                {isLoadingTrash ? (
+                  <div className="p-6 text-center text-xs text-slate-400 flex items-center justify-center space-x-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-accent-light" />
+                    <span>Carregando notas excluídas...</span>
                   </div>
-                );
-              })}
-            </div>
+                ) : deletedNotes.filter(dn => 
+                    dn.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    dn.originalFolder.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    dn.content.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-500 space-y-2">
+                    <Archive className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="font-semibold text-slate-400">Lixeira Vazia</p>
+                    <p className="text-[11px] text-slate-500">Nenhuma nota excluída ou arquivada no momento.</p>
+                  </div>
+                ) : (
+                  deletedNotes
+                    .filter(dn => 
+                      dn.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      dn.originalFolder.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      dn.content.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                    .map((dn) => {
+                      const isSelected = selectedDeletedNote?.backupFilename === dn.backupFilename;
+                      return (
+                        <div
+                          key={dn.backupFilename}
+                          onClick={() => {
+                            setSelectedDeletedNote(dn);
+                            setActiveNote(null);
+                          }}
+                          className={`p-2.5 rounded-xl border transition-all cursor-pointer flex flex-col space-y-1.5 ${
+                            isSelected
+                              ? 'bg-rose-950/30 border-rose-500/60 shadow-md ring-1 ring-rose-500/40'
+                              : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card-border/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs truncate text-slate-200 flex items-center space-x-1.5 max-w-[170px]" title={dn.title}>
+                              <FileText className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                              <span className="truncate">{dn.title}</span>
+                            </span>
+                            <div className="flex items-center space-x-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRestoreNote(dn.backupFilename);
+                                }}
+                                className="p-1 rounded bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-500/30 text-[10px] font-semibold flex items-center space-x-1 transition-all"
+                                title="Restaurar esta nota de volta para o cofre"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>Restaurar</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handlePermanentlyDeleteNote(dn.backupFilename);
+                                }}
+                                className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
+                                title="Excluir permanentemente do disco"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                            <span className="truncate max-w-[130px] text-amber-300/80">📂 {dn.originalFolder}</span>
+                            <span>{new Date(dn.deletedAt).toLocaleDateString('pt-BR')}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            )}
           </div>
 
           {/* Active Note View & Editor Panel */}
@@ -1839,9 +2101,68 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                 </div>
               )}
             </div>
+          ) : selectedDeletedNote ? (
+            /* Deleted Note Preview Mode */
+            <div className="flex-1 flex flex-col bg-[#0b0d13] overflow-hidden">
+              <div className="p-3.5 border-b border-rose-950/60 bg-rose-950/20 flex items-center justify-between shrink-0">
+                <div className="flex items-center space-x-3 flex-1 min-w-0">
+                  <div className="p-2 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-400 shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
+                  <div className="truncate">
+                    <div className="flex items-center space-x-2">
+                      <h2 className="font-bold text-sm text-rose-200 truncate">{selectedDeletedNote.title}</h2>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        Excluída em {new Date(selectedDeletedNote.deletedAt).toLocaleDateString('pt-BR')} {new Date(selectedDeletedNote.deletedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono truncate">
+                      📂 Pasta Original: <strong className="text-amber-300">{selectedDeletedNote.originalFolder}</strong> • Backup: {selectedDeletedNote.backupFilename}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0">
+                  <button
+                    onClick={() => handleRestoreNote(selectedDeletedNote.backupFilename)}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-emerald-950/30"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Restaurar Nota</span>
+                  </button>
+
+                  <button
+                    onClick={() => handlePermanentlyDeleteNote(selectedDeletedNote.backupFilename)}
+                    className="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 font-semibold text-xs flex items-center space-x-1.5 transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Excluir Definitivamente</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Read-only Document Preview */}
+              <div className="flex-1 overflow-y-auto bg-[#0a0c12] p-8 scrollbar-thin scrollbar-thumb-card-border select-text">
+                <div className="max-w-4xl mx-auto space-y-6">
+                  <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/30 text-xs text-amber-200/90 leading-relaxed flex items-center space-x-2">
+                    <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      Esta nota está na lixeira e será excluída automaticamente após o período configurado ({retentionPolicy.replace('_', ' ')}). Clique em <strong>Restaurar Nota</strong> para reativá-la no cofre.
+                    </span>
+                  </div>
+
+                  <div className="prose prose-invert max-w-none text-sm leading-relaxed select-text space-y-4">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {selectedDeletedNote.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-slate-500 text-xs">
-              Selecione ou crie uma anotação para começar a escrever.
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs space-y-2">
+              <FolderOpen className="w-8 h-8 text-slate-600" />
+              <span>Selecione ou crie uma anotação para começar a escrever.</span>
             </div>
           )}
         </div>

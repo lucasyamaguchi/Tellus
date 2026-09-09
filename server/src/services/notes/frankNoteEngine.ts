@@ -41,6 +41,16 @@ export interface GraphData {
   links: GraphLink[];
 }
 
+export interface DeletedNoteItem {
+  id: string;
+  title: string;
+  backupFilename: string;
+  originalFolder: string;
+  deletedAt: number;
+  size: number;
+  content: string;
+}
+
 const GLOBAL_NOTES_DIR = OBSIDIAN_VAULT_DIR;
 const BACKUPS_DIR = path.join(OBSIDIAN_VAULT_DIR, '.backups');
 
@@ -520,5 +530,159 @@ export class FrankNoteEngine {
     }
 
     return { nodes, links };
+  }
+
+  // List deleted / backup notes (Trash Bin)
+  public static listDeletedNotes(projectPath?: string): DeletedNoteItem[] {
+    this.ensureDirs(projectPath);
+    if (!fs.existsSync(BACKUPS_DIR)) return [];
+
+    const items: DeletedNoteItem[] = [];
+    const files = fs.readdirSync(BACKUPS_DIR);
+
+    for (const file of files) {
+      if (!file.endsWith('.md')) continue;
+
+      const fullPath = path.join(BACKUPS_DIR, file);
+      try {
+        const stat = fs.statSync(fullPath);
+        const content = fs.readFileSync(fullPath, 'utf-8');
+
+        // Extract timestamp from filename like: note-id_deleted_1787616941222.md or note-id_deleted_folder_1787616941222.md or note-id_backup_1788264300284.md
+        const tsMatch = file.match(/_(\d+)\.md$/i);
+        const deletedAt = tsMatch ? parseInt(tsMatch[1], 10) : stat.mtimeMs;
+
+        const baseId = file
+          .replace(/_(deleted_folder|deleted|backup)_\d+\.md$/i, '')
+          .replace(/\.md$/i, '');
+
+        const firstLine = content.split('\n')[0] || '';
+        const titleMatch = firstLine.match(/^#+\s*(.*)/);
+        const title = titleMatch ? titleMatch[1].trim() : baseId.replace(/[-_]/g, ' ');
+
+        const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
+        const originalFolder = subjectMatch ? subjectMatch[1].trim() : 'Geral';
+
+        items.push({
+          id: baseId,
+          title,
+          backupFilename: file,
+          originalFolder,
+          deletedAt,
+          size: stat.size,
+          content
+        });
+      } catch {
+        // ignore unreadable file
+      }
+    }
+
+    return items.sort((a, b) => b.deletedAt - a.deletedAt);
+  }
+
+  // Restore a deleted note back to the active vault
+  public static restoreDeletedNote(backupFilename: string, projectPath?: string): FrankNote | null {
+    this.ensureDirs(projectPath);
+    const backupPath = path.join(BACKUPS_DIR, backupFilename);
+    if (!fs.existsSync(backupPath)) return null;
+
+    const content = fs.readFileSync(backupPath, 'utf-8');
+    const firstLine = content.split('\n')[0] || '';
+    const titleMatch = firstLine.match(/^#+\s*(.*)/);
+    const id = backupFilename.replace(/_(deleted_folder|deleted|backup)_\d+\.md$/i, '');
+    const title = titleMatch ? titleMatch[1].trim() : id.replace(/[-_]/g, ' ');
+
+    const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
+    const folder = subjectMatch ? subjectMatch[1].trim() : 'Geral';
+
+    const restoredNote = this.saveNote({
+      id,
+      title,
+      folder,
+      subject: folder,
+      content,
+      isProjectSpecific: false
+    }, projectPath);
+
+    // Remove from backups once restored
+    try {
+      fs.unlinkSync(backupPath);
+    } catch {
+      // ignore
+    }
+
+    return restoredNote;
+  }
+
+  // Permanently delete a single note backup from disk
+  public static permanentlyDeleteNote(backupFilename: string): boolean {
+    const backupPath = path.join(BACKUPS_DIR, backupFilename);
+    if (fs.existsSync(backupPath)) {
+      try {
+        fs.unlinkSync(backupPath);
+        return true;
+      } catch (e) {
+        console.error('Error permanently deleting backup:', e);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Permanently empty all deleted notes in trash
+  public static emptyTrash(): { success: boolean; count: number } {
+    if (!fs.existsSync(BACKUPS_DIR)) return { success: true, count: 0 };
+    const files = fs.readdirSync(BACKUPS_DIR);
+    let count = 0;
+    for (const file of files) {
+      if (file.endsWith('.md')) {
+        try {
+          fs.unlinkSync(path.join(BACKUPS_DIR, file));
+          count++;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return { success: true, count };
+  }
+
+  // Automatic retention cleanup: cleans notes older than specified retention (30d, 90d, 120d, 1y)
+  public static cleanupExpiredBackups(retention: string = '90_days'): number {
+    if (!retention || retention === 'never') return 0;
+    if (!fs.existsSync(BACKUPS_DIR)) return 0;
+
+    let maxAgeMs = 90 * 24 * 60 * 60 * 1000; // default 90 days
+    if (retention === '30_days') {
+      maxAgeMs = 30 * 24 * 60 * 60 * 1000;
+    } else if (retention === '90_days') {
+      maxAgeMs = 90 * 24 * 60 * 60 * 1000;
+    } else if (retention === '120_days') {
+      maxAgeMs = 120 * 24 * 60 * 60 * 1000;
+    } else if (retention === '1_year') {
+      maxAgeMs = 365 * 24 * 60 * 60 * 1000;
+    }
+
+    const now = Date.now();
+    const files = fs.readdirSync(BACKUPS_DIR);
+    let cleanedCount = 0;
+
+    for (const file of files) {
+      if (!file.endsWith('.md')) continue;
+
+      const fullPath = path.join(BACKUPS_DIR, file);
+      try {
+        const tsMatch = file.match(/_(\d+)\.md$/i);
+        const timestamp = tsMatch ? parseInt(tsMatch[1], 10) : fs.statSync(fullPath).mtimeMs;
+        if (now - timestamp > maxAgeMs) {
+          fs.unlinkSync(fullPath);
+          cleanedCount++;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return cleanedCount;
   }
 }

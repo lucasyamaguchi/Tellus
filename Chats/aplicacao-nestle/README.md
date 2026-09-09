@@ -11,7 +11,7 @@ Pasta com todos os entregáveis para sua candidatura.
 | `03-curriculo-alvo.md` | Estrutura de currículo otimizada para ATS + checklist | ✅ Pronto (genérico) |
 | `04-plano-entrevistas.md` | Preparação técnica (SQL/Snowflake/Databricks/dbt/AI Eng), system design, STAR | ✅ Pronto (genérico) |
 | `05-gap-analise.md` | Matriz de autoavaliação requisito × evidência para fechar lacunas | ✅ Pronto (genérico) |
-| `06-acompanhamento.md` | (a criar) Controle de envios, retornos e próximos passos | ⏳ quando você enviar |
+| `06-acompanhamento.md` | Controle de envios, retornos, linha do tempo do processo e preparação por rodada | ✅ Pronto |
 
 ## 🚀 Próximos passos recomendados
 
