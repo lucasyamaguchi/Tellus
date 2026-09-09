@@ -77,6 +77,9 @@ export const App: React.FC = () => {
   const [tokenEfficiency, setTokenEfficiency] = useState<boolean>(false);
   const [agentPipeline, setAgentPipeline] = useState<AgentPipelineConfig | undefined>(undefined);
 
+  // Target Note navigation from Chat
+  const [targetNoteIdOrTitle, setTargetNoteIdOrTitle] = useState<string | null>(null);
+
   // Theme State (Dark / Light)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
@@ -527,6 +530,7 @@ export const App: React.FC = () => {
       {mainViewMode === 'notes' && (
         <div className="flex-1 flex overflow-hidden">
           <FrankNoteView
+            targetNoteIdOrTitle={targetNoteIdOrTitle}
             onMentionInChat={(note) => {
               setMainViewMode('agent');
               handleNewSession();
@@ -624,6 +628,10 @@ export const App: React.FC = () => {
                 quotedMessage={quotedMessage}
                 onClearQuotedMessage={() => setQuotedMessage(null)}
                 onOpenNotes={() => setMainViewMode('notes')}
+                onOpenNoteOrFile={(target) => {
+                  setTargetNoteIdOrTitle(target);
+                  setMainViewMode('notes');
+                }}
                 onEditMessage={handleEditAndResendMessage}
                 onRegenerateResponse={handleRegenerateResponse}
                 tokenEfficiency={tokenEfficiency}

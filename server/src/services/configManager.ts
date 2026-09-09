@@ -33,6 +33,7 @@ export interface AppConfig {
   }>;
   pipeline?: AgentPipelineConfig;
   theme?: 'dark' | 'light';
+  deletedNotesRetention?: '30_days' | '90_days' | '120_days' | '1_year' | 'never';
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.tellus');
@@ -45,6 +46,7 @@ const DEFAULT_CONFIG: AppConfig = {
   recentProjects: [],
   openProjects: [],
   theme: 'dark',
+  deletedNotesRetention: '90_days',
   customRoutines: [
     {
       id: 'architect',

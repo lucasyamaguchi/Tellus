@@ -51,9 +51,15 @@ export class FileParser {
       try {
         const parseFn = (pdfParse as any).default || pdfParse;
         const data = await parseFn(buffer);
-        parsedContent = `[📄 DOCUMENTO PDF IMPORTADO: ${filename} (${data.numpages || 1} páginas)]\n\n${data.text ? data.text.trim() : ''}`;
+        const rawText = data.text ? data.text.trim() : '';
+        const maxLen = 35000;
+        let displayText = rawText;
+        if (rawText.length > maxLen) {
+          displayText = `${rawText.slice(0, maxLen)}\n\n[... Restante do PDF (${data.numpages || 1} págs no total, ${(rawText.length / 1000).toFixed(0)}k caracteres) preservado no arquivo (.agentic/attachments/${sanitizedFilename}). O agente pode ler trechos adicionais com read_file se necessário ...]`;
+        }
+        parsedContent = `[📄 DOCUMENTO PDF IMPORTADO: ${filename} (${data.numpages || 1} páginas, salvo em .agentic/attachments/${sanitizedFilename})]\n\n${displayText}`;
       } catch (err: any) {
-        parsedContent = `[PDF ${filename} importado. Erro na extração de texto: ${err.message}]`;
+        parsedContent = `[PDF ${filename} importado e salvo em .agentic/attachments/${sanitizedFilename}. Erro na extração direta: ${err.message}]`;
       }
     } else if (isCsv) {
       try {

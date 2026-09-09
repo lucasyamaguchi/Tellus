@@ -53,6 +53,7 @@ interface ChatAreaProps {
   onClearQuotedMessage: () => void;
   onOpenWindowPicker: () => void;
   onOpenNotes?: () => void;
+  onOpenNoteOrFile?: (noteIdOrTitle: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onRegenerateResponse?: (assistantMessageId: string) => void;
   tokenEfficiency?: boolean;
@@ -74,6 +75,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onClearQuotedMessage,
   onOpenWindowPicker,
   onOpenNotes,
+  onOpenNoteOrFile,
   onEditMessage,
   onRegenerateResponse,
   tokenEfficiency,
@@ -558,7 +560,69 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 ) : (
                   msg.content && (
                     <div className={`prose prose-invert max-w-none text-xs leading-relaxed break-words ${msg.role === 'user' ? 'text-white' : 'text-slate-100'}`}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          code({ node, inline, className, children, ...props }: any) {
+                            const codeText = String(children).replace(/\n$/, '').trim();
+                            
+                            // Check if it's an inline code referencing a markdown note, folder path, or file
+                            const isMdFile = codeText.endsWith('.md') || codeText.endsWith('.markdown');
+                            const isFolder = codeText.includes('/') && (codeText.endsWith('/') || !codeText.includes('.'));
+                            const isWikilinkLike = codeText.startsWith('[[') && codeText.endsWith(']]');
+                            const isNumberedNote = /^0\d-/.test(codeText) || /^\d{2}_/.test(codeText);
+
+                            if (inline && (isMdFile || isWikilinkLike || isFolder || isNumberedNote) && onOpenNoteOrFile) {
+                              const cleanTarget = codeText.replace(/^\[\[/, '').replace(/\]\]$/, '').trim();
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onOpenNoteOrFile(cleanTarget);
+                                  }}
+                                  className="inline-flex items-center space-x-1 font-mono text-[11px] font-semibold text-amber-300 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 hover:border-amber-400 px-1.5 py-0.5 rounded-md cursor-pointer transition-all mx-0.5 shadow-xs group"
+                                  title={`Abrir "${cleanTarget}" no FrankMD Vault`}
+                                >
+                                  <FileText className="w-3 h-3 text-amber-400 group-hover:scale-110 transition-transform" />
+                                  <span className="underline decoration-amber-500/50 underline-offset-2">{codeText}</span>
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            );
+                          },
+                          a({ href, children, ...props }: any) {
+                            if (href && (href.startsWith('note://') || href.startsWith('vault://') || href.endsWith('.md'))) {
+                              const target = href.replace(/^(note|vault):\/\//, '');
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (onOpenNoteOrFile) onOpenNoteOrFile(target);
+                                  }}
+                                  className="inline-flex items-center space-x-1 font-semibold text-accent-light hover:text-white underline cursor-pointer"
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  <span>{children}</span>
+                                </button>
+                              );
+                            }
+                            return (
+                              <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-light hover:underline" {...props}>
+                                {children}
+                              </a>
+                            );
+                          }
+                        }}
+                      >
                         {msg.content}
                       </ReactMarkdown>
                     </div>

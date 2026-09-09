@@ -9,7 +9,9 @@ import {
   ExternalLink,
   Sparkles,
   Sun,
-  Moon
+  Moon,
+  Clock,
+  Trash2
 } from 'lucide-react';
 import { AppConfig } from '../types';
 import { api } from '../api';
@@ -32,6 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [anthropicKey, setAnthropicKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [deletedNotesRetention, setDeletedNotesRetention] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -42,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setAnthropicKey(config.keys.anthropic || '');
       setOpenaiKey(config.keys.openai || '');
       if (config.theme) setTheme(config.theme);
+      if (config.deletedNotesRetention) setDeletedNotesRetention(config.deletedNotesRetention);
     }
   }, [config]);
 
@@ -53,6 +57,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const updated = await api.updateConfig({
         theme,
+        deletedNotesRetention,
         keys: {
           openrouter: openrouterKey.trim() || undefined,
           google: googleKey.trim() || undefined,
@@ -134,6 +139,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>Tema Claro</span>
               </button>
             </div>
+          </div>
+
+          {/* Deleted Notes Retention Setting */}
+          <div className="space-y-2 p-3 rounded-xl bg-panel border border-card-border">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Retenção de Notas Excluídas (Lixeira)</span>
+              </label>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Define o tempo que as notas e pastas excluídas permanecerão na lixeira (.backups) antes da exclusão permanente.
+            </p>
+            <select
+              value={deletedNotesRetention}
+              onChange={(e) => setDeletedNotesRetention(e.target.value as any)}
+              className="w-full bg-background border border-card-border rounded-xl px-3 py-2 text-xs font-mono text-amber-300 focus:outline-none focus:border-accent cursor-pointer"
+            >
+              <option value="30_days">30 dias</option>
+              <option value="90_days">90 dias (Recomendado / Padrão)</option>
+              <option value="120_days">120 dias</option>
+              <option value="1_year">1 ano</option>
+              <option value="never">Sempre (Nunca excluir definitivamente)</option>
+            </select>
           </div>
 
           {/* OpenRouter Key & Live Balance */}

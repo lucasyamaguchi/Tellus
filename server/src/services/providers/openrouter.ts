@@ -173,60 +173,69 @@ export class OpenRouterService {
     let fullReasoning = '';
     const activeToolCalls: Record<number, { id: string; name: string; arguments: string }> = {};
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data:')) continue;
-        if (trimmed === 'data: [DONE]') continue;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          if (trimmed === 'data: [DONE]') continue;
 
-        try {
-          const jsonStr = trimmed.replace(/^data:\s*/, '');
-          const data = JSON.parse(jsonStr);
-          const choice = data.choices?.[0];
-          if (!choice) continue;
+          try {
+            const jsonStr = trimmed.replace(/^data:\s*/, '');
+            const data = JSON.parse(jsonStr);
+            const choice = data.choices?.[0];
+            if (!choice) continue;
 
-          const delta = choice.delta;
-          if (!delta) continue;
+            const delta = choice.delta;
+            if (!delta) continue;
 
-          // Check for reasoning or thought tokens
-          if (delta.reasoning || delta.thought) {
-            const rChunk = delta.reasoning || delta.thought;
-            fullReasoning += rChunk;
-            callbacks.onReasoningChunk(rChunk);
-          }
+            // Check for reasoning or thought tokens
+            if (delta.reasoning || delta.thought) {
+              const rChunk = delta.reasoning || delta.thought;
+              fullReasoning += rChunk;
+              callbacks.onReasoningChunk(rChunk);
+            }
 
-          // Check for content tokens
-          if (delta.content) {
-            fullContent += delta.content;
-            callbacks.onContentChunk(delta.content);
-          }
+            // Check for content tokens
+            if (delta.content) {
+              fullContent += delta.content;
+              callbacks.onContentChunk(delta.content);
+            }
 
-          // Check for tool calls
-          if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
-            for (const tc of delta.tool_calls) {
-              const index = tc.index || 0;
-              if (!activeToolCalls[index]) {
-                activeToolCalls[index] = {
-                  id: tc.id || `call_${Math.random().toString(36).substr(2, 9)}`,
-                  name: tc.function?.name || '',
-                  arguments: tc.function?.arguments || ''
-                };
-              } else {
-                if (tc.function?.name) activeToolCalls[index].name += tc.function.name;
-                if (tc.function?.arguments) activeToolCalls[index].arguments += tc.function.arguments;
+            // Check for tool calls
+            if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+              for (const tc of delta.tool_calls) {
+                const index = tc.index || 0;
+                if (!activeToolCalls[index]) {
+                  activeToolCalls[index] = {
+                    id: tc.id || `call_${Math.random().toString(36).substr(2, 9)}`,
+                    name: tc.function?.name || '',
+                    arguments: tc.function?.arguments || ''
+                  };
+                } else {
+                  if (tc.function?.name) activeToolCalls[index].name += tc.function.name;
+                  if (tc.function?.arguments) activeToolCalls[index].arguments += tc.function.arguments;
+                }
               }
             }
+          } catch {
+            // ignore malformed SSE line
           }
-        } catch {
-          // ignore malformed SSE line
         }
+      }
+    } catch (readErr: any) {
+      if (abortSignal?.aborted) {
+        throw new Error('Requisição cancelada pelo usuário.');
+      }
+      if (!fullContent && !fullReasoning && Object.keys(activeToolCalls).length === 0) {
+        throw new Error(`Conexão com provedor interrompida: ${readErr.message || 'Stream abortado'}`);
       }
     }
 

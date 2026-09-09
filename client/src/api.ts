@@ -15,7 +15,8 @@ import {
   GraphData,
   TellusSkill,
   TellusArtifact,
-  AgentPipelineConfig
+  AgentPipelineConfig,
+  DeletedNoteItem
 } from './types';
 
 const API_BASE = '/api';
@@ -235,6 +236,48 @@ export const api = {
   async deleteNote(id: string, isProjectSpecific?: boolean): Promise<{ success: boolean }> {
     const res = await fetch(`${API_BASE}/notes/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
       method: 'DELETE'
+    });
+    return res.json();
+  },
+
+  // Trash & Deleted Notes Retention
+  async listDeletedNotes(): Promise<{ items: DeletedNoteItem[]; retention: string }> {
+    const res = await fetch(`${API_BASE}/notes/trash`);
+    return res.json();
+  },
+
+  async restoreDeletedNote(backupFilename: string): Promise<{ success: boolean; note: FrankNote }> {
+    const res = await fetch(`${API_BASE}/notes/trash/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backupFilename })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao restaurar nota' }));
+      throw new Error(err.error || 'Falha ao restaurar nota');
+    }
+    return res.json();
+  },
+
+  async permanentlyDeleteNote(backupFilename: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/notes/trash?backupFilename=${encodeURIComponent(backupFilename)}`, {
+      method: 'DELETE'
+    });
+    return res.json();
+  },
+
+  async emptyTrash(): Promise<{ success: boolean; count: number }> {
+    const res = await fetch(`${API_BASE}/notes/trash`, {
+      method: 'DELETE'
+    });
+    return res.json();
+  },
+
+  async cleanupTrash(retention?: string): Promise<{ success: boolean; cleanedCount: number }> {
+    const res = await fetch(`${API_BASE}/notes/trash/cleanup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ retention })
     });
     return res.json();
   },
@@ -473,7 +516,16 @@ export const api = {
         if (onDone) onDone();
       })
       .catch((err) => {
-        if (onError) onError(err);
+        if (controller.signal.aborted || err?.name === 'AbortError') {
+          return;
+        }
+        if (onError) {
+          const isBufferAbort = err?.message?.includes('BodyStreamBuffer') || err?.message?.includes('aborted');
+          const message = isBufferAbort
+            ? 'A conexão com o modelo foi interrompida antes do término do streaming. Tente novamente ou verifique se o modelo selecionado está disponível.'
+            : (err?.message || 'Erro durante a transmissão do chat');
+          onError({ message });
+        }
       });
 
     return () => controller.abort();

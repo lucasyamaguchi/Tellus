@@ -36,6 +36,17 @@ export interface AppConfig {
   customRoutines: Routine[];
   pipeline?: AgentPipelineConfig;
   theme?: 'dark' | 'light';
+  deletedNotesRetention?: '30_days' | '90_days' | '120_days' | '1_year' | 'never';
+}
+
+export interface DeletedNoteItem {
+  id: string;
+  title: string;
+  backupFilename: string;
+  originalFolder: string;
+  deletedAt: number;
+  size: number;
+  content: string;
 }
 
 export interface Routine {

@@ -368,7 +368,13 @@ export class AgentLoop {
 - É ESTRITAMENTE PROIBIDO trocar para Espanhol, Portunhol ou qualquer outro idioma, mesmo ao analisar PDFs, editais, provas ou materiais técnicos.
 - Termos técnicos de exames e concursos devem ser sempre traduzidos e grafados no padrão oficial brasileiro (ex: "Gabarito Oficial" em vez de "hoja de respuestas", "Questões" em vez de "preguntas", "Direito Administrativo" em vez de "derecho", "Orçamento Público" em vez de "orzamento", "Despesas" em vez de "gastos").`;
 
-    const enrichedSystemPrompt = `${languageAnchor}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    // Strict Deleted Notes & Live Vault State Guidelines
+    const deletedNotesPolicy = `[🗑️ DIRETRIZ MANDATÓRIA DE NOTAS EXCLUÍDAS E ESTADO ATIVO DO VAULT]
+- Verificação de Existência Real: NUNCA presuma que arquivos, roteiros, cadernos de estudo ou pacotes de candidatura (ex: aplicacao-nestle/, cadernos de concurso, etc.) já estão prontos apenas porque constam em mensagens antigas do chat.
+- Notas Excluídas são INATIVAS / NÃO CONCLUÍDAS: Se o usuário reenviar um pedido de estudo ou candidatura para uma vaga/conteúdo cujo diretório ou notas foram excluídos, desconsidere o material antigo e crie um NOVO roteiro, plano de estudos, atividades e módulos do zero no Vault ativo.
+- Consulta sobre Notas Excluídas: Se o usuário perguntar especificamente sobre uma nota, roteiro ou assunto que foi excluído, consulte o histórico de exclusões e informe claramente quando foi excluída, o contexto do arquivo e por que pode ser útil mantê-la ou restaurá-la.`;
+
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${deletedNotesPolicy}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     const currentHistory: ChatMessage[] = [
       { role: 'system', content: enrichedSystemPrompt },
