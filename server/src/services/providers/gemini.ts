@@ -28,10 +28,31 @@ export class GeminiService {
       if (msg.role === 'system') {
         systemInstruction = { parts: [{ text: msg.content || '' }] };
       } else if (msg.role === 'user') {
-        contents.push({
-          role: 'user',
-          parts: [{ text: msg.content || '' }]
-        });
+        if (Array.isArray(msg.content)) {
+          const parts: any[] = [];
+          for (const part of msg.content) {
+            if (part.type === 'text') {
+              parts.push({ text: part.text || '' });
+            } else if (part.type === 'image_url' && part.image_url?.url) {
+              const dataUrl = part.image_url.url;
+              const match = dataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+              if (match) {
+                parts.push({
+                  inlineData: {
+                    mimeType: match[1],
+                    data: match[2]
+                  }
+                });
+              }
+            }
+          }
+          contents.push({ role: 'user', parts: parts.length > 0 ? parts : [{ text: '' }] });
+        } else {
+          contents.push({
+            role: 'user',
+            parts: [{ text: msg.content || '' }]
+          });
+        }
       } else if (msg.role === 'assistant') {
         const parts: any[] = [];
         if (msg.content) parts.push({ text: msg.content });
@@ -50,7 +71,11 @@ export class GeminiService {
         contents.push({ role: 'model', parts });
       } else if (msg.role === 'tool') {
         let responseJson: any = { content: msg.content };
-        try { responseJson = JSON.parse(msg.content || '{}'); } catch {}
+        if (typeof msg.content === 'string') {
+          try { responseJson = JSON.parse(msg.content || '{}'); } catch {}
+        } else if (msg.content) {
+          responseJson = msg.content;
+        }
         contents.push({
           role: 'user',
           parts: [{

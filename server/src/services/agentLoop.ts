@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { FileTools } from './tools/fileTools.js';
 import { TerminalRunner } from './tools/terminalRunner.js';
 import { ScreenCapture } from './tools/screenCapture.js';
@@ -195,13 +197,14 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'frank_note_save',
-      description: 'Cria ou atualiza uma nota segura no sistema FrankMD / Obsidian Vault com wikilinks [[Nota]] e tags #tag.',
+      description: 'Cria ou atualiza uma nota segura no sistema FrankMD / Obsidian Vault dentro de um Caderno e Subpasta especificados com wikilinks [[Nota]] e tags #tag.',
       parameters: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Título da nota' },
-          subject: { type: 'string', description: 'Assunto ou tema (ex: "Arquitetura", "Segurança", "Ideias")' },
-          content: { type: 'string', description: 'Conteúdo em Markdown com wikilinks e tags' },
+          title: { type: 'string', description: 'Título claro da nota' },
+          folder: { type: 'string', description: 'Caminho do Caderno e Subpasta no cofre (ex: "Carreira/Nestle", "Estudos/SPREGULA", "Caderno de Anotações/Manuscritos")' },
+          subject: { type: 'string', description: 'Assunto ou tema principal da nota' },
+          content: { type: 'string', description: 'Conteúdo em Markdown com wikilinks [[Outra Nota]] e #tags' },
           is_project_specific: { type: 'boolean', description: 'Se true salva no projeto atual, se false salva no cofre global' }
         },
         required: ['title', 'content']
@@ -320,13 +323,24 @@ export class AgentLoop {
           return { status: 'success', artifact: { id: artifact.id, title: artifact.title, path: artifact.relativePath } };
         }
         case 'frank_note_save': {
+          const folder = args.folder || args.subject || 'Geral';
           const note = FrankNoteEngine.saveNote({
             title: args.title,
-            subject: args.subject,
+            folder,
+            subject: args.subject || folder,
             content: args.content,
             isProjectSpecific: args.is_project_specific
           }, projectPath);
-          return { status: 'success', note: { id: note.id, title: note.title, subject: note.subject } };
+          return { 
+            status: 'success', 
+            note: { 
+              id: note.id, 
+              title: note.title, 
+              folder: note.folder,
+              subject: note.subject,
+              relativePath: note.relativePath 
+            } 
+          };
         }
         case 'memory_create_handoff': {
           const handoff = MemoryEngine.createHandoff(
@@ -362,11 +376,42 @@ export class AgentLoop {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
     const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
     
-    // Strict Language Enforcement Anchor to prevent multilingual drift (e.g. Spanish/Portunhol bleed in fast models)
-    const languageAnchor = `[🌐 DIRETRIZ MANDATÓRIA DE IDIOMA - PORTUGUÊS DO BRASIL (pt-BR)]
-- Você DEVE SEMPRE responder, explicar, dialogar e redigir TODAS as anotações, planos de estudo, cadernos e notas do FrankMD estritamente em PORTUGUÊS DO BRASIL (pt-BR).
-- É ESTRITAMENTE PROIBIDO trocar para Espanhol, Portunhol ou qualquer outro idioma, mesmo ao analisar PDFs, editais, provas ou materiais técnicos.
-- Termos técnicos de exames e concursos devem ser sempre traduzidos e grafados no padrão oficial brasileiro (ex: "Gabarito Oficial" em vez de "hoja de respuestas", "Questões" em vez de "preguntas", "Direito Administrativo" em vez de "derecho", "Orçamento Público" em vez de "orzamento", "Despesas" em vez de "gastos").`;
+    // 1. Dynamic User Language Detection:
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+    let userText = '';
+    if (typeof lastUserMsg?.content === 'string') {
+      userText = lastUserMsg.content;
+    } else if (Array.isArray(lastUserMsg?.content)) {
+      userText = lastUserMsg.content.map(p => p.text || '').join(' ');
+    }
+
+    const isEnglish = /\b(the|and|is|are|please|write|create|solve|how|what|why|code)\b/i.test(userText) && !/\b(você|para|como|quero|estudar|anote|vaga|não|com|de|em)\b/i.test(userText);
+    const isSpanishExplicit = /\b(quiero|estudiar|anota|esto|por favor|prueba|preguntas)\b/i.test(userText) && !/\b(você|para|como|quero|anote|vaga|não|com|de|em|estudos)\b/i.test(userText);
+    
+    let targetLanguage = 'PORTUGUÊS DO BRASIL (pt-BR)';
+    if (isEnglish) targetLanguage = 'INGLÊS (English)';
+    else if (isSpanishExplicit) targetLanguage = 'ESPANHOL (Español)';
+
+    // Dynamic Language Enforcement Anchor:
+    const languageAnchor = `[🌐 DIRETRIZ MANDATÓRIA DE IDIOMA - RECONHECIMENTO DINÂMICO]
+- IDIOMA DE ENTRADA DO USUÁRIO IDENTIFICADO: **${targetLanguage}**.
+- Você DEVE OBRIGATORIAMENTE responder, dialogar, explicar e redigir TODAS as anotações, planos de estudo, cadernos e notas do FrankMD estritamente no idioma de entrada: **${targetLanguage}**.
+- SE O USUÁRIO ESCREVEU EM PORTUGUÊS, É ESTRITAMENTE PROIBIDO RESPONDER OU GERAR ARQUIVOS EM ESPANHOL OU PORTUNHOL!
+- Ignore e rejeite qualquer contaminação linguística de mensagens antigas do histórico que tenham sido redigidas em outro idioma.
+- NUNCA use termos em espanhol como "preguntas", "análisis", "derecho", "orzamento", "desconhecimento" se o idioma for português; use sempre os termos corretos da língua portuguesa ("questões", "análise", "direito", "orçamento", etc.).`;
+
+    // Handwritten Notebook OCR & Visual Note-Taking Policy
+    const handwrittenOcrPolicy = `[📸 RECONHECIMENTO DE FOTOS DE CADERNO E ANOTAÇÕES MANUSCRITAS ("Anote Isso")]
+- Quando o usuário anexar uma foto de caderno, anotação manuscrita, lousa ou papel e pedir para "anotar", "anote isso", "digitalizar", "transcrever" ou "salvar nas notas":
+  1. Realize OCR visual minucioso da caligrafia, transcrevendo com precisão o texto manuscrito para Markdown estruturado e limpo.
+  2. Preserve fórmulas matemáticas em LaTeX ($...$ ou $$...$$), diagramas (em Mermaid ou blocos de código), tabelas, títulos e listas com marcadores.
+  3. Salve AUTOMATICAMENTE a anotação transcrita chamando a ferramenta 'frank_note_save', escolhendo um título expressivo e direcionando para o Caderno apropriado (ex: folder: "Caderno de Anotações/Manuscritos" ou "Estudos/Anotações à Mão").
+  4. Responda no chat em português confirmando a digitalização com um resumo objetivo e o link clicável da nota criada.`;
+
+    // Notebooks & Subfolders System Guidelines
+    const notebooksPolicy = `[📓 SISTEMA DE CADERNOS (NOTEBOOKS) E SUBPASTAS DO FRANKMD VAULT]
+- O cofre é organizado na hierarquia: CADERNO (Pasta Principal) ➔ SUBPASTA ➔ NOTA.
+- Sempre que criar notas com 'frank_note_save', defina o parâmetro 'folder' com a estrutura "Caderno/Subpasta" (ex: "Carreira/Vaga Nestle", "Estudos/SPREGULA", "Caderno de Anotações/Manuscritos").`;
 
     // Strict Deleted Notes & Live Vault State Guidelines
     const deletedNotesPolicy = `[🗑️ DIRETRIZ MANDATÓRIA DE NOTAS EXCLUÍDAS E ESTADO ATIVO DO VAULT]
@@ -374,11 +419,41 @@ export class AgentLoop {
 - Notas Excluídas são INATIVAS / NÃO CONCLUÍDAS: Se o usuário reenviar um pedido de estudo ou candidatura para uma vaga/conteúdo cujo diretório ou notas foram excluídos, desconsidere o material antigo e crie um NOVO roteiro, plano de estudos, atividades e módulos do zero no Vault ativo.
 - Consulta sobre Notas Excluídas: Se o usuário perguntar especificamente sobre uma nota, roteiro ou assunto que foi excluído, consulte o histórico de exclusões e informe claramente quando foi excluída, o contexto do arquivo e por que pode ser útil mantê-la ou restaurá-la.`;
 
-    const enrichedSystemPrompt = `${languageAnchor}\n\n${deletedNotesPolicy}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+
+    // Process Multimodal Images from .agentic/attachments/
+    const processedMessages: ChatMessage[] = messages.map(m => {
+      if (m.role === 'user' && typeof m.content === 'string') {
+        const imageMatch = m.content.match(/\.agentic[\\\/]attachments[\\\/]([a-zA-Z0-9._-]+\.(png|jpg|jpeg|webp|gif))/i);
+        if (imageMatch) {
+          const imgFilename = imageMatch[1];
+          const imgPath = path.join(projectPath, '.agentic', 'attachments', imgFilename);
+          if (fs.existsSync(imgPath)) {
+            try {
+              const buf = fs.readFileSync(imgPath);
+              const ext = path.extname(imgPath).toLowerCase().replace('.', '');
+              const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+              const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+              
+              return {
+                ...m,
+                content: [
+                  { type: 'text', text: m.content },
+                  { type: 'image_url', image_url: { url: dataUrl } }
+                ]
+              };
+            } catch {
+              // fallback to original text content
+            }
+          }
+        }
+      }
+      return m;
+    });
 
     const currentHistory: ChatMessage[] = [
       { role: 'system', content: enrichedSystemPrompt },
-      ...messages
+      ...processedMessages
     ];
 
     let stepCount = 0;
