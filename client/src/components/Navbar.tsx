@@ -21,7 +21,8 @@ import {
   Code2,
   BrainCircuit,
   Sun,
-  Moon
+  Moon,
+  Radio
 } from 'lucide-react';
 import { AppConfig, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
@@ -39,6 +40,7 @@ interface NavbarProps {
   hasCustomPipeline?: boolean;
   theme?: 'dark' | 'light';
   onToggleTheme?: () => void;
+  onOpenLiveVoice?: () => void;
   onSetMainViewMode: (mode: 'agent' | 'notes' | 'skills') => void;
   onToggleRightPanel: () => void;
   onToggleOverlay: () => void;
@@ -64,6 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   hasCustomPipeline,
   theme,
   onToggleTheme,
+  onOpenLiveVoice,
   onSetMainViewMode,
   onToggleRightPanel,
   onToggleOverlay,
@@ -241,6 +244,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <Zap className={`w-3.5 h-3.5 ${tokenEfficiency ? 'text-amber-400 fill-amber-400 animate-pulse' : 'text-slate-400'}`} />
         </button>
+
+        {/* Live Voice Chat Button */}
+        {onOpenLiveVoice && (
+          <button
+            onClick={onOpenLiveVoice}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs transition-all group shadow-sm"
+            title="Abrir Live Voice Chat (diálogo por voz em tempo real para estudos)"
+          >
+            <Radio className="w-3.5 h-3.5 text-red-400 group-hover:animate-pulse" />
+            <span className="hidden xl:inline text-[11px] font-medium">Live Voice</span>
+          </button>
+        )}
       </div>
 
       {/* 3. Right Section: Live Balance, Right Panel Tabs & Consolidated Menu */}
@@ -389,6 +404,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {isOverlayActive ? 'ON' : 'OFF'}
                 </span>
               </button>
+
+              {/* Live Voice Chat Option */}
+              {onOpenLiveVoice && (
+                <button
+                  onClick={() => {
+                    setIsMenuDropdownOpen(false);
+                    onOpenLiveVoice();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-panel text-slate-200 flex items-center justify-between"
+                >
+                  <div className="flex items-center space-x-2">
+                    <Radio className="w-3.5 h-3.5 text-red-400" />
+                    <span>Live Voice Chat</span>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-red-500/20 text-red-300">
+                    Ao Vivo
+                  </span>
+                </button>
+              )}
 
               <div className="h-[1px] bg-card-border my-1" />
 

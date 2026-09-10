@@ -14,6 +14,7 @@ import { MentionModal } from './components/MentionModal';
 import { WindowPickerModal } from './components/WindowPickerModal';
 import { FloatingOverlay } from './components/FloatingOverlay';
 import { PipelineMindMapModal } from './components/PipelineMindMapModal';
+import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
@@ -70,6 +71,7 @@ export const App: React.FC = () => {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState<boolean>(false);
   const [isMentionModalOpen, setIsMentionModalOpen] = useState<boolean>(false);
   const [isWindowPickerOpen, setIsWindowPickerOpen] = useState<boolean>(false);
+  const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
   const [openProjects, setOpenProjects] = useState<ProjectOverview[]>([]);
 
@@ -435,6 +437,19 @@ export const App: React.FC = () => {
     setIsStreaming(false);
   };
 
+  const handleTransferVoiceMessages = (voiceMsgs: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+    if (!voiceMsgs || voiceMsgs.length === 0) return;
+    const mapped: Message[] = voiceMsgs.map((m, idx) => ({
+      id: 'voice_' + Date.now() + '_' + idx,
+      role: m.role,
+      content: m.content,
+      timestamp: Date.now() + idx * 10
+    }));
+    const updated = [...messages, ...mapped];
+    setMessages(updated);
+    saveCurrentSession(updated);
+  };
+
   const handleSelectModel = (modelId: string) => {
     const cleanId = modelId.replace(/:batch$/i, '').trim();
     setActiveModel(cleanId);
@@ -514,6 +529,7 @@ export const App: React.FC = () => {
         hasCustomPipeline={!!(agentPipeline?.plannerModel || agentPipeline?.codingModel || agentPipeline?.reasoningModel || agentPipeline?.fastToolsModel)}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        onOpenLiveVoice={() => setIsLiveVoiceOpen(true)}
         onSetMainViewMode={setMainViewMode}
         onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
         onToggleOverlay={() => setIsOverlayActive(!isOverlayActive)}
@@ -625,6 +641,7 @@ export const App: React.FC = () => {
                 onSelectRoutine={handleSelectRoutine}
                 onOpenMentionModal={() => setIsMentionModalOpen(true)}
                 onOpenWindowPicker={() => setIsWindowPickerOpen(true)}
+                onOpenLiveVoice={() => setIsLiveVoiceOpen(true)}
                 quotedMessage={quotedMessage}
                 onClearQuotedMessage={() => setQuotedMessage(null)}
                 onOpenNotes={() => setMainViewMode('notes')}
@@ -778,6 +795,14 @@ export const App: React.FC = () => {
         isOpen={isMentionModalOpen}
         onClose={() => setIsMentionModalOpen(false)}
         onSelectQuote={(q) => setQuotedMessage(q)}
+      />
+
+      {/* Live Voice Chat & Study Modal */}
+      <LiveVoiceModal
+        isOpen={isLiveVoiceOpen}
+        onClose={() => setIsLiveVoiceOpen(false)}
+        activeModel={activeModel}
+        onTransferToChat={handleTransferVoiceMessages}
       />
     </div>
   );

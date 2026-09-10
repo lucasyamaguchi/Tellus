@@ -32,12 +32,18 @@ import {
   Zap,
   Maximize2,
   Minimize2,
-  Camera
+  Camera,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Radio
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message, ToolCallItem, Routine, Attachment, QuotedMessage } from '../types';
 import { api } from '../api';
+import { voiceService } from '../services/voiceService';
 
 interface ChatAreaProps {
   messages: Message[];
@@ -59,6 +65,7 @@ interface ChatAreaProps {
   onRegenerateResponse?: (assistantMessageId: string) => void;
   tokenEfficiency?: boolean;
   onToggleTokenEfficiency?: () => void;
+  onOpenLiveVoice?: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -80,7 +87,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onEditMessage,
   onRegenerateResponse,
   tokenEfficiency,
-  onToggleTokenEfficiency
+  onToggleTokenEfficiency,
+  onOpenLiveVoice
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -89,6 +97,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   
+  // Voice & Speech States
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [isDictating, setIsDictating] = useState<boolean>(false);
+  const dictationRecognizerRef = useRef<any>(null);
+
   // Message In-Place Editing State
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editInput, setEditInput] = useState<string>('');
@@ -101,6 +114,56 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [createdNoteInfo, setCreatedNoteInfo] = useState<{ id: string; title: string } | null>(null);
 
   const [isExpandedEditor, setIsExpandedEditor] = useState<boolean>(false);
+
+  const handleToggleSpeakMessage = (msgId: string, content: string) => {
+    if (speakingMessageId === msgId) {
+      voiceService.stop();
+      setSpeakingMessageId(null);
+    } else {
+      voiceService.speak(content, {
+        onStart: () => setSpeakingMessageId(msgId),
+        onEnd: () => setSpeakingMessageId(null),
+        onError: () => setSpeakingMessageId(null)
+      });
+    }
+  };
+
+  const handleToggleDictation = () => {
+    if (isDictating) {
+      if (dictationRecognizerRef.current) {
+        try { dictationRecognizerRef.current.stop(); } catch {}
+      }
+      setIsDictating(false);
+      return;
+    }
+
+    if (!voiceService.isSpeechRecognitionAvailable()) {
+      alert('Reconhecimento de voz não suportado neste navegador. Verifique permissões de microfone.');
+      return;
+    }
+
+    try {
+      const rec = voiceService.createSpeechRecognizer({
+        lang: 'pt-BR',
+        onStart: () => setIsDictating(true),
+        onResult: (transcript, isFinal) => {
+          setInput(prev => {
+            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+            return prev + separator + transcript;
+          });
+          if (isFinal) {
+            setIsDictating(false);
+          }
+        },
+        onError: () => setIsDictating(false),
+        onEnd: () => setIsDictating(false)
+      });
+      dictationRecognizerRef.current = rec;
+      rec.start();
+    } catch {
+      setIsDictating(false);
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -361,6 +424,27 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </span>
                 )}
                 <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                {msg.role !== 'user' && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSpeakMessage(msg.id, msg.content)}
+                    className={`p-1 rounded-md border transition-all flex items-center space-x-1 cursor-pointer ${
+                      speakingMessageId === msg.id
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 ring-1 ring-emerald-500/40 animate-pulse'
+                        : 'bg-panel/60 hover:bg-card-border border-card-border/60 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title={speakingMessageId === msg.id ? "Interromper leitura em voz alta" : "Ouvir resposta em voz alta (TTS)"}
+                  >
+                    {speakingMessageId === msg.id ? (
+                      <>
+                        <VolumeX className="w-3 h-3 text-emerald-400" />
+                        <span className="text-[9px] font-mono text-emerald-300">Falando</span>
+                      </>
+                    ) : (
+                      <Volume2 className="w-3 h-3" />
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Message Bubble Container */}
@@ -835,6 +919,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
         {/* Quick Action Chips Bar */}
         <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+          {onOpenLiveVoice && (
+            <button
+              onClick={onOpenLiveVoice}
+              className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/25 to-indigo-600/25 hover:from-purple-600/40 hover:to-indigo-600/40 border border-purple-500/50 text-purple-300 transition-all whitespace-nowrap flex items-center space-x-1.5 font-semibold cursor-pointer shadow-xs animate-pulse"
+              title="Abrir Modo Live Voice Chat para estudo conversacional por voz em tempo real"
+            >
+              <Radio className="w-3.5 h-3.5 text-purple-400" />
+              <span>🎙️ Live Voice Chat</span>
+            </button>
+          )}
+
           {attachments.some(att => att.isImage) && (
             <button
               onClick={() => {
@@ -1021,18 +1116,34 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <span>Interromper</span>
               </button>
             ) : (
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() && attachments.length === 0}
-                className={`px-4 py-2 rounded-xl text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-md ${
-                  input.trim() || attachments.length > 0
-                    ? 'bg-accent hover:bg-accent-hover shadow-accent/30'
-                    : 'bg-card-border text-slate-500 cursor-not-allowed'
-                }`}
-              >
-                <span>Enviar</span>
-                <Send className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center space-x-1.5">
+                {/* Microphone / Dictation button */}
+                <button
+                  type="button"
+                  onClick={handleToggleDictation}
+                  className={`p-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+                    isDictating
+                      ? 'bg-purple-600 text-white border-purple-500 ring-2 ring-purple-500/50 shadow-md shadow-purple-600/30 animate-pulse'
+                      : 'bg-panel hover:bg-card-border border-card-border text-slate-300 hover:text-white'
+                  }`}
+                  title={isDictating ? "Parar ditado por voz" : "Ditar mensagem por voz (Reconhecimento de fala em pt-BR)"}
+                >
+                  {isDictating ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4 text-purple-400" />}
+                </button>
+
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() && attachments.length === 0}
+                  className={`px-4 py-2 rounded-xl text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-md ${
+                    input.trim() || attachments.length > 0
+                      ? 'bg-accent hover:bg-accent-hover shadow-accent/30 cursor-pointer'
+                      : 'bg-card-border text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  <span>Enviar</span>
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </div>
             )}
           </div>
         </div>

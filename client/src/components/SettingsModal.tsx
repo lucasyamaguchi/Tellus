@@ -11,10 +11,14 @@ import {
   Sun,
   Moon,
   Clock,
-  Trash2
+  Trash2,
+  Volume2,
+  Mic,
+  Play
 } from 'lucide-react';
 import { AppConfig } from '../types';
 import { api } from '../api';
+import { voiceService, VoiceOption } from '../services/voiceService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,8 +39,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [openaiKey, setOpenaiKey] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [deletedNotesRetention, setDeletedNotesRetention] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
+  
+  // Voice Settings States
+  const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const [selectedVoiceUri, setSelectedVoiceUri] = useState<string>('');
+  const [speechRate, setSpeechRate] = useState<number>(1.0);
+  const [autoSpeak, setAutoSpeak] = useState<boolean>(false);
+
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
 
   useEffect(() => {
     if (config) {
@@ -47,14 +59,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (config.theme) setTheme(config.theme);
       if (config.deletedNotesRetention) setDeletedNotesRetention(config.deletedNotesRetention);
     }
+
+    const loadVoices = () => {
+      setVoices(voiceService.getVoiceOptions());
+      const pref = voiceService.getPreferredVoice();
+      if (pref) setSelectedVoiceUri(pref.voiceURI);
+      setSpeechRate(voiceService.getSpeechRate());
+      setAutoSpeak(voiceService.getAutoSpeak());
+    };
+    loadVoices();
+    voiceService.onVoicesReady(loadVoices);
   }, [config]);
 
   if (!isOpen) return null;
+
+  const handleTestVoice = () => {
+    if (isTestingVoice) {
+      voiceService.stop();
+      setIsTestingVoice(false);
+      return;
+    }
+    setIsTestingVoice(true);
+    voiceService.speak('Olá! Esta é a voz de síntese do Tellus Agentic IDE configurada para você.', {
+      voiceURI: selectedVoiceUri,
+      rate: speechRate,
+      onEnd: () => setIsTestingVoice(false),
+      onError: () => setIsTestingVoice(false),
+    });
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
+      // Save Voice preferences locally
+      if (selectedVoiceUri) {
+        voiceService.setPreferredVoice(selectedVoiceUri);
+      }
+      voiceService.setSpeechRate(speechRate);
+      voiceService.setAutoSpeak(autoSpeak);
+
       const updated = await api.updateConfig({
         theme,
         deletedNotesRetention,
@@ -163,6 +207,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <option value="1_year">1 ano</option>
               <option value="never">Sempre (Nunca excluir definitivamente)</option>
             </select>
+          </div>
+
+          {/* Voice & Speech Synthesis Settings */}
+          <div className="space-y-3 p-3.5 rounded-xl bg-panel border border-card-border">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <Volume2 className="w-4 h-4 text-brand-cyan" />
+                <span>Voz e Síntese de Fala (Áudio & Live Chat)</span>
+              </label>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-cyan/10 border border-brand-cyan/20 text-brand-cyan font-mono">
+                TTS & STT
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Escolha a voz do assistente para ouvir as respostas no chat e para o modo de estudo Live Voice.
+            </p>
+
+            {/* Voice Dropdown */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-slate-300">Seletor de Voz:</label>
+              <div className="flex items-center space-x-2">
+                <select
+                  value={selectedVoiceUri}
+                  onChange={(e) => setSelectedVoiceUri(e.target.value)}
+                  className="flex-1 bg-background border border-card-border rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-brand-cyan cursor-pointer"
+                >
+                  {voices.length === 0 ? (
+                    <option value="">Carregando vozes do sistema...</option>
+                  ) : (
+                    voices.map((v) => (
+                      <option key={v.uri} value={v.uri}>
+                        {v.isPortuguese ? '🇧🇷 ' : '🌐 '} {v.name} ({v.lang})
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleTestVoice}
+                  className={`px-3 py-2 rounded-xl text-xs font-medium flex items-center space-x-1.5 border transition-all ${
+                    isTestingVoice
+                      ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse'
+                      : 'bg-card hover:bg-card-border border-card-border text-slate-300 hover:text-white'
+                  }`}
+                  title={isTestingVoice ? 'Parar reprodução de teste' : 'Ouvir voz selecionada'}
+                >
+                  <Play className={`w-3 h-3 ${isTestingVoice ? 'fill-rose-400 text-rose-400' : 'fill-slate-300'}`} />
+                  <span>{isTestingVoice ? 'Parar' : 'Testar'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Speech Rate Slider */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300">Velocidade da Fala:</span>
+                <span className="font-mono text-brand-cyan font-semibold">{speechRate.toFixed(2)}x</span>
+              </div>
+              <input
+                type="range"
+                min="0.75"
+                max="1.5"
+                step="0.05"
+                value={speechRate}
+                onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
+                className="w-full accent-brand-cyan cursor-pointer"
+              />
+              <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                <span>0.75x (Lenta)</span>
+                <span>1.0x (Padrão)</span>
+                <span>1.5x (Rápida)</span>
+              </div>
+            </div>
+
+            {/* Auto-speak replies toggle */}
+            <label className="flex items-center space-x-2.5 pt-1 text-xs text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={autoSpeak}
+                onChange={(e) => setAutoSpeak(e.target.checked)}
+                className="rounded border-card-border bg-background text-brand-cyan focus:ring-0 w-3.5 h-3.5 cursor-pointer accent-brand-cyan"
+              />
+              <span>Ler automaticamente respostas novas do assistente com áudio</span>
+            </label>
           </div>
 
           {/* OpenRouter Key & Live Balance */}

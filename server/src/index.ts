@@ -859,6 +859,61 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 });
 
+// Voice Endpoints: Whisper STT support
+app.post('/api/voice/transcribe', async (req, res) => {
+  try {
+    const { audioBase64, mimeType } = req.body;
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'Nenhum dado de áudio fornecido.' });
+    }
+
+    const config = ConfigManager.getConfig();
+    const openaiKey = config.keys.openai;
+
+    if (!openaiKey) {
+      return res.status(400).json({ 
+        error: 'Chave da OpenAI para o Whisper não configurada nas configurações. Utilize o reconhecimento de voz nativo.' 
+      });
+    }
+
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    const ext = mimeType?.includes('wav') ? 'wav' : (mimeType?.includes('mp3') ? 'mp3' : 'webm');
+    
+    // Create FormData for Whisper API
+    const formData = new FormData();
+    const blob = new Blob([audioBuffer], { type: mimeType || 'audio/webm' });
+    formData.append('file', blob, `audio.${ext}`);
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'pt');
+
+    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiKey}`
+      },
+      body: formData
+    });
+
+    if (!whisperResponse.ok) {
+      const errText = await whisperResponse.text();
+      return res.status(whisperResponse.status).json({ error: `Erro Whisper: ${errText}` });
+    }
+
+    const result: any = await whisperResponse.json();
+    res.json({ text: result.text || '', provider: 'whisper-1' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Falha ao transcrever áudio com Whisper' });
+  }
+});
+
+app.get('/api/voice/status', (req, res) => {
+  const config = ConfigManager.getConfig();
+  res.json({
+    hasWhisper: !!config.keys.openai,
+    webSpeechAvailable: true
+  });
+});
+
 // Serve Client Dist statically if built
 const clientDistPath = path.resolve(process.cwd(), '../client/dist');
 const altClientDistPath = path.resolve(process.cwd(), 'client/dist');

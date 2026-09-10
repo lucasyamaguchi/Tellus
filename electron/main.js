@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, nativeImage, desktopCapturer, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, nativeImage, desktopCapturer, ipcMain, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
@@ -10,6 +10,16 @@ const __dirname = path.dirname(__filename);
 
 // Ensure Windows Taskbar uses the same AppUserModelID
 app.setAppUserModelId('Tellus.AgenticIDE');
+
+// Allow microphone and media access without permission prompts
+app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media') {
+      return callback(true);
+    }
+    callback(true);
+  });
+});
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
