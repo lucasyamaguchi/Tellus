@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   FileText, 
   Plus, 
@@ -38,6 +38,10 @@ import {
   Filter,
   Layers,
   Maximize2,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Columns,
   Clock,
   Archive,
   RefreshCw,
@@ -127,6 +131,50 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [showFloatingAction, setShowFloatingAction] = useState<boolean>(false);
   const [floatingActionPos, setFloatingActionPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Window Resizing & Layout State (Obsidian / Notion style)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(330);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isNoteMaximized, setIsNoteMaximized] = useState<boolean>(false);
+
+  // Edit Mode Resizable Split
+  const [editSplitRatio, setEditSplitRatio] = useState<number>(50); // percentage (default 50%)
+  const [editSplitMode, setEditSplitMode] = useState<'both' | 'editor' | 'preview'>('both');
+  const [isDraggingEditSplit, setIsDraggingEditSplit] = useState<boolean>(false);
+  const editContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Mouse Drag Handlers for Resizing
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDraggingSidebar) {
+      const newWidth = Math.min(Math.max(e.clientX, 220), 650);
+      setSidebarWidth(newWidth);
+    } else if (isDraggingEditSplit && editContainerRef.current) {
+      const rect = editContainerRef.current.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left;
+      const percentage = Math.min(Math.max((relativeX / rect.width) * 100, 20), 80);
+      setEditSplitRatio(percentage);
+    }
+  }, [isDraggingSidebar, isDraggingEditSplit]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDraggingSidebar(false);
+    setIsDraggingEditSplit(false);
+  }, []);
+
+  useEffect(() => {
+    if (isDraggingSidebar || isDraggingEditSplit) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    } else {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingSidebar, isDraggingEditSplit, handleMouseMove, handleMouseUp]);
 
   useEffect(() => {
     const handleGlobalClick = () => {
@@ -1398,13 +1446,35 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       {/* Top Bar Controls */}
       <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
         <div className="flex items-center space-x-3">
+          {/* Toggle Sidebar Button */}
+          {viewMode === 'editor' && (
+            <button
+              onClick={() => {
+                if (isNoteMaximized) setIsNoteMaximized(false);
+                setIsSidebarCollapsed(!isSidebarCollapsed);
+              }}
+              className={`p-1.5 rounded-lg border transition-all ${
+                isSidebarCollapsed || isNoteMaximized
+                  ? 'bg-accent/20 border-accent text-accent-light'
+                  : 'bg-panel hover:bg-card border-card-border text-slate-400 hover:text-slate-200'
+              }`}
+              title={isSidebarCollapsed || isNoteMaximized ? "Mostrar Barra de Cadernos & Pastas" : "Ocultar Barra de Cadernos & Pastas"}
+            >
+              {isSidebarCollapsed || isNoteMaximized ? (
+                <PanelLeftOpen className="w-4 h-4" />
+              ) : (
+                <PanelLeftClose className="w-4 h-4" />
+              )}
+            </button>
+          )}
+
           <div className="flex items-center space-x-2">
             <div className="w-6 h-6 rounded-lg bg-white p-0.5 border border-card-border shadow-xs flex items-center justify-center shrink-0">
               <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
             </div>
             <span className="font-bold text-xs text-slate-100 font-mono">FrankMD Vault & Pastas</span>
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1">
+          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full hidden sm:flex items-center space-x-1">
             <ShieldCheck className="w-3 h-3" />
             <span>Obsidian Standard Compatible</span>
           </span>
@@ -1601,9 +1671,14 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         </div>
       ) : (
         /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE & DRAG-AND-DROP */
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden relative">
           {/* Notes & Folders Explorer Sidebar */}
-          <div className="w-84 border-r border-card-border bg-sidebar flex flex-col shrink-0">
+          <div 
+            style={{ width: isSidebarCollapsed || isNoteMaximized ? '0px' : `${sidebarWidth}px` }}
+            className={`border-r border-card-border bg-sidebar flex flex-col shrink-0 overflow-hidden relative select-none transition-[width] duration-75 ${
+              isSidebarCollapsed || isNoteMaximized ? 'w-0 border-r-0 invisible' : ''
+            }`}
+          >
             {/* Sidebar Navigation Tabs (Pastas vs Lixeira) */}
             <div className="flex items-center p-1.5 bg-panel border-b border-card-border gap-1 shrink-0">
               <button
@@ -2307,6 +2382,34 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             )}
           </div>
 
+          {/* Resizable Splitter 1: Between Sidebar and Note/Dashboard */}
+          {!isNoteMaximized && !isSidebarCollapsed && (
+            <div
+              onMouseDown={() => setIsDraggingSidebar(true)}
+              className={`w-1.5 cursor-col-resize hover:bg-accent transition-colors z-20 flex items-center justify-center shrink-0 ${
+                isDraggingSidebar ? 'bg-accent shadow-sm' : 'bg-transparent hover:bg-accent/40'
+              }`}
+              title="Arraste para redimensionar barra lateral de notas"
+            >
+              <div className="w-0.5 h-6 rounded-full bg-slate-700/60" />
+            </div>
+          )}
+
+          {/* Floating Collapsed Sidebar Restore Button */}
+          {(isSidebarCollapsed || isNoteMaximized) && (
+            <button
+              onClick={() => {
+                setIsSidebarCollapsed(false);
+                setIsNoteMaximized(false);
+              }}
+              className="absolute left-2.5 top-2.5 z-30 p-2 rounded-xl bg-card/90 hover:bg-card border border-card-border shadow-xl text-slate-300 hover:text-white flex items-center space-x-1.5 transition-all group backdrop-blur-md"
+              title="Mostrar barra de cadernos e pastas"
+            >
+              <PanelLeftOpen className="w-4 h-4 text-accent-light group-hover:scale-110 transition-transform" />
+              <span className="text-[11px] font-semibold hidden md:inline">Cadernos</span>
+            </button>
+          )}
+
           {/* Active Note View & Editor Panel */}
           {activeNote ? (
             <div className="flex-1 flex flex-col bg-[#0b0d13] overflow-hidden">
@@ -2402,9 +2505,71 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+
+                      {/* Maximize / Restore Note */}
+                      <button
+                        onClick={() => {
+                          const nextState = !isNoteMaximized;
+                          setIsNoteMaximized(nextState);
+                          if (nextState) setIsSidebarCollapsed(true);
+                        }}
+                        className={`p-2 rounded-xl border transition-colors ${
+                          isNoteMaximized 
+                            ? 'bg-accent/20 border-accent text-accent-light' 
+                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
+                        }`}
+                        title={isNoteMaximized ? "Restaurar tamanho normal" : "Maximizar nota (foco total na leitura)"}
+                      >
+                        {isNoteMaximized ? (
+                          <Minimize2 className="w-4 h-4 text-accent-light" />
+                        ) : (
+                          <Maximize2 className="w-4 h-4" />
+                        )}
+                      </button>
                     </>
                   ) : (
                     <>
+                      {/* Layout Mode Toggle for Editor */}
+                      <div className="flex items-center bg-card rounded-xl p-0.5 border border-card-border text-[11px] shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setEditSplitMode('editor')}
+                          className={`px-2.5 py-1 rounded-lg transition-all ${
+                            editSplitMode === 'editor'
+                              ? 'bg-accent text-white font-semibold shadow-xs'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                          title="Apenas Editor de Código Markdown"
+                        >
+                          Editor
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditSplitMode('both')}
+                          className={`px-2.5 py-1 rounded-lg transition-all flex items-center space-x-1 ${
+                            editSplitMode === 'both'
+                              ? 'bg-accent text-white font-semibold shadow-xs'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                          title="Dividir: Editor e Preview Lado a Lado"
+                        >
+                          <Columns className="w-3 h-3" />
+                          <span>Split</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditSplitMode('preview')}
+                          className={`px-2.5 py-1 rounded-lg transition-all ${
+                            editSplitMode === 'preview'
+                              ? 'bg-accent text-white font-semibold shadow-xs'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                          title="Apenas Pré-visualização Formatada"
+                        >
+                          Preview
+                        </button>
+                      </div>
+
                       <button
                         onClick={() => {
                           setEditContent(activeNote.content);
@@ -2432,6 +2597,27 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       >
                         <Save className="w-3.5 h-3.5" />
                         <span>{isSaving ? 'Salvando...' : 'Salvar & Visualizar'}</span>
+                      </button>
+
+                      {/* Maximize / Restore in Edit Mode */}
+                      <button
+                        onClick={() => {
+                          const nextState = !isNoteMaximized;
+                          setIsNoteMaximized(nextState);
+                          if (nextState) setIsSidebarCollapsed(true);
+                        }}
+                        className={`p-2 rounded-xl border transition-colors ${
+                          isNoteMaximized 
+                            ? 'bg-accent/20 border-accent text-accent-light' 
+                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
+                        }`}
+                        title={isNoteMaximized ? "Restaurar tamanho normal" : "Maximizar tela de edição"}
+                      >
+                        {isNoteMaximized ? (
+                          <Minimize2 className="w-4 h-4 text-accent-light" />
+                        ) : (
+                          <Maximize2 className="w-4 h-4" />
+                        )}
                       </button>
                     </>
                   )}
@@ -2492,44 +2678,65 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
               ) : (
                 /* 2. SPLIT-SCREEN EDIT MODE */
                 <div 
-                  className="flex-1 grid grid-cols-2 overflow-hidden select-text"
+                  ref={editContainerRef}
+                  className="flex-1 flex overflow-hidden select-text relative"
                   onMouseUp={handleTextSelection}
                   onContextMenu={handleContextMenu}
                 >
                   {/* Editor Column */}
-                  <div className="border-r border-card-border p-6 flex flex-col bg-[#08090e]">
-                    <div className="flex items-center justify-between text-[11px] uppercase font-bold text-slate-500 mb-3 font-mono">
-                      <span>Editor Markdown (suporta [[Wikilinks]] e #tags)</span>
-                      <span className="text-emerald-400">● Protegido por Backup</span>
+                  {(editSplitMode === 'both' || editSplitMode === 'editor') && (
+                    <div 
+                      style={{ width: editSplitMode === 'editor' ? '100%' : `${editSplitRatio}%` }}
+                      className="border-r border-card-border p-6 flex flex-col bg-[#08090e] shrink-0 overflow-hidden"
+                    >
+                      <div className="flex items-center justify-between text-[11px] uppercase font-bold text-slate-500 mb-3 font-mono">
+                        <span>Editor Markdown (suporta [[Wikilinks]] e #tags)</span>
+                        <span className="text-emerald-400">● Protegido por Backup</span>
+                      </div>
+                      <textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        onMouseUp={handleTextSelection}
+                        onContextMenu={handleContextMenu}
+                        placeholder="Escreva seu documento com formatação Markdown, tabelas, código e [[Conexões]]..."
+                        className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed select-text"
+                      />
                     </div>
-                    <textarea
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      onMouseUp={handleTextSelection}
-                      onContextMenu={handleContextMenu}
-                      placeholder="Escreva seu documento com formatação Markdown, tabelas, código e [[Conexões]]..."
-                      className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed select-text"
-                    />
-                  </div>
+                  )}
+
+                  {/* Resizable Splitter between Editor and Preview */}
+                  {editSplitMode === 'both' && (
+                    <div
+                      onMouseDown={() => setIsDraggingEditSplit(true)}
+                      className={`w-1.5 cursor-col-resize hover:bg-accent transition-colors z-20 flex items-center justify-center shrink-0 ${
+                        isDraggingEditSplit ? 'bg-accent shadow-sm' : 'bg-transparent hover:bg-accent/40'
+                      }`}
+                      title="Arraste para redimensionar Editor e Pré-visualização"
+                    >
+                      <div className="w-0.5 h-6 rounded-full bg-slate-700/60" />
+                    </div>
+                  )}
 
                   {/* Live Preview Column */}
-                  <div 
-                    className="p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border select-text"
-                    onMouseUp={handleTextSelection}
-                    onContextMenu={handleContextMenu}
-                  >
-                    <div className="max-w-3xl mx-auto space-y-6">
-                      <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
-                        Pré-visualização em Tempo Real
-                      </span>
+                  {(editSplitMode === 'both' || editSplitMode === 'preview') && (
+                    <div 
+                      className="flex-1 p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border select-text"
+                      onMouseUp={handleTextSelection}
+                      onContextMenu={handleContextMenu}
+                    >
+                      <div className="max-w-3xl mx-auto space-y-6">
+                        <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
+                          Pré-visualização em Tempo Real
+                        </span>
 
-                      <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {editContent}
-                        </ReactMarkdown>
+                        <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {editContent}
+                          </ReactMarkdown>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
