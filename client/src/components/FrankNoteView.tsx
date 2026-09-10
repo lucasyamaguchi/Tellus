@@ -42,6 +42,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Columns,
+  ArrowLeftRight,
   Clock,
   Archive,
   RefreshCw,
@@ -137,6 +138,24 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isNoteMaximized, setIsNoteMaximized] = useState<boolean>(false);
+  const [isFullWidth, setIsFullWidth] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('frank_vault_full_width');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleFullWidth = useCallback(() => {
+    setIsFullWidth(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('frank_vault_full_width', String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
 
   // Edit Mode Resizable Split
   const [editSplitRatio, setEditSplitRatio] = useState<number>(50); // percentage (default 50%)
@@ -2506,6 +2525,19 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         <Trash2 className="w-4 h-4" />
                       </button>
 
+                      {/* Full Width Toggle */}
+                      <button
+                        onClick={toggleFullWidth}
+                        className={`p-2 rounded-xl border transition-colors ${
+                          isFullWidth 
+                            ? 'bg-accent/20 border-accent text-accent-light' 
+                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
+                        }`}
+                        title={isFullWidth ? "Largura Total ativada (clique para limitar a 896px)" : "Ocupar toda a largura da tela (Full Width)"}
+                      >
+                        <ArrowLeftRight className="w-4 h-4" />
+                      </button>
+
                       {/* Maximize / Restore Note */}
                       <button
                         onClick={() => {
@@ -2599,6 +2631,19 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         <span>{isSaving ? 'Salvando...' : 'Salvar & Visualizar'}</span>
                       </button>
 
+                      {/* Full Width Toggle in Edit Mode */}
+                      <button
+                        onClick={toggleFullWidth}
+                        className={`p-2 rounded-xl border transition-colors ${
+                          isFullWidth 
+                            ? 'bg-accent/20 border-accent text-accent-light' 
+                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
+                        }`}
+                        title={isFullWidth ? "Largura Total ativada (clique para limitar a 896px)" : "Ocupar toda a largura da tela (Full Width)"}
+                      >
+                        <ArrowLeftRight className="w-4 h-4" />
+                      </button>
+
                       {/* Maximize / Restore in Edit Mode */}
                       <button
                         onClick={() => {
@@ -2634,7 +2679,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                   onDoubleClick={() => setNoteViewMode('edit')}
                   title="Dê duplo clique para editar esta anotação"
                 >
-                  <div className="max-w-4xl mx-auto space-y-6">
+                  <div className={`space-y-6 ${isFullWidth ? 'w-full max-w-none' : 'max-w-4xl mx-auto'}`}>
                     {/* Top banner info */}
                     <div className="flex items-center justify-between pb-4 border-b border-card-border/60 text-xs text-slate-400 font-mono">
                       <span className="flex items-center space-x-1.5">
@@ -2724,7 +2769,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       onMouseUp={handleTextSelection}
                       onContextMenu={handleContextMenu}
                     >
-                      <div className="max-w-3xl mx-auto space-y-6">
+                      <div className={`space-y-6 ${isFullWidth ? 'w-full max-w-none' : 'max-w-3xl mx-auto'}`}>
                         <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
                           Pré-visualização em Tempo Real
                         </span>
@@ -2782,7 +2827,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
               {/* Read-only Document Preview */}
               <div className="flex-1 overflow-y-auto bg-[#0a0c12] p-8 scrollbar-thin scrollbar-thumb-card-border select-text">
-                <div className="max-w-4xl mx-auto space-y-6">
+                <div className={`space-y-6 ${isFullWidth ? 'w-full max-w-none' : 'max-w-4xl mx-auto'}`}>
                   <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/30 text-xs text-amber-200/90 leading-relaxed flex items-center space-x-2">
                     <Clock className="w-4 h-4 text-amber-400 shrink-0" />
                     <span>
@@ -2827,7 +2872,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                   : (currentNb?.subfolders || []);
 
                 return (
-                  <div className="max-w-6xl mx-auto space-y-7">
+                  <div className={`space-y-7 ${isFullWidth ? 'w-full max-w-none' : 'max-w-6xl mx-auto'}`}>
                     {/* Hero Banner Card */}
                     <div className={`p-6 sm:p-7 rounded-3xl border ${details.bg} shadow-2xl relative overflow-hidden bg-gradient-to-br from-card/90 via-panel/80 to-card/50`}>
                       {/* Glow Accent */}
