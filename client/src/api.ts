@@ -529,5 +529,24 @@ export const api = {
       });
 
     return () => controller.abort();
+  },
+
+  // Voice & Whisper API
+  async transcribeAudio(audioBase64: string, mimeType?: string): Promise<{ text: string; provider: string }> {
+    const res = await fetch(`${API_BASE}/voice/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioBase64, mimeType })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha na transcrição' }));
+      throw new Error(err.error || 'Falha ao transcrever áudio');
+    }
+    return res.json();
+  },
+
+  async getVoiceStatus(): Promise<{ hasWhisper: boolean; webSpeechAvailable: boolean }> {
+    const res = await fetch(`${API_BASE}/voice/status`);
+    return res.json();
   }
 };
