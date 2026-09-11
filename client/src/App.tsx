@@ -803,6 +803,11 @@ export const App: React.FC = () => {
         onClose={() => setIsLiveVoiceOpen(false)}
         activeModel={activeModel}
         onTransferToChat={handleTransferVoiceMessages}
+        onOpenNote={(noteTitle) => {
+          setIsLiveVoiceOpen(false);
+          setTargetNoteIdOrTitle(noteTitle);
+          setMainViewMode('notes');
+        }}
       />
     </div>
   );
