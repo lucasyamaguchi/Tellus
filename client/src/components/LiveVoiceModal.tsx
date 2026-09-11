@@ -14,10 +14,74 @@ import {
   Radio, 
   Sliders, 
   GraduationCap,
-  ChevronDown
+  ChevronDown,
+  FileText,
+  BookMarked,
+  ExternalLink,
+  CheckCircle2,
+  Eye,
+  PenTool
 } from 'lucide-react';
 import { voiceService, VoiceOption } from '../services/voiceService';
 import { api } from '../api';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+export interface ParsedLiveResponse {
+  spokenText: string;
+  noteData?: {
+    title: string;
+    folder: string;
+    content: string;
+  };
+  detailsText?: string;
+}
+
+export function parseLiveResponse(rawText: string): ParsedLiveResponse {
+  let spokenText = '';
+  let noteData: ParsedLiveResponse['noteData'] | undefined;
+  let detailsText: string | undefined;
+
+  // 1. Extract [FALA]...[/FALA]
+  const falaMatch = rawText.match(/\[FALA\]([\s\S]*?)(?:\[\/FALA\]|(?=\[NOTA|\[DETALHES)|$)/i);
+  if (falaMatch && falaMatch[1].trim()) {
+    spokenText = falaMatch[1].trim();
+  } else {
+    // If model didn't wrap in [FALA], take text prior to [NOTA or [DETALHES
+    const beforeAction = rawText.split(/\[NOTA|\[DETALHES/i)[0].trim();
+    spokenText = beforeAction || rawText.trim();
+  }
+
+  // 2. Extract [NOTA: Title | Folder] ... [/NOTA]
+  const noteMatch = rawText.match(/\[NOTA:\s*([^\|\]\n]+)(?:\s*\|\s*([^\]\n]+))?\]([\s\S]*?)(?:\[\/NOTA\]|$)/i);
+  if (noteMatch && noteMatch[3].trim()) {
+    const rawTitle = noteMatch[1].trim();
+    const rawFolder = noteMatch[2]?.trim() || 'Estudos/Anotacoes de Leitura';
+    const noteContent = noteMatch[3].replace(/\[\/NOTA\]/gi, '').trim();
+    
+    noteData = {
+      title: rawTitle,
+      folder: rawFolder,
+      content: noteContent
+    };
+  }
+
+  // 3. Extract [DETALHES] ... [/DETALHES]
+  const detailsMatch = rawText.match(/\[DETALHES\]([\s\S]*?)(?:\[\/DETALHES\]|$)/i);
+  if (detailsMatch && detailsMatch[1].trim()) {
+    detailsText = detailsMatch[1].replace(/\[\/DETALHES\]/gi, '').trim();
+  }
+
+  // Clean up any markdown syntax that degrades TTS speech quality
+  spokenText = spokenText
+    .replace(/^\[FALA\]/i, '')
+    .replace(/\[\/FALA\]$/i, '')
+    .replace(/\*\*/g, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+
+  return { spokenText, noteData, detailsText };
+}
 
 interface LiveVoiceModalProps {
   isOpen: boolean;
@@ -25,6 +89,7 @@ interface LiveVoiceModalProps {
   activeModel: string;
   onTransferToChat?: (messages: Array<{ role: 'user' | 'assistant'; content: string }>) => void;
   initialTopic?: string;
+  onOpenNote?: (noteTitle: string) => void;
 }
 
 type LiveVoiceState = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -34,13 +99,18 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
   onClose,
   activeModel,
   onTransferToChat,
-  initialTopic = 'Estudos e Revisão Geral'
+  initialTopic = 'Estudos e Revisão Geral',
+  onOpenNote
 }) => {
   const [voiceState, setVoiceState] = useState<LiveVoiceState>('idle');
   const [topic, setTopic] = useState<string>(initialTopic);
   const [isHandsFree, setIsHandsFree] = useState<boolean>(true);
   const [currentTranscript, setCurrentTranscript] = useState<string>('');
   const [latestAiResponse, setLatestAiResponse] = useState<string>('');
+  const [latestAiSpoken, setLatestAiSpoken] = useState<string>('');
+  const [latestCreatedNote, setLatestCreatedNote] = useState<{ title: string; folder: string; content: string } | null>(null);
+  const [sessionNotes, setSessionNotes] = useState<Array<{ title: string; folder: string; content: string }>>([]);
+  const [viewingNoteContent, setViewingNoteContent] = useState<{ title: string; folder: string; content: string } | null>(null);
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   
   // Voice & Settings
@@ -184,14 +254,48 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
     const updatedHistory = [...conversationHistory, { role: 'user' as const, content: text }];
     setConversationHistory(updatedHistory);
 
-    // Call LLM for oral concise response
-    const liveSystemPrompt = `[🎙️ MODO LIVE VOICE CHAT - CONVERSA ORAL & ESTUDO]
-- Você está em uma sessão de estudo e diálogo ao vivo por VOZ sobre o tema: "${topic}".
+    // Call LLM with strict oral speech vs written action separation
+    const liveSystemPrompt = `[🎙️ MODO LIVE VOICE & ASSISTENTE INTELIGENTE]
+- Você é a assistente pessoal do usuário em uma conversa ao vivo por VOZ sobre o tema: "${topic}".
 - Responda OBRIGATORIAMENTE em PORTUGUÊS DO BRASIL (pt-BR).
-- Seu retorno será lido por sintetizador de voz (TTS). Por isso:
-  1. Seja conciso, claro, didático e direto (no máximo 2 a 3 parágrafos curtos).
-  2. NÃO use tabelas, blocos de código longos ou formatações que fiquem ruins na fala.
-  3. Mantenha um diálogo ativo: explique o ponto e, se for estudo, faça uma breve pergunta reflexiva para testar o entendimento do usuário.`;
+- Seu tom deve ser natural, inteligente, amigável, acolhedor e ágil, como uma pessoa real conversando.
+
+[REGRA DE OURO: SEPARAÇÃO ENTRE FALA ORAL E ESCRITA NO VAULT]
+Para manter a conversa natural e fluida SEM gastar voz e tokens à toa lendo textos longos:
+Sua resposta DEVE ser estruturada estritamente nas seguintes tags:
+
+[FALA]
+Aqui você coloca EXATAMENTE o que vai dizer em voz alta para o usuário.
+- Limite: NO MÁXIMO 1 a 3 frases curtas, naturais e diretas (cerca de 20 a 45 palavras).
+- Soe como uma companheira de estudo real falando: simpática, objetiva e empática.
+- Responda à pergunta central imediatamente em tom oral.
+- Se o usuário pediu uma anotação, pesquisa ou desenvolvimento (ex: "faça uma anotação, página X, frase Y, o que ela significaria hoje?"):
+  Responda resumindo o significado em uma ou duas frases faladas e avise com naturalidade: "Fiz a anotação aqui! A frase significa principalmente que... vou colocar mais alguns detalhes e fontes nas suas notas agora mesmo."
+- NUNCA use markdown complexo, listas longas, blocos de código ou tabelas dentro de [FALA].
+[/FALA]
+
+[NOTA: Título Claro da Nota | Pasta Sugerida no Vault]
+(Gere esta tag SEMPRE que o usuário disser "anote isso", "faça uma anotação", citar livros/páginas, ou quando a reflexão merecer um registro permanente no cofre).
+Escreva a nota completa em Markdown:
+# Título da Nota
+> Trecho ou citação com referência (Livro, página, autor).
+
+## 📌 Contexto & Significado Central
+Explicação detalhada e fundamentada do conceito.
+
+## 🌍 O Que Ela Significa Hoje? (Aplicação Contemporânea)
+Como esse conceito se aplica na sociedade atual, relações humanas, política, tecnologia, etc.
+
+## 🤖 Reflexões e Comentários da Assistente
+Seus comentários críticos, conexões e insights pessoais para enriquecer o pensamento do usuário.
+
+## 📚 Fontes Pesquisadas & Leituras Complementares
+Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]].
+[/NOTA]
+
+[DETALHES]
+(Opcional, use apenas se NÃO gerou uma [NOTA], mas quiser deixar 2 ou 3 tópicos complementares para o usuário ler silenciosamente na tela sem você precisar ler em voz alta).
+[/DETALHES]`;
 
     let accumulatedText = '';
 
@@ -213,6 +317,12 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
           if (event.type === 'content') {
             accumulatedText += event.data || '';
             setLatestAiResponse(accumulatedText);
+            
+            // Live update spoken text preview if available
+            const partialParsed = parseLiveResponse(accumulatedText);
+            if (partialParsed.spokenText) {
+              setLatestAiSpoken(partialParsed.spokenText);
+            }
           }
         },
         () => {
@@ -231,17 +341,46 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
     }
   };
 
-  const handleAiSpeechReady = (aiText: string, updatedHistory: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+  const handleAiSpeechReady = async (aiText: string, updatedHistory: Array<{ role: 'user' | 'assistant'; content: string }>) => {
     if (!aiText.trim()) {
       setVoiceState('idle');
       return;
     }
 
-    setConversationHistory([...updatedHistory, { role: 'assistant', content: aiText }]);
+    const parsed = parseLiveResponse(aiText);
+    const textToSpeak = parsed.spokenText || aiText.split(/\[NOTA|\[DETALHES/i)[0].trim();
+    setLatestAiSpoken(textToSpeak);
+
+    // Auto-save rich note to Vault if generated
+    if (parsed.noteData && parsed.noteData.title && parsed.noteData.content) {
+      try {
+        await api.saveNote({
+          title: parsed.noteData.title,
+          folder: parsed.noteData.folder,
+          subject: topic,
+          content: parsed.noteData.content,
+          isProjectSpecific: false
+        });
+        setLatestCreatedNote(parsed.noteData);
+        setSessionNotes(prev => [...prev, parsed.noteData!]);
+      } catch (err) {
+        console.error('[LiveVoice] Failed to auto-save note to Vault:', err);
+      }
+    }
+
+    // Build rich history content for export / vault sessions
+    let historyEntry = textToSpeak;
+    if (parsed.noteData) {
+      historyEntry += `\n\n> 📝 **Nota salva no Vault:** \`[[${parsed.noteData.title}]]\` na pasta *${parsed.noteData.folder}*\n\n${parsed.noteData.content}`;
+    } else if (parsed.detailsText) {
+      historyEntry += `\n\n> ℹ️ **Detalhes Complementares:**\n${parsed.detailsText}`;
+    }
+
+    setConversationHistory([...updatedHistory, { role: 'assistant', content: historyEntry }]);
     setVoiceState('speaking');
 
-    // Speak AI response
-    voiceService.speak(aiText, {
+    // Speak ONLY the concise oral portion (avoids wasting tokens, prevents long monotone speeches)
+    voiceService.speak(textToSpeak, {
       voiceURI: selectedVoiceUri,
       rate: speechRate,
       onStart: () => {
@@ -516,8 +655,8 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
           </div>
 
           {/* Real-time Subtitles / Live Transcript Floating Card */}
-          {(currentTranscript || latestAiResponse) && (
-            <div className="w-full max-w-lg mt-6 p-4 rounded-2xl bg-card/80 border border-card-border/80 shadow-xl backdrop-blur-md space-y-2 text-xs relative z-10 animate-in fade-in">
+          {(currentTranscript || latestAiSpoken || latestAiResponse || latestCreatedNote) && (
+            <div className="w-full max-w-xl mt-6 p-4 rounded-2xl bg-card/90 border border-card-border/80 shadow-2xl backdrop-blur-md space-y-2.5 text-xs relative z-10 animate-in fade-in">
               {currentTranscript && (
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold uppercase text-purple-300 font-mono flex items-center space-x-1">
@@ -527,15 +666,60 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
                   <p className="text-slate-100 italic text-sm leading-relaxed">"{currentTranscript}"</p>
                 </div>
               )}
-              {latestAiResponse && (
-                <div className="space-y-0.5 pt-2 border-t border-card-border/50">
+
+              {(latestAiSpoken || latestAiResponse) && (
+                <div className="space-y-1 pt-2 border-t border-card-border/50">
                   <span className="text-[10px] font-bold uppercase text-emerald-300 font-mono flex items-center space-x-1">
                     <Volume2 className="w-3 h-3 text-emerald-400" />
-                    <span>Assistente:</span>
+                    <span>Assistente (Fala):</span>
                   </span>
-                  <p className="text-slate-200 text-xs leading-relaxed max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-card-border">
-                    {latestAiResponse}
+                  <p className="text-slate-100 text-sm font-medium leading-relaxed">
+                    {latestAiSpoken || parseLiveResponse(latestAiResponse).spokenText}
                   </p>
+                </div>
+              )}
+
+              {/* Automatic Vault Note Created Badge Card */}
+              {latestCreatedNote && (
+                <div className="mt-2.5 p-3 rounded-xl bg-amber-950/20 border border-amber-500/40 flex items-center justify-between gap-3 text-xs animate-in zoom-in-95">
+                  <div className="flex items-center space-x-2.5 min-w-0">
+                    <div className="p-2 rounded-lg bg-amber-500/20 text-amber-300 shrink-0">
+                      <BookMarked className="w-4 h-4" />
+                    </div>
+                    <div className="truncate">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-bold text-amber-200 truncate">{latestCreatedNote.title}</span>
+                        <span className="text-[9px] bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-1.5 py-0.2 rounded-full font-mono shrink-0">
+                          Salva no Vault
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">📂 {latestCreatedNote.folder} • Anotação estruturada & fontes</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setViewingNoteContent(latestCreatedNote)}
+                      className="px-2.5 py-1.5 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
+                      title="Pré-visualizar nota completa na janela"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Ver</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const title = latestCreatedNote.title;
+                        onOpenNote?.(title);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-200 hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all shadow-xs cursor-pointer"
+                      title="Abrir nota no editor do FrankMD Vault"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Abrir no Vault</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -630,6 +814,53 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Full Note Inspector Overlay */}
+        {viewingNoteContent && (
+          <div className="absolute inset-0 z-30 bg-[#080a10]/95 backdrop-blur-md p-6 flex flex-col animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-card-border">
+              <div className="flex items-center space-x-2.5 min-w-0 pr-2">
+                <BookMarked className="w-5 h-5 text-amber-400 shrink-0" />
+                <div className="truncate">
+                  <h4 className="font-bold text-sm text-slate-100 truncate">{viewingNoteContent.title}</h4>
+                  <span className="text-[10px] font-mono text-amber-300">
+                    📂 {viewingNoteContent.folder}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const title = viewingNoteContent.title;
+                    setViewingNoteContent(null);
+                    onOpenNote?.(title);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-md shadow-amber-900/30 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Abrir no Editor do Vault</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewingNoteContent(null)}
+                  className="p-1.5 rounded-xl hover:bg-card-border text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  title="Fechar pré-visualização"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs leading-relaxed text-slate-200 scrollbar-thin scrollbar-thumb-card-border select-text">
+              <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {viewingNoteContent.content}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
