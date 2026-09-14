@@ -321,6 +321,53 @@ app.post('/api/terminal/launch-external', (req, res) => {
   }
 });
 
+// Fish Audio Text-to-Speech (TTS) Proxy
+app.post('/api/voice/fish-audio/tts', async (req, res) => {
+  try {
+    const { text, reference_id, model } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: 'Texto não informado para síntese.' });
+    }
+
+    const config = ConfigManager.getConfig();
+    const apiKey = req.body.apiKey || config.keys.fishAudio;
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Chave da Fish Audio não configurada.' });
+    }
+
+    const voiceId = reference_id || config.voiceSettings?.fishAudioVoiceId || '5161d41404314212af1254556477c17d';
+    const selectedModel = model || config.voiceSettings?.fishAudioModel || 's2.1-pro-free';
+
+    const fishResponse = await fetch('https://api.fish.audio/v1/tts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'model': selectedModel
+      },
+      body: JSON.stringify({
+        text,
+        reference_id: voiceId,
+        format: 'mp3',
+        latency: 'normal'
+      })
+    });
+
+    if (!fishResponse.ok) {
+      const errText = await fishResponse.text().catch(() => '');
+      console.error('[FishAudio TTS Error]', fishResponse.status, errText);
+      return res.status(fishResponse.status).json({ error: `Fish Audio error (${fishResponse.status}): ${errText}` });
+    }
+
+    const arrayBuffer = await fishResponse.arrayBuffer();
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err: any) {
+    console.error('[FishAudio TTS Exception]', err);
+    res.status(500).json({ error: err.message || 'Erro ao sintetizar voz com Fish Audio' });
+  }
+});
+
 // OpenRouter Credits & Usage Monitor
 app.get('/api/openrouter/credits', async (req, res) => {
   try {

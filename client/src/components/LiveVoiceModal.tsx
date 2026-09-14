@@ -20,9 +20,10 @@ import {
   ExternalLink,
   CheckCircle2,
   Eye,
-  PenTool
+  PenTool,
+  Play
 } from 'lucide-react';
-import { voiceService, VoiceOption } from '../services/voiceService';
+import { voiceService, VoiceOption, FISH_VOICE_PRESETS, VoiceProvider } from '../services/voiceService';
 import { api } from '../api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -114,6 +115,8 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   
   // Voice & Settings
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>(voiceService.getVoiceProvider());
+  const [fishVoiceId, setFishVoiceId] = useState<string>(voiceService.getFishVoiceId() || FISH_VOICE_PRESETS[0].id);
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [selectedVoiceUri, setSelectedVoiceUri] = useState<string>('');
   const [speechRate, setSpeechRate] = useState<number>(1.0);
@@ -142,6 +145,8 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
 
     // Load voices
     const loadVoices = () => {
+      setVoiceProvider(voiceService.getVoiceProvider());
+      setFishVoiceId(voiceService.getFishVoiceId() || FISH_VOICE_PRESETS[0].id);
       const opts = voiceService.getVoiceOptions();
       setVoices(opts);
       const pref = voiceService.getPreferredVoice();
@@ -381,6 +386,8 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
 
     // Speak ONLY the concise oral portion (avoids wasting tokens, prevents long monotone speeches)
     voiceService.speak(textToSpeak, {
+      forceProvider: voiceProvider,
+      referenceId: fishVoiceId,
       voiceURI: selectedVoiceUri,
       rate: speechRate,
       onStart: () => {
@@ -477,6 +484,21 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                    voiceState === 'thinking' ? 'Pensando...' :
                    voiceState === 'speaking' ? 'Falando...' : 'Pronto'}
                 </span>
+
+                {/* Active Voice Provider Badge */}
+                <button 
+                  type="button"
+                  onClick={() => setShowSettings(prev => !prev)}
+                  className="hidden sm:flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-brand-cyan/10 border border-brand-cyan/30 text-[10px] text-brand-cyan hover:bg-brand-cyan/20 transition-all shadow-sm"
+                  title="Clique para alternar voz"
+                >
+                  <Sparkles className="w-3 h-3 text-brand-cyan" />
+                  <span className="font-semibold">
+                    {voiceProvider === 'fish-audio'
+                      ? (FISH_VOICE_PRESETS.find(p => p.id === fishVoiceId)?.name.split(' ')[0] || 'Fish Audio')
+                      : 'Voz do Sistema'}
+                  </span>
+                </button>
               </div>
               <p className="text-[11px] text-slate-400">Conversação e estudo contínuo em tempo real por voz</p>
             </div>
@@ -531,60 +553,138 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
 
         {/* Settings Flyout Bar */}
         {showSettings && (
-          <div className="p-3.5 bg-card/80 border-b border-card-border relative z-10 space-y-2.5 text-xs animate-in slide-in-from-top-2">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex-1 space-y-1">
-                <label className="text-[10px] font-bold uppercase text-slate-400 font-mono block">Voz do Sintetizador (TTS):</label>
-                <select
-                  value={selectedVoiceUri}
-                  onChange={(e) => {
-                    setSelectedVoiceUri(e.target.value);
-                    voiceService.setPreferredVoice(e.target.value);
-                  }}
-                  className="w-full bg-panel border border-card-border rounded-xl px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent"
-                >
-                  {voices.map(v => (
-                    <option key={v.uri} value={v.uri}>
-                      {v.isPortuguese ? '🇧🇷 ' : ''}{v.name} ({v.lang})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="w-48 space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                  <span>Velocidade:</span>
-                  <span className="text-accent-light font-bold">{speechRate}x</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  {[0.8, 1.0, 1.2, 1.5].map(r => (
-                    <button
-                      key={r}
-                      onClick={() => {
-                        setSpeechRate(r);
-                        voiceService.setSpeechRate(r);
-                      }}
-                      className={`flex-1 py-1 rounded-lg border text-[10px] font-mono transition-all ${
-                        speechRate === r ? 'bg-accent text-white border-accent font-bold' : 'bg-panel border-card-border text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {r}x
-                    </button>
-                  ))}
+          <div className="p-3.5 bg-card/90 border-b border-card-border relative z-10 space-y-3 text-xs animate-in slide-in-from-top-2">
+            {/* Mechanism Toggle */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-[10px] font-bold uppercase text-slate-400 font-mono">Mecanismo de Voz:</span>
+                <div className="flex items-center space-x-1 bg-panel p-0.5 rounded-xl border border-card-border">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVoiceProvider('fish-audio');
+                      voiceService.setVoiceProvider('fish-audio');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-all ${
+                      voiceProvider === 'fish-audio'
+                        ? 'bg-brand-cyan text-slate-950 font-bold shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Fish Audio AI</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVoiceProvider('system');
+                      voiceService.setVoiceProvider('system');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-all ${
+                      voiceProvider === 'system'
+                        ? 'bg-accent text-white font-bold shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Volume2 className="w-3 h-3" />
+                    <span>Voz do Sistema</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="pt-3 sm:pt-0">
-                <button
-                  type="button"
-                  onClick={() => voiceService.testVoice(selectedVoiceUri)}
-                  className="px-3 py-1.5 rounded-xl bg-panel hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-xs flex items-center space-x-1.5 transition-colors"
-                >
-                  <Volume2 className="w-3.5 h-3.5 text-accent-light" />
-                  <span>Testar Voz</span>
-                </button>
-              </div>
+              {/* Test Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  voiceService.speak('Olá! Testando a síntese de voz do Tellus em tempo real.', {
+                    forceProvider: voiceProvider,
+                    referenceId: fishVoiceId,
+                    voiceURI: selectedVoiceUri,
+                    rate: speechRate
+                  });
+                }}
+                className="px-3 py-1 rounded-xl bg-panel hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-[11px] flex items-center space-x-1.5 transition-colors"
+              >
+                <Play className="w-3 h-3 fill-slate-300" />
+                <span>Testar Áudio</span>
+              </button>
             </div>
+
+            {/* Presets or System Voice List */}
+            {voiceProvider === 'fish-audio' ? (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase text-slate-400 font-mono block">Vozes Expressivas Fish Audio:</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {FISH_VOICE_PRESETS.map((preset) => {
+                    const isSelected = fishVoiceId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setFishVoiceId(preset.id);
+                          voiceService.setFishVoiceId(preset.id);
+                        }}
+                        className={`text-left p-2.5 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-brand-cyan/15 border-brand-cyan text-slate-100 shadow-sm'
+                            : 'bg-panel border-card-border text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-200">{preset.name}</span>
+                          {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-brand-cyan" />}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5 leading-tight">{preset.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex-1 space-y-1">
+                  <label className="text-[10px] font-bold uppercase text-slate-400 font-mono block">Voz do Sistema (TTS):</label>
+                  <select
+                    value={selectedVoiceUri}
+                    onChange={(e) => {
+                      setSelectedVoiceUri(e.target.value);
+                      voiceService.setPreferredVoice(e.target.value);
+                    }}
+                    className="w-full bg-panel border border-card-border rounded-xl px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                  >
+                    {voices.map(v => (
+                      <option key={v.uri} value={v.uri}>
+                        {v.isPortuguese ? '🇧🇷 ' : ''}{v.name} ({v.lang})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="w-48 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                    <span>Velocidade:</span>
+                    <span className="text-accent-light font-bold">{speechRate}x</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    {[0.8, 1.0, 1.2, 1.5].map(r => (
+                      <button
+                        key={r}
+                        onClick={() => {
+                          setSpeechRate(r);
+                          voiceService.setSpeechRate(r);
+                        }}
+                        className={`flex-1 py-1 rounded-lg border text-[10px] font-mono transition-all ${
+                          speechRate === r ? 'bg-accent text-white border-accent font-bold' : 'bg-panel border-card-border text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {r}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

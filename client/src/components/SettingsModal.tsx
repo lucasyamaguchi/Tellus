@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { AppConfig } from '../types';
 import { api } from '../api';
-import { voiceService, VoiceOption } from '../services/voiceService';
+import { voiceService, VoiceOption, FISH_VOICE_PRESETS, VoiceProvider } from '../services/voiceService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -37,10 +37,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [googleKey, setGoogleKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
+  const [fishAudioKey, setFishAudioKey] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [deletedNotesRetention, setDeletedNotesRetention] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
   
   // Voice Settings States
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>('fish-audio');
+  const [fishVoiceId, setFishVoiceId] = useState<string>(FISH_VOICE_PRESETS[0].id);
+  const [fishModel, setFishModel] = useState<string>('s2.1-pro-free');
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [selectedVoiceUri, setSelectedVoiceUri] = useState<string>('');
   const [speechRate, setSpeechRate] = useState<number>(1.0);
@@ -56,9 +60,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setGoogleKey(config.keys.google || '');
       setAnthropicKey(config.keys.anthropic || '');
       setOpenaiKey(config.keys.openai || '');
+      setFishAudioKey(config.keys.fishAudio || '');
       if (config.theme) setTheme(config.theme);
       if (config.deletedNotesRetention) setDeletedNotesRetention(config.deletedNotesRetention);
+      if (config.voiceSettings?.provider) setVoiceProvider(config.voiceSettings.provider);
+      if (config.voiceSettings?.fishAudioVoiceId) setFishVoiceId(config.voiceSettings.fishAudioVoiceId);
+      if (config.voiceSettings?.fishAudioModel) setFishModel(config.voiceSettings.fishAudioModel);
     }
+
+    setVoiceProvider(voiceService.getVoiceProvider());
+    setFishVoiceId(voiceService.getFishVoiceId());
+    setFishModel(voiceService.getFishModel());
 
     const loadVoices = () => {
       setVoices(voiceService.getVoiceOptions());
@@ -80,7 +92,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return;
     }
     setIsTestingVoice(true);
-    voiceService.speak('Olá! Esta é a voz de síntese do Tellus Agentic IDE configurada para você.', {
+    voiceService.speak('Olá! Esta é a voz de síntese do Tellus configurada para você.', {
+      forceProvider: voiceProvider,
+      referenceId: fishVoiceId,
       voiceURI: selectedVoiceUri,
       rate: speechRate,
       onEnd: () => setIsTestingVoice(false),
@@ -93,6 +107,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsSaving(true);
     try {
       // Save Voice preferences locally
+      voiceService.setVoiceProvider(voiceProvider);
+      voiceService.setFishVoiceId(fishVoiceId);
+      voiceService.setFishModel(fishModel);
       if (selectedVoiceUri) {
         voiceService.setPreferredVoice(selectedVoiceUri);
       }
@@ -102,11 +119,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const updated = await api.updateConfig({
         theme,
         deletedNotesRetention,
+        voiceSettings: {
+          provider: voiceProvider,
+          fishAudioVoiceId: fishVoiceId,
+          fishAudioModel: fishModel
+        },
         keys: {
           openrouter: openrouterKey.trim() || undefined,
           google: googleKey.trim() || undefined,
           anthropic: anthropicKey.trim() || undefined,
           openai: openaiKey.trim() || undefined,
+          fishAudio: fishAudioKey.trim() || undefined,
         }
       });
       onConfigUpdated(updated);
@@ -210,28 +233,123 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Voice & Speech Synthesis Settings */}
-          <div className="space-y-3 p-3.5 rounded-xl bg-panel border border-card-border">
+          <div className="space-y-3.5 p-3.5 rounded-xl bg-panel border border-card-border">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
                 <Volume2 className="w-4 h-4 text-brand-cyan" />
                 <span>Voz e Síntese de Fala (Áudio & Live Chat)</span>
               </label>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-cyan/10 border border-brand-cyan/20 text-brand-cyan font-mono">
-                TTS & STT
+                {voiceProvider === 'fish-audio' ? 'Fish Audio AI' : 'Web Speech'}
               </span>
             </div>
             <p className="text-[11px] text-slate-400">
-              Escolha a voz do assistente para ouvir as respostas no chat e para o modo de estudo Live Voice.
+              Escolha o mecanismo de voz do assistente para ouvir as respostas no chat e para o modo de estudo Live Voice.
             </p>
 
-            {/* Voice Dropdown */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium text-slate-300">Seletor de Voz:</label>
-              <div className="flex items-center space-x-2">
+            {/* Provider Toggle Tabs */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setVoiceProvider('fish-audio')}
+                className={`flex items-center justify-center space-x-2 p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                  voiceProvider === 'fish-audio'
+                    ? 'bg-gradient-to-r from-brand-cyan/20 to-accent/20 border-brand-cyan text-brand-cyan shadow-sm shadow-brand-cyan/10'
+                    : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-brand-cyan" />
+                <span>Fish Audio AI (Recomendado)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setVoiceProvider('system')}
+                className={`flex items-center justify-center space-x-2 p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                  voiceProvider === 'system'
+                    ? 'bg-accent/20 border-accent text-accent-light shadow-sm'
+                    : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Voz do Sistema (Nativa)</span>
+              </button>
+            </div>
+
+            {/* Fish Audio Options */}
+            {voiceProvider === 'fish-audio' && (
+              <div className="space-y-2.5 p-3 rounded-xl bg-card border border-brand-cyan/25 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-brand-cyan flex items-center space-x-1.5">
+                    <Sparkles className="w-3 h-3" />
+                    <span>Modelos de Voz Expressiva (Suporte pt-BR)</span>
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono">
+                    Tier Gratuito Ativo
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {FISH_VOICE_PRESETS.map((preset) => {
+                    const isSelected = fishVoiceId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setFishVoiceId(preset.id)}
+                        className={`text-left p-2.5 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-brand-cyan/15 border-brand-cyan text-slate-100 shadow-sm'
+                            : 'bg-panel border-card-border text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-200">{preset.name}</span>
+                          {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-brand-cyan" />}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1 leading-tight">{preset.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Voice ID or Preset Selection */}
+                <div className="pt-1.5 space-y-1">
+                  <label className="text-[10px] font-mono text-slate-400">ID da Voz na Fish Audio (Reference ID):</label>
+                  <input
+                    type="text"
+                    value={fishVoiceId}
+                    onChange={(e) => setFishVoiceId(e.target.value)}
+                    placeholder="Ex: 5161d41404314212af1254556477c17d"
+                    className="w-full bg-background border border-card-border rounded-xl px-3 py-1.5 text-xs font-mono text-brand-cyan focus:outline-none focus:border-brand-cyan"
+                  />
+                  <p className="text-[9px] text-slate-500">
+                    Você pode colar o ID de qualquer voz da comunidade Fish Audio compartilhada publicamente.
+                  </p>
+                </div>
+
+                {/* Model Backend */}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-300">Modelo Fish Audio:</span>
+                  <select
+                    value={fishModel}
+                    onChange={(e) => setFishModel(e.target.value)}
+                    className="bg-background border border-card-border rounded-lg px-2.5 py-1 text-xs font-mono text-slate-200 focus:outline-none focus:border-brand-cyan cursor-pointer"
+                  >
+                    <option value="s2.1-pro-free">s2.1-pro-free (100% Gratuito - $0.00)</option>
+                    <option value="s2.1-pro">s2.1-pro (Premium Ultra-HD)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* System Voice Options */}
+            {voiceProvider === 'system' && (
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-medium text-slate-300">Vozes do Sistema / Navegador:</label>
                 <select
                   value={selectedVoiceUri}
                   onChange={(e) => setSelectedVoiceUri(e.target.value)}
-                  className="flex-1 bg-background border border-card-border rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-brand-cyan cursor-pointer"
+                  className="w-full bg-background border border-card-border rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-brand-cyan cursor-pointer"
                 >
                   {voices.length === 0 ? (
                     <option value="">Carregando vozes do sistema...</option>
@@ -243,43 +361,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ))
                   )}
                 </select>
-                <button
-                  type="button"
-                  onClick={handleTestVoice}
-                  className={`px-3 py-2 rounded-xl text-xs font-medium flex items-center space-x-1.5 border transition-all ${
-                    isTestingVoice
-                      ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse'
-                      : 'bg-card hover:bg-card-border border-card-border text-slate-300 hover:text-white'
-                  }`}
-                  title={isTestingVoice ? 'Parar reprodução de teste' : 'Ouvir voz selecionada'}
-                >
-                  <Play className={`w-3 h-3 ${isTestingVoice ? 'fill-rose-400 text-rose-400' : 'fill-slate-300'}`} />
-                  <span>{isTestingVoice ? 'Parar' : 'Testar'}</span>
-                </button>
               </div>
+            )}
+
+            {/* Test Voice Button */}
+            <div className="pt-1 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleTestVoice}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center space-x-1.5 border transition-all ${
+                  isTestingVoice
+                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse'
+                    : 'bg-card hover:bg-card-border border-card-border text-slate-300 hover:text-white'
+                }`}
+                title={isTestingVoice ? 'Parar reprodução de teste' : 'Ouvir voz selecionada'}
+              >
+                <Play className={`w-3 h-3 ${isTestingVoice ? 'fill-rose-400 text-rose-400' : 'fill-slate-300'}`} />
+                <span>{isTestingVoice ? 'Parar Áudio' : 'Ouvir Teste de Áudio'}</span>
+              </button>
+
+              <span className="text-[10px] text-slate-400">
+                {voiceProvider === 'fish-audio' ? 'Síntese via Fish Audio' : 'Síntese local'}
+              </span>
             </div>
 
-            {/* Speech Rate Slider */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-300">Velocidade da Fala:</span>
-                <span className="font-mono text-brand-cyan font-semibold">{speechRate.toFixed(2)}x</span>
+            {/* Speech Rate Slider (for system voice) */}
+            {voiceProvider === 'system' && (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-300">Velocidade da Fala:</span>
+                  <span className="font-mono text-brand-cyan font-semibold">{speechRate.toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.75"
+                  max="1.5"
+                  step="0.05"
+                  value={speechRate}
+                  onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
+                  className="w-full accent-brand-cyan cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                  <span>0.75x (Lenta)</span>
+                  <span>1.0x (Padrão)</span>
+                  <span>1.5x (Rápida)</span>
+                </div>
               </div>
-              <input
-                type="range"
-                min="0.75"
-                max="1.5"
-                step="0.05"
-                value={speechRate}
-                onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
-                className="w-full accent-brand-cyan cursor-pointer"
-              />
-              <div className="flex justify-between text-[9px] text-slate-500 font-mono">
-                <span>0.75x (Lenta)</span>
-                <span>1.0x (Padrão)</span>
-                <span>1.5x (Rápida)</span>
-              </div>
-            </div>
+            )}
 
             {/* Auto-speak replies toggle */}
             <label className="flex items-center space-x-2.5 pt-1 text-xs text-slate-300 cursor-pointer select-none">
@@ -324,6 +452,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <p className="text-[10px] text-slate-400">
               Dá acesso a mais de 300 modelos (DeepSeek R1, Claude 3.7, Llama 3.3, Qwen 2.5, GPT-4o, etc.).
+            </p>
+          </div>
+
+          {/* Fish Audio API Key */}
+          <div className="space-y-1.5 p-3 rounded-xl bg-panel border border-card-border">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand-cyan" />
+                <span>Fish Audio API Key</span>
+              </label>
+              <a
+                href="https://fish.audio/app/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-brand-cyan hover:underline flex items-center"
+              >
+                fish.audio/api-keys <ExternalLink className="w-2.5 h-2.5 ml-1" />
+              </a>
+            </div>
+            <div className="relative">
+              <input
+                type="password"
+                value={fishAudioKey}
+                onChange={(e) => setFishAudioKey(e.target.value)}
+                placeholder="sk-fish-..."
+                className="w-full bg-background border border-card-border rounded-xl px-3.5 py-2 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-brand-cyan"
+              />
+              {fishAudioKey && (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 absolute right-2.5 top-2.5" />
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">
+              Chave da Fish Audio para vozes neurais expressivas. Gratuito para uso com o modelo <code className="text-brand-cyan">s2.1-pro-free</code>.
             </p>
           </div>
 

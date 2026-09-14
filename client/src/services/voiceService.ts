@@ -8,13 +8,42 @@ export interface VoiceOption {
   isDefault: boolean;
 }
 
+export type VoiceProvider = 'system' | 'fish-audio';
+
+export interface FishVoicePreset {
+  id: string;
+  name: string;
+  description: string;
+  lang: string;
+}
+
+export const FISH_VOICE_PRESETS: FishVoicePreset[] = [
+  {
+    id: '5161d41404314212af1254556477c17d',
+    name: '元気な女性 (Mulher Alegre)',
+    description: 'Timbre doce, carismático e expressivo (estilo anime/assistente virtual)',
+    lang: 'Multilíngue (pt-BR)'
+  },
+  {
+    id: 'ec6303f4ed0c435b9f8cdf7530e590c7',
+    name: '元気な若声 (Jovem e Animada)',
+    description: 'Timbre jovem, vibrante, ágil e espontâneo',
+    lang: 'Multilíngue (pt-BR)'
+  }
+];
+
 const STORAGE_VOICE_KEY = 'tellus_selected_voice_uri';
 const STORAGE_RATE_KEY = 'tellus_speech_rate';
 const STORAGE_AUTOSPEAK_KEY = 'tellus_auto_speak';
+const STORAGE_PROVIDER_KEY = 'tellus_voice_provider';
+const STORAGE_FISH_VOICE_KEY = 'tellus_fish_voice_id';
+const STORAGE_FISH_MODEL_KEY = 'tellus_fish_model';
 
 class VoiceService {
   private voices: SpeechSynthesisVoice[] = [];
   private onVoicesLoadedCallbacks: Array<() => void> = [];
+  private currentAudio: HTMLAudioElement | null = null;
+  private currentAudioUrl: string | null = null;
 
   constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -154,8 +183,118 @@ class VoiceService {
       .trim();
   }
 
-  public speak(
+  public getVoiceProvider(): VoiceProvider {
+    return (localStorage.getItem(STORAGE_PROVIDER_KEY) as VoiceProvider) || 'fish-audio';
+  }
+
+  public setVoiceProvider(provider: VoiceProvider) {
+    localStorage.setItem(STORAGE_PROVIDER_KEY, provider);
+  }
+
+  public getFishVoiceId(): string {
+    return localStorage.getItem(STORAGE_FISH_VOICE_KEY) || FISH_VOICE_PRESETS[0].id;
+  }
+
+  public setFishVoiceId(id: string) {
+    localStorage.setItem(STORAGE_FISH_VOICE_KEY, id.trim());
+  }
+
+  public getFishModel(): string {
+    return localStorage.getItem(STORAGE_FISH_MODEL_KEY) || 's2.1-pro-free';
+  }
+
+  public setFishModel(model: string) {
+    localStorage.setItem(STORAGE_FISH_MODEL_KEY, model.trim());
+  }
+
+  public async speak(
     text: string,
+    options?: {
+      onStart?: () => void;
+      onEnd?: () => void;
+      onError?: (err: any) => void;
+      voiceURI?: string;
+      rate?: number;
+      forceProvider?: VoiceProvider;
+      referenceId?: string;
+    }
+  ) {
+    this.stop();
+
+    const clean = this.cleanTextForSpeech(text);
+    if (!clean) {
+      options?.onEnd?.();
+      return;
+    }
+
+    const provider = options?.forceProvider || this.getVoiceProvider();
+
+    // 1. Fish Audio AI High-Fidelity Synthesis
+    if (provider === 'fish-audio') {
+      try {
+        const voiceId = options?.referenceId || this.getFishVoiceId();
+        const model = this.getFishModel();
+
+        const res = await fetch('/api/voice/fish-audio/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: clean,
+            reference_id: voiceId,
+            model
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Erro Fish Audio HTTP ${res.status}`);
+        }
+
+        const blob = await res.blob();
+        const audioUrl = URL.createObjectURL(blob);
+        this.currentAudioUrl = audioUrl;
+        const audio = new Audio(audioUrl);
+        this.currentAudio = audio;
+        audio.playbackRate = options?.rate || this.getSpeechRate();
+
+        audio.onplay = () => {
+          options?.onStart?.();
+        };
+
+        audio.onended = () => {
+          if (this.currentAudioUrl) {
+            URL.revokeObjectURL(this.currentAudioUrl);
+            this.currentAudioUrl = null;
+          }
+          this.currentAudio = null;
+          options?.onEnd?.();
+        };
+
+        audio.onerror = (e) => {
+          console.error('[FishAudio Playback Error]', e);
+          if (this.currentAudioUrl) {
+            URL.revokeObjectURL(this.currentAudioUrl);
+            this.currentAudioUrl = null;
+          }
+          this.currentAudio = null;
+          this.speakWithSystem(clean, options);
+        };
+
+        await audio.play();
+        return;
+      } catch (err: any) {
+        console.warn('[Fish Audio Error — Revertendo para voz nativa do sistema]:', err.message);
+        this.speakWithSystem(clean, options);
+        return;
+      }
+    }
+
+    // 2. Default System Web Speech
+    this.speakWithSystem(clean, options);
+  }
+
+  private speakWithSystem(
+    clean: string,
     options?: {
       onStart?: () => void;
       onEnd?: () => void;
@@ -166,14 +305,6 @@ class VoiceService {
   ) {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       options?.onError?.(new Error('Speech Synthesis não suportado neste ambiente.'));
-      return;
-    }
-
-    this.stop();
-
-    const clean = this.cleanTextForSpeech(text);
-    if (!clean) {
-      options?.onEnd?.();
       return;
     }
 
@@ -215,22 +346,35 @@ class VoiceService {
   }
 
   public stop() {
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.pause();
+        this.currentAudio.currentTime = 0;
+      } catch {}
+      this.currentAudio = null;
+    }
+    if (this.currentAudioUrl) {
+      try {
+        URL.revokeObjectURL(this.currentAudioUrl);
+      } catch {}
+      this.currentAudioUrl = null;
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
   }
 
   public isSpeaking(): boolean {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      return window.speechSynthesis.speaking;
-    }
-    return false;
+    const isAudioPlaying = this.currentAudio !== null && !this.currentAudio.paused;
+    const isSynthesisSpeaking = typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis.speaking;
+    return isAudioPlaying || isSynthesisSpeaking;
   }
 
-  public testVoice(voiceURI: string, onEnd?: () => void) {
-    this.speak('Olá! Esta é uma demonstração da voz selecionada no Tellus.', {
-      voiceURI,
-      onEnd
+  public testVoice(options?: { voiceURI?: string; referenceId?: string; onEnd?: () => void }) {
+    this.speak('Olá! Esta é uma demonstração da voz configurada no Tellus.', {
+      voiceURI: options?.voiceURI,
+      referenceId: options?.referenceId,
+      onEnd: options?.onEnd
     });
   }
 
