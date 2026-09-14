@@ -16,6 +16,12 @@ export interface AppConfig {
     google?: string;
     anthropic?: string;
     openai?: string;
+    fishAudio?: string;
+  };
+  voiceSettings?: {
+    provider?: 'system' | 'fish-audio';
+    fishAudioVoiceId?: string;
+    fishAudioModel?: string;
   };
   defaultModel: string;
   defaultProvider: 'openrouter' | 'google' | 'anthropic' | 'openai';
