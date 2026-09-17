@@ -57,6 +57,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FrankNote, GraphData, DeletedNoteItem } from '../types';
 import { api } from '../api';
+import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
+import { SmartDropzoneModal } from './SmartDropzoneModal';
 
 interface FrankNoteViewProps {
   onMentionInChat?: (note: FrankNote) => void;
@@ -126,6 +128,9 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [notionPasteContent, setNotionPasteContent] = useState<string>('');
   const [notionTargetFolder, setNotionTargetFolder] = useState<string>('Notion Import');
   const [isImportingNotion, setIsImportingNotion] = useState<boolean>(false);
+
+  // Smart Dropzone Modal State
+  const [isDropzoneOpen, setIsDropzoneOpen] = useState<boolean>(false);
 
   // Text Selection & Context Menu for Study Engine
   const [selectedText, setSelectedText] = useState<string>('');
@@ -397,7 +402,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     interface SimNode {
       id: string;
       label: string;
-      type: 'note' | 'subject' | 'tag';
+      type: string;
       val: number;
       color: string;
       x: number;
@@ -412,7 +417,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     interface SimLink {
       source: SimNode;
       target: SimNode;
-      type: 'wikilink' | 'tag' | 'subject';
+      type: string;
     }
 
     // Map raw nodes to simulation nodes
@@ -1540,6 +1545,16 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </button>
           </div>
 
+          {/* Smart Dropzone Button */}
+          <button
+            onClick={() => setIsDropzoneOpen(true)}
+            className="px-3 py-1 rounded-lg bg-gradient-to-r from-brand-cyan/20 to-accent/20 hover:from-brand-cyan/30 hover:to-accent/30 border border-brand-cyan/40 text-brand-cyan text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm"
+            title="Soltar arquivos diversos para auto-organização inteligente e emissão de relatório"
+          >
+            <Upload className="w-3.5 h-3.5 text-brand-cyan" />
+            <span>Smart Dropzone</span>
+          </button>
+
           <button
             onClick={() => handleCreateNoteInFolder(selectedFolderFilter !== 'all' ? selectedFolderFilter : 'Geral')}
             className="px-3 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition-all"
@@ -1554,139 +1569,19 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       {viewMode === 'graph' ? (
         /* OBSIDIAN-STYLE INTERACTIVE GRAPH (FULL PAGE) */
         <div className="flex-1 w-full h-full flex flex-col bg-[#050608] relative overflow-hidden select-none">
-          {/* Top Left Info Banner */}
-          <div className="absolute top-6 left-6 z-10 p-4 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-2xl space-y-2 max-w-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 font-bold text-xs text-slate-100">
-                <Network className="w-4 h-4 text-cyan-400" />
-                <span>Grafo de Conhecimento (Obsidian)</span>
-              </div>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-300 border border-cyan-500/30">
-                Interativo
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Arraste nós para reorganizar, use o scroll do mouse para Zoom e <strong>clique em qualquer nota para abri-la diretamente</strong>.
-            </p>
-            <div className="flex items-center space-x-3 pt-1 text-[10px] font-mono text-slate-400 border-t border-card-border/50">
-              <span className="flex items-center space-x-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 inline-block shadow-xs shadow-indigo-400"></span>
-                <span>Notas</span>
-              </span>
-              <span className="flex items-center space-x-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block shadow-xs shadow-amber-400"></span>
-                <span>Pastas</span>
-              </span>
-              <span className="flex items-center space-x-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-xs shadow-emerald-400"></span>
-                <span>Tags</span>
-              </span>
-            </div>
-          </div>
-
-          {/* Top Right Obsidian Control Toolbar */}
-          <div className="absolute top-6 right-6 z-10 p-3 rounded-2xl bg-card/90 backdrop-blur-md border border-card-border shadow-2xl space-y-3 w-72 text-xs">
-            <div className="flex items-center justify-between font-bold text-[11px] text-slate-300 uppercase tracking-wider font-mono">
-              <span className="flex items-center space-x-1.5">
-                <Filter className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Filtros do Grafo</span>
-              </span>
-              <button
-                onClick={() => setViewMode('editor')}
-                className="text-[10px] text-accent-light hover:underline font-sans"
-              >
-                Voltar às Notas
-              </button>
-            </div>
-
-            {/* Quick Search within Graph */}
-            <div className="relative">
-              <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Filtrar nós no grafo..."
-                value={graphSearchFilter}
-                onChange={(e) => setGraphSearchFilter(e.target.value)}
-                className="w-full bg-panel border border-card-border rounded-xl pl-7 pr-2.5 py-1 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
-            {/* Visibility Toggles */}
-            <div className="space-y-1.5 pt-1">
-              <label className="flex items-center justify-between text-slate-300 cursor-pointer hover:text-white">
-                <span className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-                  <span>Conexões [[Wikilinks]]</span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={graphShowWikilinks}
-                  onChange={(e) => setGraphShowWikilinks(e.target.checked)}
-                  className="rounded border-card-border text-cyan-500 focus:ring-0"
-                />
-              </label>
-
-              <label className="flex items-center justify-between text-slate-300 cursor-pointer hover:text-white">
-                <span className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                  <span>Nós de Pastas / Assuntos</span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={graphShowFolders}
-                  onChange={(e) => setGraphShowFolders(e.target.checked)}
-                  className="rounded border-card-border text-amber-500 focus:ring-0"
-                />
-              </label>
-
-              <label className="flex items-center justify-between text-slate-300 cursor-pointer hover:text-white">
-                <span className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                  <span>Nós de #Tags</span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={graphShowTags}
-                  onChange={(e) => setGraphShowTags(e.target.checked)}
-                  className="rounded border-card-border text-emerald-500 focus:ring-0"
-                />
-              </label>
-            </div>
-
-            {/* Repulsion Force Slider */}
-            <div className="pt-2 border-t border-card-border/60 space-y-1">
-              <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                <span>Força de Repulsão:</span>
-                <span className="text-cyan-400">{graphChargeStrength}</span>
-              </div>
-              <input
-                type="range"
-                min="100"
-                max="600"
-                step="20"
-                value={graphChargeStrength}
-                onChange={(e) => setGraphChargeStrength(Number(e.target.value))}
-                className="w-full accent-cyan-500 cursor-pointer h-1.5 bg-panel rounded-lg"
-              />
-            </div>
-          </div>
-
-          {/* Bottom Left Hovered Node Info Pill */}
-          {hoveredGraphNode && (
-            <div className="absolute bottom-6 left-6 z-10 p-3 rounded-2xl bg-card/95 backdrop-blur-md border border-cyan-500/40 shadow-2xl flex items-center space-x-3 text-xs animate-in fade-in">
-              <div className="p-2 rounded-xl bg-cyan-950/60 border border-cyan-500/30 text-cyan-400">
-                <Network className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="font-bold text-slate-100 block">{hoveredGraphNode.label}</span>
-                <span className="text-[10px] text-slate-400 block font-mono">
-                  Tipo: <strong className="uppercase text-cyan-300">{hoveredGraphNode.type}</strong> • {hoveredGraphNode.connections} conexões • <em className="text-accent-light">Clique para abrir</em>
-                </span>
-              </div>
-            </div>
-          )}
-
-          <canvas ref={canvasRef} className="w-full h-full bg-[#06070a] cursor-grab active:cursor-grabbing block" />
+          <InteractiveGraphCanvas
+            initialType="notes"
+            embeddedMode={true}
+            onOpenNote={(noteTitle) => {
+              const cleanTitle = noteTitle.replace(/^#+\s*/, '').trim();
+              const found = notes.find(n => n.title.toLowerCase() === cleanTitle.toLowerCase() || n.id.toLowerCase() === cleanTitle.toLowerCase());
+              if (found) {
+                selectNote(found);
+                setViewMode('editor');
+              }
+            }}
+            onClose={() => setViewMode('editor')}
+          />
         </div>
       ) : (
         /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE & DRAG-AND-DROP */
@@ -3170,6 +3065,21 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
           )}
         </div>
       )}
+
+      {/* Smart Dropzone Modal with AI Auto-Organization & Report */}
+      <SmartDropzoneModal
+        isOpen={isDropzoneOpen}
+        onClose={() => setIsDropzoneOpen(false)}
+        onOpenNote={(noteTitle) => {
+          const cleanTitle = noteTitle.replace(/^#+\s*/, '').trim();
+          const found = notes.find(n => n.title.toLowerCase() === cleanTitle.toLowerCase() || n.id.toLowerCase() === cleanTitle.toLowerCase());
+          if (found) {
+            selectNote(found);
+            setViewMode('editor');
+          }
+        }}
+        onRefreshNotes={fetchNotesAndFolders}
+      />
     </div>
   );
 };

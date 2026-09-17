@@ -16,7 +16,9 @@ import {
   TellusSkill,
   TellusArtifact,
   AgentPipelineConfig,
-  DeletedNoteItem
+  DeletedNoteItem,
+  IncomingDropzoneFile,
+  DropzoneOrganizeReport
 } from './types';
 
 const API_BASE = '/api';
@@ -284,6 +286,30 @@ export const api = {
 
   async getNotesGraph(): Promise<GraphData> {
     const res = await fetch(`${API_BASE}/notes/graph`);
+    return res.json();
+  },
+
+  async getSkillsGraph(projectPath?: string): Promise<GraphData> {
+    const url = projectPath ? `${API_BASE}/skills/graph?projectPath=${encodeURIComponent(projectPath)}` : `${API_BASE}/skills/graph`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  async getProjectsGraph(): Promise<GraphData> {
+    const res = await fetch(`${API_BASE}/projects/graph`);
+    return res.json();
+  },
+
+  async organizeDropzoneFiles(files: IncomingDropzoneFile[], customVaultDir?: string): Promise<DropzoneOrganizeReport> {
+    const res = await fetch(`${API_BASE}/vault/dropzone-organize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files, customVaultDir })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao organizar arquivos na dropzone' }));
+      throw new Error(err.error || 'Falha ao processar arquivos na dropzone');
+    }
     return res.json();
   },
 

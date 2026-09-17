@@ -13,6 +13,7 @@ import { TerminalRunner } from './services/tools/terminalRunner.js';
 import { SessionManager } from './services/sessionManager.js';
 import { AgentLoop } from './services/agentLoop.js';
 import { FrankNoteEngine } from './services/notes/frankNoteEngine.js';
+import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
 
@@ -471,6 +472,42 @@ app.get('/api/notes/graph', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
     const graphData = FrankNoteEngine.getGraphData(currentPath);
+    res.json(graphData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Dropzone Smart Auto-Organizer Endpoint
+app.post('/api/vault/dropzone-organize', async (req, res) => {
+  try {
+    const { files, customVaultDir } = req.body;
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'Nenhum arquivo enviado para organização.' });
+    }
+    const report = await SmartOrganizer.organizeFiles(files, customVaultDir);
+    res.json(report);
+  } catch (err: any) {
+    console.error('[Dropzone Organize Error]', err);
+    res.status(500).json({ error: err.message || 'Falha ao organizar arquivos na dropzone' });
+  }
+});
+
+// Skills Graph Endpoint
+app.get('/api/skills/graph', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const graphData = SkillManager.getSkillsGraphData(targetPath);
+    res.json(graphData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Projects Graph Endpoint
+app.get('/api/projects/graph', (req, res) => {
+  try {
+    const graphData = ProjectManager.getProjectsGraphData();
     res.json(graphData);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
