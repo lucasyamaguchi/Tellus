@@ -143,20 +143,54 @@ export interface FrankNote {
 export interface GraphNode {
   id: string;
   label: string;
-  type: 'note' | 'subject' | 'tag';
+  type: 'note' | 'subject' | 'tag' | 'skill' | 'category' | 'agent' | 'project' | 'module' | 'memory' | 'routine' | string;
   val: number;
   color?: string;
+  details?: string;
 }
 
 export interface GraphLink {
   source: string;
   target: string;
-  type: 'wikilink' | 'tag' | 'subject';
+  type: 'wikilink' | 'tag' | 'subject' | 'skill_category' | 'skill_agent' | 'synergy' | 'proj_module' | 'proj_memory' | 'proj_routine' | string;
 }
 
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+}
+
+export interface IncomingDropzoneFile {
+  name: string;
+  type: string;
+  size: number;
+  base64Data: string;
+}
+
+export interface OrganizedFileResult {
+  id: string;
+  originalName: string;
+  savedName: string;
+  targetFolder: string;
+  fullRelativePath: string;
+  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'other';
+  size: number;
+  reason: string;
+  summary: string;
+  tags: string[];
+  success: boolean;
+  error?: string;
+}
+
+export interface DropzoneOrganizeReport {
+  sessionId: string;
+  timestamp: number;
+  totalFiles: number;
+  successfulCount: number;
+  failedCount: number;
+  vaultPath: string;
+  reportNotePath?: string;
+  results: OrganizedFileResult[];
 }
 
 export interface TellusSkill {

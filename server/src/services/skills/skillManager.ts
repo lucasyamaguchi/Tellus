@@ -529,4 +529,106 @@ export class SkillManager {
 
     return prompt;
   }
+
+  // Generate Interactive Skills & Agents Graph
+  public static getSkillsGraphData(projectPath?: string): {
+    nodes: Array<{ id: string; label: string; type: string; val: number; color?: string; details?: string }>;
+    links: Array<{ source: string; target: string; type: string }>;
+  } {
+    const allSkills = this.listSkills(projectPath);
+    const nodes: Array<{ id: string; label: string; type: string; val: number; color?: string; details?: string }> = [];
+    const links: Array<{ source: string; target: string; type: string }> = [];
+
+    const categories = new Set<string>();
+    const agents = new Set<string>();
+
+    for (const skill of allSkills) {
+      const cat = skill.category || 'General';
+      const agent = skill.agentAssigned || 'all';
+      categories.add(cat);
+      agents.add(agent);
+
+      const isActive = skill.isActive !== false;
+      const skillColor = !isActive 
+        ? '#64748b' 
+        : (skill.isProjectSpecific ? '#38bdf8' : '#06b6d4');
+
+      nodes.push({
+        id: `skill_${skill.id}`,
+        label: skill.name,
+        type: 'skill',
+        val: 12,
+        color: skillColor,
+        details: skill.description
+      });
+
+      // Link Skill -> Category
+      links.push({
+        source: `skill_${skill.id}`,
+        target: `cat_${cat}`,
+        type: 'skill_category'
+      });
+
+      // Link Skill -> Agent
+      links.push({
+        source: `skill_${skill.id}`,
+        target: `agent_${agent}`,
+        type: 'skill_agent'
+      });
+    }
+
+    // Category Nodes
+    for (const cat of Array.from(categories)) {
+      nodes.push({
+        id: `cat_${cat}`,
+        label: `📂 ${cat}`,
+        type: 'category',
+        val: 18,
+        color: '#f59e0b',
+        details: `Categoria de competências técnicas: ${cat}`
+      });
+    }
+
+    // Agent Nodes
+    const agentLabels: Record<string, string> = {
+      all: '🤖 Todos os Agentes (Universal)',
+      architect: '🏛️ Agente Arquiteto (High-Level)',
+      debugger: '🔍 Agente Diagnóstico (Deep Debugger)',
+      fast_coder: '⚡ Agente Codificador Rápido',
+    };
+
+    for (const agent of Array.from(agents)) {
+      nodes.push({
+        id: `agent_${agent}`,
+        label: agentLabels[agent] || `🤖 Agente ${agent}`,
+        type: 'agent',
+        val: 16,
+        color: '#a855f7',
+        details: `Especialista responsável pelas rotinas de execução: ${agent}`
+      });
+    }
+
+    // Inter-skill synergy connections (e.g. Architecture <-> API Generator, Debugger <-> Testing)
+    const synergyPairs: Array<[string, string]> = [
+      ['architecture-planner', 'api-generator'],
+      ['architecture-planner', 'security-reviewer'],
+      ['deep-debugger', 'unit-testing-best-practices'],
+      ['modern-web-guidance', 'api-generator'],
+      ['tellus-study-engine', 'architecture-planner'],
+      ['tellus-study-engine', 'unit-testing-best-practices']
+    ];
+
+    for (const [s1, s2] of synergyPairs) {
+      if (allSkills.some(s => s.id === s1) && allSkills.some(s => s.id === s2)) {
+        links.push({
+          source: `skill_${s1}`,
+          target: `skill_${s2}`,
+          type: 'synergy'
+        });
+      }
+    }
+
+    return { nodes, links };
+  }
 }
+

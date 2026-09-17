@@ -25,15 +25,17 @@ import {
   Download,
   Folder,
   FolderCheck,
-  FileUp
+  FileUp,
+  Network
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { TellusSkill, TellusArtifact, ProjectOverview } from '../types';
 import { api } from '../api';
+import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
 
 export const SkillsAndArtifactsView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'skills' | 'artifacts'>('skills');
+  const [activeTab, setActiveTab] = useState<'skills' | 'artifacts' | 'graph'>('skills');
   const [skills, setSkills] = useState<TellusSkill[]>([]);
   const [artifacts, setArtifacts] = useState<TellusArtifact[]>([]);
   const [projects, setProjects] = useState<ProjectOverview[]>([]);
@@ -497,6 +499,17 @@ export const SkillsAndArtifactsView: React.FC = () => {
             <FileCheck className="w-3.5 h-3.5 text-brand-emerald" />
             <span>Artefatos & Blueprints ({artifacts.length})</span>
           </button>
+          <button
+            onClick={() => setActiveTab('graph')}
+            className={`px-3 py-1 rounded-md transition-all flex items-center space-x-1.5 ${
+              activeTab === 'graph'
+                ? 'bg-accent text-white font-semibold shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Graph View</span>
+          </button>
         </div>
 
         {activeTab === 'skills' ? (
@@ -517,7 +530,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
               <span>Nova Skill</span>
             </button>
           </div>
-        ) : (
+        ) : activeTab === 'artifacts' ? (
           <button
             onClick={() => setIsCreatingArtifact(true)}
             className="px-3 py-1 rounded-lg bg-brand-emerald hover:bg-emerald-600 text-slate-950 font-semibold text-xs flex items-center space-x-1 shadow-sm transition-all"
@@ -525,6 +538,11 @@ export const SkillsAndArtifactsView: React.FC = () => {
             <Plus className="w-3.5 h-3.5 text-slate-950" />
             <span>Novo Artefato</span>
           </button>
+        ) : (
+          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+            Visão Gráfica das Skills & Conexões
+          </div>
         )}
       </div>
 
@@ -1107,6 +1125,13 @@ export const SkillsAndArtifactsView: React.FC = () => {
               <span>Selecione um artefato para visualizar os detalhes.</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 3: SKILLS GRAPH VIEW */}
+      {activeTab === 'graph' && (
+        <div className="flex-1 w-full h-full overflow-hidden">
+          <InteractiveGraphCanvas initialType="skills" embeddedMode={true} />
         </div>
       )}
     </div>
