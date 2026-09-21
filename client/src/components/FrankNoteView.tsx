@@ -51,7 +51,8 @@ import {
   Code2,
   PenTool,
   Camera,
-  LayoutGrid
+  LayoutGrid,
+  Home
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -131,6 +132,8 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
 
   // Smart Dropzone Modal State
   const [isDropzoneOpen, setIsDropzoneOpen] = useState<boolean>(false);
+  const [initialHomeDropFiles, setInitialHomeDropFiles] = useState<File[] | null>(null);
+  const [isHomeDraggingOver, setIsHomeDraggingOver] = useState<boolean>(false);
 
   // Text Selection & Context Menu for Study Engine
   const [selectedText, setSelectedText] = useState<string>('');
@@ -216,9 +219,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       ]);
       setNotes(notesList);
       setFolders(foldersList);
-      if (notesList.length > 0 && !activeNote) {
-        selectNote(notesList[0]);
-      }
+      // Keep activeNote null by default so user opens the Home Dashboard
     } catch {
       // ignore
     }
@@ -785,6 +786,37 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     setEditFolder(note.folder || note.subject || 'Geral');
     setEditContent(note.content);
     setNoteViewMode('preview'); // Always open in formatted preview first!
+
+    // Focus the sidebar on this note's notebook
+    const folderPath = note.folder || note.subject || 'Geral';
+    const nbId = folderPath.split('/')[0] || 'Geral';
+    setSelectedNotebookId(nbId);
+  };
+
+  const goToHome = () => {
+    setSelectedNotebookId('all');
+    setActiveNote(null);
+    setViewMode('editor');
+  };
+
+  const goBack = () => {
+    if (viewMode === 'graph') {
+      setViewMode('editor');
+      return;
+    }
+    if (activeNote) {
+      setActiveNote(null);
+      return;
+    }
+    if (selectedNotebookId !== 'all') {
+      setSelectedNotebookId('all');
+      return;
+    }
+  };
+
+  const openNotebook = (nbId: string) => {
+    setSelectedNotebookId(nbId);
+    setActiveNote(null);
   };
 
   const handleCreateNoteInFolder = (folderName: string = 'Geral') => {
@@ -1469,7 +1501,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
       {/* Top Bar Controls */}
       <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
           {/* Toggle Sidebar Button */}
           {viewMode === 'editor' && (
             <button
@@ -1492,13 +1524,74 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </button>
           )}
 
-          <div className="flex items-center space-x-2">
-            <div className="w-6 h-6 rounded-lg bg-white p-0.5 border border-card-border shadow-xs flex items-center justify-center shrink-0">
-              <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
-            </div>
-            <span className="font-bold text-xs text-slate-100 font-mono">FrankMD Vault & Pastas</span>
+          {/* Practical Back and Home Buttons */}
+          <div className="flex items-center space-x-1 bg-card rounded-lg p-0.5 border border-card-border">
+            <button
+              onClick={goBack}
+              disabled={activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor'}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center space-x-1.5 transition-all ${
+                activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor'
+                  ? 'opacity-30 text-slate-500 cursor-not-allowed'
+                  : 'hover:bg-panel text-slate-200 hover:text-white cursor-pointer'
+              }`}
+              title="Voltar ao nível anterior"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Voltar</span>
+            </button>
+
+            <button
+              onClick={goToHome}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor'
+                  ? 'bg-accent text-white shadow-xs'
+                  : 'hover:bg-panel text-slate-300 hover:text-white'
+              }`}
+              title="Ir para a Página Inicial (Todos os Cadernos)"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>Home</span>
+            </button>
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full hidden sm:flex items-center space-x-1">
+
+          {/* Clickable Breadcrumbs Trail */}
+          <div className="hidden md:flex items-center space-x-1.5 text-xs text-slate-400 font-mono">
+            <span className="text-slate-600">/</span>
+            <button
+              onClick={goToHome}
+              className={`hover:text-accent-light hover:underline font-sans transition-colors ${
+                activeNote === null && selectedNotebookId === 'all' ? 'text-accent-light font-bold' : 'text-slate-300'
+              }`}
+            >
+              Cadernos
+            </button>
+
+            {selectedNotebookId !== 'all' && (
+              <>
+                <span className="text-slate-600">/</span>
+                <button
+                  onClick={() => setActiveNote(null)}
+                  className={`hover:text-accent-light hover:underline font-sans transition-colors truncate max-w-[140px] ${
+                    activeNote === null ? 'text-accent-light font-bold' : 'text-slate-300'
+                  }`}
+                  title={`Caderno: ${selectedNotebookId}`}
+                >
+                  {selectedNotebookId}
+                </button>
+              </>
+            )}
+
+            {activeNote && (
+              <>
+                <span className="text-slate-600">/</span>
+                <span className="text-slate-100 font-bold font-sans truncate max-w-[180px]" title={activeNote.title}>
+                  {activeNote.title}
+                </span>
+              </>
+            )}
+          </div>
+
+          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full hidden xl:flex items-center space-x-1">
             <ShieldCheck className="w-3 h-3" />
             <span>Obsidian Standard Compatible</span>
           </span>
@@ -1742,48 +1835,69 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     </form>
                   )}
 
-                  {/* Notebook Filter Pills / Tabs Bar */}
-                  <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none pt-0.5">
-                    <button
-                      onClick={() => {
-                        setSelectedNotebookId('all');
-                        setActiveNote(null);
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all flex items-center space-x-1.5 border cursor-pointer ${
-                        selectedNotebookId === 'all'
-                          ? 'bg-accent text-white border-accent shadow-xs'
-                          : 'bg-card text-slate-400 border-card-border hover:text-slate-200'
-                      }`}
-                    >
-                      <LayoutGrid className="w-3 h-3" />
-                      <span>Todos</span>
-                      <span className="opacity-70 font-mono">({filteredNotes.length})</span>
-                    </button>
-                    {notebooksList.map(nb => {
-                      const details = getNotebookDetails(nb.id);
-                      const NbIcon = details.icon;
-                      const isSelected = selectedNotebookId === nb.id;
-                      return (
-                        <button
-                          key={nb.id}
-                          onClick={() => {
-                            setSelectedNotebookId(nb.id === selectedNotebookId ? 'all' : nb.id);
-                            setActiveNote(null);
-                          }}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all flex items-center space-x-1.5 border cursor-pointer ${
-                            isSelected
-                              ? `${details.badgeBg} shadow-xs font-bold ring-1 ring-accent/40`
-                              : 'bg-card text-slate-400 border-card-border hover:text-slate-200'
-                          }`}
-                          title={`Ver painel do caderno ${nb.id}`}
-                        >
-                          <NbIcon className={`w-3 h-3 ${isSelected ? details.color : 'text-slate-400'}`} />
-                          <span>{nb.id}</span>
-                          <span className="opacity-70 font-mono">({nb.totalCount})</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {/* Notebook Filter Pills OR Focused Notebook Header */}
+                  {selectedNotebookId !== 'all' ? (
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-accent/15 border border-accent/40 text-xs animate-in fade-in">
+                      <div className="flex items-center space-x-2 truncate">
+                        <span className="font-bold text-slate-100 truncate text-xs flex items-center space-x-1.5">
+                          <Folder className="w-3.5 h-3.5 text-accent-light" />
+                          <span className="truncate">{selectedNotebookId}</span>
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-panel border border-card-border text-accent-light font-bold">
+                          {currentSelectedNotebook?.totalCount || 0}
+                        </span>
+                      </div>
+                      <button
+                        onClick={goToHome}
+                        className="text-[10px] text-accent-light hover:underline font-mono flex items-center space-x-1 cursor-pointer shrink-0 font-semibold"
+                        title="Voltar para todos os cadernos (Home)"
+                      >
+                        <span>← Todos</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none pt-0.5">
+                      <button
+                        onClick={() => {
+                          setSelectedNotebookId('all');
+                          setActiveNote(null);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all flex items-center space-x-1.5 border cursor-pointer ${
+                          selectedNotebookId === 'all'
+                            ? 'bg-accent text-white border-accent shadow-xs'
+                            : 'bg-card text-slate-400 border-card-border hover:text-slate-200'
+                        }`}
+                      >
+                        <LayoutGrid className="w-3 h-3" />
+                        <span>Todos</span>
+                        <span className="opacity-70 font-mono">({filteredNotes.length})</span>
+                      </button>
+                      {notebooksList.map(nb => {
+                        const details = getNotebookDetails(nb.id);
+                        const NbIcon = details.icon;
+                        const isSelected = selectedNotebookId === nb.id;
+                        return (
+                          <button
+                            key={nb.id}
+                            onClick={() => {
+                              setSelectedNotebookId(nb.id === selectedNotebookId ? 'all' : nb.id);
+                              setActiveNote(null);
+                            }}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all flex items-center space-x-1.5 border cursor-pointer ${
+                              isSelected
+                                ? `${details.badgeBg} shadow-xs font-bold ring-1 ring-accent/40`
+                                : 'bg-card text-slate-400 border-card-border hover:text-slate-200'
+                            }`}
+                            title={`Ver painel do caderno ${nb.id}`}
+                          >
+                            <NbIcon className={`w-3 h-3 ${isSelected ? details.color : 'text-slate-400'}`} />
+                            <span>{nb.id}</span>
+                            <span className="opacity-70 font-mono">({nb.totalCount})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </>
               ) : (
                 /* Trash Retention Configuration Bar */
@@ -2841,14 +2955,140 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       </div>
                     </div>
 
+                    {/* Back to Home Button when in a specific notebook */}
+                    {!isAll && (
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={goToHome}
+                          className="px-3.5 py-1.5 rounded-xl bg-panel hover:bg-card border border-card-border text-xs text-slate-300 hover:text-white font-semibold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+                        >
+                          <Home className="w-3.5 h-3.5 text-accent-light" />
+                          <span>← Voltar para Todos os Cadernos</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Home Interactive Hub: Dropzone & Graph Preview (When in 'all' view) */}
+                    {isAll && (
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                        {/* 1. Smart Dropzone Card (5 cols) */}
+                        <div className="lg:col-span-5 flex flex-col">
+                          <div 
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              setIsHomeDraggingOver(true);
+                            }}
+                            onDragLeave={() => setIsHomeDraggingOver(false)}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              setIsHomeDraggingOver(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                setInitialHomeDropFiles(Array.from(e.dataTransfer.files));
+                                setIsDropzoneOpen(true);
+                              }
+                            }}
+                            onClick={() => {
+                              setInitialHomeDropFiles(null);
+                              setIsDropzoneOpen(true);
+                            }}
+                            className={`p-6 rounded-3xl border-2 transition-all duration-200 cursor-pointer flex-1 flex flex-col justify-between shadow-xl relative overflow-hidden group ${
+                              isHomeDraggingOver
+                                ? 'border-brand-cyan bg-brand-cyan/15 ring-4 ring-brand-cyan/20 scale-[1.01]'
+                                : 'border-dashed border-card-border/80 hover:border-brand-cyan/50 bg-gradient-to-b from-card/80 via-panel/60 to-card/40 hover:bg-card/90'
+                            }`}
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="p-3 rounded-2xl bg-brand-cyan/15 border border-brand-cyan/30 text-brand-cyan">
+                                  <Upload className="w-6 h-6 animate-pulse" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2.5 py-1 rounded-full font-bold uppercase bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30">
+                                  ⚡ Auto-Organização IA
+                                </span>
+                              </div>
+
+                              <div>
+                                <h3 className="font-bold text-base text-slate-100 group-hover:text-brand-cyan transition-colors flex items-center space-x-1.5">
+                                  <span>Smart Dropzone do Vault</span>
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                                  Arraste ou selecione qualquer arquivo (PDFs, imagens de cadernos, apostilas, docs, código, planilhas). A IA classifica automaticamente na pasta certa e gera o relatório.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="pt-5 mt-4 border-t border-card-border/60 flex items-center justify-between">
+                              <span className="text-xs text-brand-cyan font-semibold flex items-center space-x-1">
+                                <span>Soltar arquivos aqui</span>
+                                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500 bg-panel px-2 py-0.5 rounded-lg border border-card-border">
+                                Arraste ou clique
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Embedded Graph View Card (7 cols) */}
+                        <div className="lg:col-span-7 flex flex-col">
+                          <div className="p-5 rounded-3xl border border-card-border/80 bg-gradient-to-b from-card/80 to-panel/50 shadow-xl flex-1 flex flex-col justify-between space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2.5">
+                                <div className="p-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
+                                  <Network className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <h3 className="font-bold text-sm text-slate-100 flex items-center space-x-2">
+                                    <span>Grafo de Conhecimento do Vault</span>
+                                  </h3>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    Exploração visual das notas, cadernos e conexões [[...]]
+                                  </span>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => setViewMode('graph')}
+                                className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+                                title="Abrir em tela cheia com alternador de 3 universos (Notas, Skills, Projetos)"
+                              >
+                                <Maximize2 className="w-3.5 h-3.5" />
+                                <span>Expandir Grafo</span>
+                              </button>
+                            </div>
+
+                            {/* Embedded Mini Graph Canvas */}
+                            <div className="h-[230px] w-full rounded-2xl overflow-hidden border border-card-border/80 bg-[#050608] relative">
+                              <InteractiveGraphCanvas
+                                initialType="notes"
+                                embeddedMode={true}
+                                onOpenNote={(noteTitle) => {
+                                  const cleanTitle = noteTitle.replace(/^#+\s*/, '').trim();
+                                  const found = notes.find(n => n.title.toLowerCase() === cleanTitle.toLowerCase() || n.id.toLowerCase() === cleanTitle.toLowerCase());
+                                  if (found) {
+                                    selectNote(found);
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Cadernos Temáticos Grid (When in 'all' view) */}
                     {isAll && (
-                      <div className="space-y-3">
+                      <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center space-x-2">
-                            <Book className="w-3.5 h-3.5 text-accent-light" />
-                            <span>Cadernos Temáticos ({notebooksList.length})</span>
-                          </h2>
+                          <div className="space-y-0.5">
+                            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center space-x-2">
+                              <Book className="w-3.5 h-3.5 text-accent-light" />
+                              <span>Cadernos Temáticos & Pastas ({notebooksList.length})</span>
+                            </h2>
+                            <p className="text-[11px] text-slate-500">
+                              Clique em qualquer caderno para filtrar a barra lateral exclusivamente para ele.
+                            </p>
+                          </div>
                           <button
                             onClick={() => setIsCreatingNotebook(true)}
                             className="text-xs text-cyan-400 hover:underline flex items-center space-x-1 cursor-pointer"
@@ -2858,37 +3098,120 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                           {notebooksList.map(nb => {
                             const nbDet = getNotebookDetails(nb.id);
                             const IconComp = nbDet.icon;
+                            const previewSubnotes = nb.allNotes.slice(0, 3);
+
                             return (
                               <div
                                 key={nb.id}
-                                onClick={() => setSelectedNotebookId(nb.id)}
-                                className={`p-4 rounded-2xl border ${nbDet.bg} hover:border-accent/60 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-md flex flex-col justify-between group`}
+                                className={`p-5 rounded-3xl border ${nbDet.bg} hover:border-accent/60 transition-all duration-200 hover:-translate-y-0.5 shadow-lg flex flex-col justify-between space-y-4 group`}
                               >
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <div className={`p-2 rounded-xl ${nbDet.badgeBg}`}>
-                                      <IconComp className={`w-4 h-4 ${nbDet.color}`} />
+                                <div className="space-y-3">
+                                  {/* Notebook Card Header */}
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-center space-x-3">
+                                      <div className={`p-3 rounded-2xl ${nbDet.badgeBg} shadow-sm shrink-0`}>
+                                        <IconComp className={`w-5 h-5 ${nbDet.color}`} />
+                                      </div>
+                                      <div>
+                                        <h3 
+                                          onClick={() => openNotebook(nb.id)}
+                                          className="font-bold text-base text-slate-100 group-hover:text-accent-light transition-colors truncate cursor-pointer"
+                                          title={`Abrir caderno ${nb.id}`}
+                                        >
+                                          {nb.id}
+                                        </h3>
+                                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase inline-block mt-0.5 ${nbDet.badgeBg}`}>
+                                          {nbDet.category}
+                                        </span>
+                                      </div>
                                     </div>
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-panel border border-card-border text-slate-400">
-                                      {nb.subfolders.length} subpastas
+
+                                    <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 font-semibold shrink-0">
+                                      {nb.totalCount} nota{nb.totalCount === 1 ? '' : 's'}
                                     </span>
                                   </div>
-                                  <div>
-                                    <h3 className="font-bold text-sm text-slate-100 group-hover:text-accent-light transition-colors truncate">
-                                      {nb.id}
-                                    </h3>
-                                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                                      {nb.totalCount} anotaç{nb.totalCount === 1 ? 'ão' : 'ões'}
-                                    </p>
+
+                                  {/* Subpastas Pills inside Notebook */}
+                                  {nb.subfolders.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <span className="text-[10px] font-mono uppercase text-slate-500 font-semibold block">
+                                        Subpastas ({nb.subfolders.length}):
+                                      </span>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {nb.subfolders.slice(0, 4).map(sub => (
+                                          <button
+                                            key={sub.path}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openNotebook(nb.id);
+                                            }}
+                                            className="px-2 py-0.5 rounded-lg bg-panel/80 hover:bg-card border border-card-border text-[10px] text-amber-300 font-mono transition-colors flex items-center space-x-1 cursor-pointer"
+                                            title={`Pasta: ${sub.path}`}
+                                          >
+                                            <Folder className="w-3 h-3 text-amber-400" />
+                                            <span className="truncate max-w-[120px]">{sub.name}</span>
+                                            <span className="text-slate-500">({sub.notes.length})</span>
+                                          </button>
+                                        ))}
+                                        {nb.subfolders.length > 4 && (
+                                          <span className="px-1.5 py-0.5 text-[10px] text-slate-500 font-mono">
+                                            +{nb.subfolders.length - 4} mais
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Subnotes Preview List */}
+                                  <div className="space-y-1.5 pt-1">
+                                    <span className="text-[10px] font-mono uppercase text-slate-500 font-semibold block">
+                                      Anotações no Caderno:
+                                    </span>
+                                    {previewSubnotes.length === 0 ? (
+                                      <div className="text-[11px] text-slate-500 italic py-1">
+                                        Caderno vazio. Clique em Abrir para criar notas.
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-1">
+                                        {previewSubnotes.map(note => (
+                                          <div
+                                            key={note.id}
+                                            onClick={() => selectNote(note)}
+                                            className="px-2.5 py-1.5 rounded-xl bg-card/60 hover:bg-card border border-card-border/60 hover:border-accent/40 text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between group/note"
+                                          >
+                                            <span className="truncate flex items-center space-x-2">
+                                              <FileText className="w-3 h-3 text-accent-light shrink-0" />
+                                              <span className="truncate font-medium group-hover/note:text-accent-light">{note.title}</span>
+                                            </span>
+                                            <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0" />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                <div className="pt-3 mt-2 border-t border-card-border/60 flex items-center justify-between text-[11px] text-accent-light font-semibold">
-                                  <span>Abrir Caderno</span>
-                                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+
+                                {/* Footer Action */}
+                                <div className="pt-3 border-t border-card-border/60 flex items-center justify-between">
+                                  <button
+                                    onClick={() => handleCreateNoteInFolder(nb.id)}
+                                    className="text-[11px] text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>Nova Nota</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => openNotebook(nb.id)}
+                                    className="px-3 py-1 rounded-xl bg-accent/20 hover:bg-accent border border-accent/40 text-accent-light hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer shadow-xs"
+                                  >
+                                    <span>Abrir Caderno</span>
+                                    <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                                  </button>
                                 </div>
                               </div>
                             );
@@ -3069,7 +3392,11 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       {/* Smart Dropzone Modal with AI Auto-Organization & Report */}
       <SmartDropzoneModal
         isOpen={isDropzoneOpen}
-        onClose={() => setIsDropzoneOpen(false)}
+        initialFiles={initialHomeDropFiles}
+        onClose={() => {
+          setIsDropzoneOpen(false);
+          setInitialHomeDropFiles(null);
+        }}
         onOpenNote={(noteTitle) => {
           const cleanTitle = noteTitle.replace(/^#+\s*/, '').trim();
           const found = notes.find(n => n.title.toLowerCase() === cleanTitle.toLowerCase() || n.id.toLowerCase() === cleanTitle.toLowerCase());

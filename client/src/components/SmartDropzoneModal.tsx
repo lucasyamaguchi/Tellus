@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, 
   X, 
@@ -12,11 +12,11 @@ import {
   Sparkles, 
   FolderCheck, 
   ArrowRight, 
-  ExternalLink,
-  BookOpen,
-  Trash2,
-  RefreshCw,
-  Folder
+  ExternalLink, 
+  BookOpen, 
+  Trash2, 
+  RefreshCw, 
+  Folder 
 } from 'lucide-react';
 import { IncomingDropzoneFile, DropzoneOrganizeReport, OrganizedFileResult } from '../types';
 import { api } from '../api';
@@ -26,13 +26,15 @@ interface SmartDropzoneModalProps {
   onClose: () => void;
   onOpenNote?: (noteTitle: string) => void;
   onRefreshNotes?: () => void;
+  initialFiles?: File[] | null;
 }
 
 export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
   isOpen,
   onClose,
   onOpenNote,
-  onRefreshNotes
+  onRefreshNotes,
+  initialFiles
 }) => {
   const [selectedFiles, setSelectedFiles] = useState<IncomingDropzoneFile[]>([]);
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
@@ -41,8 +43,6 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  if (!isOpen) return null;
 
   // Convert File objects to Base64
   const processFileList = async (fileList: FileList | File[]) => {
@@ -66,6 +66,14 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
 
     setSelectedFiles(prev => [...prev, ...newFiles]);
   };
+
+  useEffect(() => {
+    if (isOpen && initialFiles && initialFiles.length > 0) {
+      processFileList(initialFiles);
+    }
+  }, [isOpen, initialFiles]);
+
+  if (!isOpen) return null;
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
