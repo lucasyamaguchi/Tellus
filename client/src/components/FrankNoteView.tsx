@@ -1126,13 +1126,21 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
   };
 
   const handleDeleteNote = async (id: string, isProjectSpecific?: boolean) => {
-    if (!confirm('Deseja mover esta anotação para o backup de segurança e deletar?')) return;
+    const targetNote = notes.find(n => n.id === id);
+    const title = targetNote?.title || id;
+    if (!confirm(`Deseja mover a nota "${title}" para a lixeira?\n\n🛡️ Um backup de segurança será preservado automaticamente em .backups.`)) return;
     try {
       await api.deleteNote(id, isProjectSpecific);
-      const remaining = notes.filter(n => n.id !== id);
-      setNotes(remaining);
-      if (remaining.length > 0) selectNote(remaining[0]);
-      else setActiveNote(null);
+      await fetchNotesAndFolders();
+      await fetchDeletedNotes();
+      if (activeNote?.id === id) {
+        const remaining = notes.filter(n => n.id !== id);
+        if (remaining.length > 0 && selectedNotebookId !== 'all') {
+          selectNote(remaining[0]);
+        } else {
+          setActiveNote(null);
+        }
+      }
     } catch (err: any) {
       alert(`Erro ao deletar: ${err.message}`);
     }
@@ -1149,7 +1157,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     });
     
     const countMsg = folderNotes.length === 1 ? '1 nota' : `${folderNotes.length} notas`;
-    const confirmMessage = `Tem certeza que deseja excluir toda a pasta "${folderName}" e todas as suas ${countMsg}?\n\n` +
+    const confirmMessage = `Tem certeza que deseja mover toda a pasta "${folderName}" (${countMsg}) para a lixeira?\n\n` +
       `🛡️ Todas as notas serão arquivadas no backup de segurança (.backups) do Obsidian antes da exclusão.`;
 
     if (!confirm(confirmMessage)) return;
@@ -1157,21 +1165,17 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     try {
       await api.deleteFolder(folderName);
       await fetchNotesAndFolders();
+      await fetchDeletedNotes();
       if (viewMode === 'graph') {
         fetchGraph();
+      }
+      if (selectedNotebookId === folderName) {
+        setSelectedNotebookId('all');
       }
       if (activeNote) {
         const activeNoteFolder = activeNote.folder || activeNote.subject || 'Geral';
         if (activeNoteFolder === folderName || activeNoteFolder.startsWith(`${folderName}/`)) {
-          const remainingNotes = notes.filter(n => {
-            const f = n.folder || n.subject || 'Geral';
-            return f !== folderName && !f.startsWith(`${folderName}/`);
-          });
-          if (remainingNotes.length > 0) {
-            selectNote(remainingNotes[0]);
-          } else {
-            setActiveNote(null);
-          }
+          setActiveNote(null);
         }
       }
     } catch (err: any) {
@@ -1994,12 +1998,15 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             <span>Importar do Notion</span>
           </button>
 
-          {/* Mode Switcher: Editor vs Graph */}
+          {/* Mode Switcher: Editor vs Graph vs Trash */}
           <div className="flex items-center bg-card rounded-lg p-0.5 border border-card-border text-xs">
             <button
-              onClick={() => setViewMode('editor')}
+              onClick={() => {
+                setViewMode('editor');
+                setSidebarTab('folders');
+              }}
               className={`px-3 py-1 rounded-md transition-all flex items-center space-x-1.5 ${
-                viewMode === 'editor'
+                viewMode === 'editor' && sidebarTab === 'folders'
                   ? 'bg-accent text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
@@ -2021,6 +2028,28 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             >
               <Network className="w-3.5 h-3.5 text-cyan-400" />
               <span>Visualizar Grafo</span>
+            </button>
+            <button
+              onClick={() => {
+                setViewMode('editor');
+                setSidebarTab('trash');
+                setIsSidebarCollapsed(false);
+                fetchDeletedNotes();
+              }}
+              className={`px-3 py-1 rounded-md transition-all flex items-center space-x-1.5 ${
+                viewMode === 'editor' && sidebarTab === 'trash'
+                  ? 'bg-rose-950/80 text-rose-300 font-semibold shadow-sm border border-rose-500/40'
+                  : 'text-slate-400 hover:text-rose-400'
+              }`}
+              title="Abrir Lixeira de Notas e Pastas Removidas"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Lixeira</span>
+              {deletedNotes.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                  {deletedNotes.length}
+                </span>
+              )}
             </button>
           </div>
 
@@ -3303,6 +3332,18 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                 <Folder className="w-3.5 h-3.5 text-amber-400" />
                                 <span><strong>{subfoldersList.length}</strong> {subfoldersList.length === 1 ? 'subpasta' : 'subpastas'}</span>
                               </span>
+                              <button
+                                onClick={() => {
+                                  setSidebarTab('trash');
+                                  setIsSidebarCollapsed(false);
+                                  fetchDeletedNotes();
+                                }}
+                                className="px-2.5 py-1 rounded-xl bg-panel hover:bg-rose-950/30 border border-card-border hover:border-rose-500/40 text-slate-300 hover:text-rose-300 flex items-center space-x-1.5 transition-all cursor-pointer"
+                                title="Abrir Lixeira de Notas e Pastas"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                <span>Lixeira {deletedNotes.length > 0 ? `(${deletedNotes.length})` : ''}</span>
+                              </button>
                               <a
                                 href="https://github.com/akitaonrails/ai-memory"
                                 target="_blank"
@@ -3523,9 +3564,23 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                       </div>
                                     </div>
 
-                                    <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 font-semibold shrink-0">
-                                      {nb.totalCount} {nb.totalCount === 1 ? 'anotação' : 'anotações'}
-                                    </span>
+                                    <div className="flex items-center space-x-1.5 shrink-0">
+                                      <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 font-semibold">
+                                        {nb.totalCount} {nb.totalCount === 1 ? 'anotação' : 'anotações'}
+                                      </span>
+                                      {nb.id !== 'Geral' && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteFolder(nb.id);
+                                          }}
+                                          className="p-1.5 rounded-xl bg-panel hover:bg-rose-500/20 border border-card-border hover:border-rose-500/40 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                                          title={`Excluir caderno "${nb.id}" e mover para a lixeira`}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
 
                                   {/* Subpastas Pills inside Notebook */}
@@ -3536,19 +3591,33 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                       </span>
                                       <div className="flex flex-wrap gap-1.5">
                                         {nb.subfolders.slice(0, 4).map(sub => (
-                                          <button
+                                          <div
                                             key={sub.path}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              openNotebook(nb.id);
-                                            }}
-                                            className="px-2 py-0.5 rounded-lg bg-panel/80 hover:bg-card border border-card-border text-[10px] text-amber-300 font-mono transition-colors flex items-center space-x-1 cursor-pointer max-w-full"
-                                            title={`Pasta: ${sub.path}`}
+                                            className="inline-flex items-center rounded-lg bg-panel/80 hover:bg-card border border-card-border text-[10px] text-amber-300 font-mono transition-colors pl-2 pr-1 py-0.5 group/subpill max-w-full"
                                           >
-                                            <Folder className="w-3 h-3 text-amber-400 shrink-0" />
-                                            <span className="truncate max-w-[110px]">{sub.name}</span>
-                                            <span className="text-slate-500 shrink-0">({sub.notes.length})</span>
-                                          </button>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                openNotebook(nb.id);
+                                              }}
+                                              className="flex items-center space-x-1 cursor-pointer truncate max-w-[120px]"
+                                              title={`Pasta: ${sub.path}`}
+                                            >
+                                              <Folder className="w-3 h-3 text-amber-400 shrink-0" />
+                                              <span className="truncate">{sub.name}</span>
+                                              <span className="text-slate-500 shrink-0">({sub.notes.length})</span>
+                                            </button>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteFolder(sub.path);
+                                              }}
+                                              className="p-0.5 rounded hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors ml-1 cursor-pointer"
+                                              title={`Excluir subpasta "${sub.name}"`}
+                                            >
+                                              <Trash2 className="w-2.5 h-2.5" />
+                                            </button>
+                                          </div>
                                         ))}
                                         {nb.subfolders.length > 4 && (
                                           <span className="px-1.5 py-0.5 text-[10px] text-slate-500 font-mono">
@@ -3580,7 +3649,19 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                               <FileText className="w-3 h-3 text-accent-light shrink-0" />
                                               <span className="truncate font-medium group-hover/note:text-accent-light">{note.title}</span>
                                             </span>
-                                            <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0 ml-1" />
+                                            <div className="flex items-center space-x-1 shrink-0 ml-1">
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDeleteNote(note.id, note.isProjectSpecific);
+                                                }}
+                                                className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                                title={`Excluir nota "${note.title}"`}
+                                              >
+                                                <Trash2 className="w-3 h-3" />
+                                              </button>
+                                              <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0" />
+                                            </div>
                                           </div>
                                         ))}
                                       </div>
@@ -3659,16 +3740,28 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                   </span>
                                 </div>
                               </div>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCreateNoteInFolder(sub.path);
-                                }}
-                                className="p-1 rounded hover:bg-panel text-slate-400 hover:text-white shrink-0 ml-2"
-                                title={`Criar nova nota em "${sub.path}"`}
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center space-x-1 shrink-0 ml-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCreateNoteInFolder(sub.path);
+                                  }}
+                                  className="p-1 rounded hover:bg-panel text-slate-400 hover:text-white"
+                                  title={`Criar nova nota em "${sub.path}"`}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteFolder(sub.path);
+                                  }}
+                                  className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                                  title={`Excluir subpasta "${sub.name}" e mover para a lixeira`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -3728,14 +3821,26 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                 className="p-4 rounded-2xl border border-card-border/80 bg-card/60 hover:bg-card hover:border-accent/50 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-md flex flex-col justify-between space-y-3 group"
                               >
                                 <div className="space-y-2">
-                                  {/* Folder Badge + Date */}
+                                  {/* Folder Badge + Date + Delete Button */}
                                   <div className="flex items-center justify-between text-[10px] font-mono">
-                                    <span className={`px-2 py-0.5 rounded-md font-semibold truncate max-w-[170px] ${nbDet.badgeBg}`} title={folderName}>
+                                    <span className={`px-2 py-0.5 rounded-md font-semibold truncate max-w-[160px] ${nbDet.badgeBg}`} title={folderName}>
                                       📂 {folderName}
                                     </span>
-                                    <span className="text-slate-500">
-                                      {n.updatedAt ? new Date(n.updatedAt).toLocaleDateString('pt-BR') : ''}
-                                    </span>
+                                    <div className="flex items-center space-x-1.5 shrink-0">
+                                      <span className="text-slate-500">
+                                        {n.updatedAt ? new Date(n.updatedAt).toLocaleDateString('pt-BR') : ''}
+                                      </span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteNote(n.id, n.isProjectSpecific);
+                                        }}
+                                        className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                        title={`Excluir nota "${n.title}"`}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
 
                                   {/* Note Title */}
