@@ -16,6 +16,7 @@ import { FrankNoteEngine } from './services/notes/frankNoteEngine.js';
 import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
+import { PrivacySanitizer } from './services/security/privacySanitizer.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -246,6 +247,30 @@ app.post('/api/memory/handoff', (req, res) => {
   }
 });
 
+// GitSafe Privacy & Secrets Sanitization Core
+app.get('/api/security/audit', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const report = PrivacySanitizer.auditGitSafe(currentPath);
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/security/sanitize', (req, res) => {
+  try {
+    const { text } = req.body;
+    if (typeof text !== 'string') {
+      return res.status(400).json({ error: 'Campo "text" deve ser uma string' });
+    }
+    const result = PrivacySanitizer.sanitizeText(text);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 6. Multimodal File Uploads & Screen / Window Capture
 app.get('/api/screen/windows', (req, res) => {
   try {
@@ -400,6 +425,18 @@ app.post('/api/notes', (req, res) => {
     const currentPath = ProjectManager.getCurrentProject();
     const note = FrankNoteEngine.saveNote(req.body, currentPath);
     res.json(note);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Zero-LLM BM25-Lite Weighted Fast Search over Notes
+app.post('/api/notes/search', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { query, folder, limit } = req.body;
+    const results = FrankNoteEngine.searchNotes(query || '', { folder, limit }, currentPath);
+    res.json(results);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

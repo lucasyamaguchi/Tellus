@@ -18,7 +18,10 @@ import {
   AgentPipelineConfig,
   DeletedNoteItem,
   IncomingDropzoneFile,
-  DropzoneOrganizeReport
+  DropzoneOrganizeReport,
+  NoteSearchResult,
+  GitSafeAuditReport,
+  SanitizationResult
 } from './types';
 
 const API_BASE = '/api';
@@ -239,6 +242,43 @@ export const api = {
     const res = await fetch(`${API_BASE}/notes/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
       method: 'DELETE'
     });
+    return res.json();
+  },
+
+  // Zero-LLM BM25-Lite Weighted Fast Search
+  async searchNotesFast(query: string, folder?: string, limit?: number): Promise<NoteSearchResult[]> {
+    const res = await fetch(`${API_BASE}/notes/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, folder, limit })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha na busca ponderada' }));
+      throw new Error(err.error || 'Falha na busca de notas');
+    }
+    return res.json();
+  },
+
+  // GitSafe Core Privacy & Security
+  async auditGitSafe(): Promise<GitSafeAuditReport> {
+    const res = await fetch(`${API_BASE}/security/audit`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao auditar repositório' }));
+      throw new Error(err.error || 'Falha na auditoria GitSafe');
+    }
+    return res.json();
+  },
+
+  async sanitizeText(text: string): Promise<SanitizationResult> {
+    const res = await fetch(`${API_BASE}/security/sanitize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao sanitizar texto' }));
+      throw new Error(err.error || 'Falha ao sanitizar texto');
+    }
     return res.json();
   },
 

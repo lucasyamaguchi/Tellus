@@ -270,3 +270,32 @@ export interface TerminalTask {
   completedAt: number | null;
   logs: string[];
 }
+
+export interface NoteSearchResult {
+  note: FrankNote;
+  score: number;
+  matchedSnippets: string[];
+}
+
+export interface GitSafeAuditItem {
+  category: 'gitignore' | 'environment' | 'tracked_secrets' | 'binaries';
+  name: string;
+  passed: boolean;
+  severity: 'critical' | 'high' | 'medium' | 'info';
+  details: string;
+}
+
+export interface GitSafeAuditReport {
+  timestamp: string;
+  isSafe: boolean;
+  score: number;
+  items: GitSafeAuditItem[];
+  summary: string;
+}
+
+export interface SanitizationResult {
+  sanitized: string;
+  redactedCount: number;
+  detectedTypes: string[];
+}
+

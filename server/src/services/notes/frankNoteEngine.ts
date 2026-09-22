@@ -1,10 +1,17 @@
 import fs from 'fs';
 import path from 'path';
+import { PrivacySanitizer } from '../security/privacySanitizer.js';
 
 // Diretório fixo do cofre Obsidian usado pelo FrankMD.
 // No Windows, este caminho representa o volume E: e não depende do diretório
 // de execução do servidor.
 const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
+
+export interface NoteSearchResult {
+  note: FrankNote;
+  score: number;
+  matchedSnippets: string[];
+}
 
 export interface FrankNote {
   id: string;
@@ -100,10 +107,21 @@ export class FrankNoteEngine {
     const id = filename.replace(/\.md$/i, '');
     const relativePath = path.relative(GLOBAL_NOTES_DIR, filePath).replace(/\\/g, '/');
 
-    // Extract title from first H1 or filename
-    const firstLine = content.split('\n')[0] || '';
-    const titleMatch = firstLine.match(/^#+\s*(.*)/);
-    const title = titleMatch ? titleMatch[1].trim() : id.replace(/[-_]/g, ' ');
+    // Extract title from first Markdown heading, or fallback to filename
+    const lines = content.split('\n');
+    let title = '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('<!--')) continue;
+      const headingMatch = trimmed.match(/^#+\s*(.*)/);
+      if (headingMatch) {
+        title = headingMatch[1].trim();
+        break;
+      }
+    }
+    if (!title) {
+      title = id.replace(/[-_]/g, ' ');
+    }
 
     // Extract folder from physical directory or comment
     const dirRelative = path.relative(GLOBAL_NOTES_DIR, path.dirname(filePath)).replace(/\\/g, '/');
@@ -361,7 +379,13 @@ export class FrankNoteEngine {
       fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
     }
 
-    let finalContent = data.content;
+    // GitSafe Sanitization: Never write raw API keys or credentials to disk
+    const sanitizeResult = PrivacySanitizer.sanitizeText(data.content);
+    let finalContent = sanitizeResult.sanitized;
+    if (sanitizeResult.redactedCount > 0) {
+      console.warn(`[GitSafe Core] Redacted ${sanitizeResult.redactedCount} secret(s) (${sanitizeResult.detectedTypes.join(', ')}) in note: "${safeTitle}"`);
+    }
+
     const subject = data.subject || folder;
     if (!finalContent.includes('<!-- subject:')) {
       finalContent = `<!-- subject: ${subject} -->\n${finalContent}`;
@@ -369,6 +393,137 @@ export class FrankNoteEngine {
 
     fs.writeFileSync(filePath, finalContent, 'utf-8');
     return this.parseNote(filePath, folder, data.isProjectSpecific);
+  }
+
+  // Zero-LLM BM25-Lite Weighted Fast Search over Notes
+  public static searchNotes(
+    query: string,
+    options?: { folder?: string; limit?: number },
+    projectPath?: string
+  ): NoteSearchResult[] {
+    const allNotes = this.listNotes(projectPath);
+    let targetNotes = allNotes;
+
+    if (options?.folder && options.folder !== 'Geral' && options.folder !== 'Todas') {
+      const normalizedFolder = this.sanitizePath(options.folder).toLowerCase();
+      targetNotes = allNotes.filter(n => {
+        const f = (n.folder || n.subject || '').toLowerCase();
+        return f === normalizedFolder || f.startsWith(`${normalizedFolder}/`);
+      });
+    }
+
+    if (!query || !query.trim()) {
+      return targetNotes.map(n => ({
+        note: n,
+        score: 1,
+        matchedSnippets: []
+      }));
+    }
+
+    const cleanQuery = query.toLowerCase().trim();
+    // Stopwords in Portuguese and English
+    const stopwords = new Set([
+      'a', 'o', 'as', 'os', 'de', 'da', 'do', 'das', 'dos', 'em', 'no', 'na', 'nos', 'nas',
+      'por', 'para', 'com', 'sem', 'como', 'um', 'uma', 'uns', 'umas', 'que', 'se', 'e',
+      'the', 'and', 'for', 'with', 'to', 'of', 'in', 'on', 'at', 'by', 'an', 'is', 'it'
+    ]);
+
+    const rawTokens = cleanQuery.split(/[\s,;:.?!+*#_()\[\]{}"'\\/]+/).filter(t => t.length >= 2);
+    const tokens = rawTokens.filter(t => !stopwords.has(t));
+    const effectiveTokens = tokens.length > 0 ? tokens : rawTokens;
+
+    const results: NoteSearchResult[] = [];
+
+    for (const note of targetNotes) {
+      const titleLower = note.title.toLowerCase();
+      const tagsLower = note.tags.map(t => t.toLowerCase());
+      const linksLower = note.links.map(l => l.toLowerCase());
+      const lines = note.content.split('\n');
+
+      let score = 0;
+      const matchedSnippets: string[] = [];
+
+      // 1. Exact query match in title
+      if (titleLower === cleanQuery) {
+        score += 35;
+      } else if (titleLower.includes(cleanQuery)) {
+        score += 20;
+      }
+
+      // 2. Token matches in title
+      for (const tok of effectiveTokens) {
+        if (titleLower.includes(tok)) {
+          score += 8;
+        }
+      }
+
+      // 3. Match in tags
+      for (const tok of effectiveTokens) {
+        for (const tag of tagsLower) {
+          if (tag.includes(tok)) {
+            score += 7;
+          }
+        }
+      }
+
+      // 4. Match in wikilinks
+      for (const tok of effectiveTokens) {
+        for (const link of linksLower) {
+          if (link.includes(tok)) {
+            score += 5;
+          }
+        }
+      }
+
+      // 5. Match in headings and body content
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const lineLower = trimmed.toLowerCase();
+        let lineMatched = false;
+
+        if (trimmed.startsWith('#')) {
+          // Markdown heading
+          for (const tok of effectiveTokens) {
+            if (lineLower.includes(tok)) {
+              score += 6;
+              lineMatched = true;
+            }
+          }
+        } else {
+          // Body line
+          for (const tok of effectiveTokens) {
+            if (lineLower.includes(tok)) {
+              score += 2;
+              lineMatched = true;
+            }
+          }
+        }
+
+        if (lineMatched && matchedSnippets.length < 3) {
+          const snippet = trimmed.length > 140 ? trimmed.substring(0, 137) + '...' : trimmed;
+          if (!matchedSnippets.includes(snippet)) {
+            matchedSnippets.push(snippet);
+          }
+        }
+      }
+
+      // Frequency saturation cap to avoid giant files dominating unfairly
+      if (score > 120) score = 120 + Math.log(score - 119) * 10;
+
+      if (score > 0) {
+        results.push({
+          note,
+          score: Math.round(score),
+          matchedSnippets
+        });
+      }
+    }
+
+    results.sort((a, b) => b.score - a.score || b.note.updatedAt - a.note.updatedAt);
+    const limit = options?.limit || 50;
+    return results.slice(0, limit);
   }
 
   public static deleteNote(id: string, isProjectSpecific?: boolean, projectPath?: string): boolean {
