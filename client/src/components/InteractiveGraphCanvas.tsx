@@ -127,15 +127,31 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
     // Resize high-DPI canvas
     const resizeCanvas = () => {
       const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
+      const targetW = Math.round(rect.width * dpr);
+      const targetH = Math.round(rect.height * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
     };
     resizeCanvas();
 
-    const rect = canvas.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
+    const resizeObserver = new ResizeObserver(() => {
+      resizeCanvas();
+      ticks = 0; // awaken simulation on container resize
+    });
+    if (canvas.parentElement) {
+      resizeObserver.observe(canvas.parentElement);
+    } else {
+      resizeObserver.observe(canvas);
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    const initialRect = canvas.getBoundingClientRect();
+    const initialCenterX = (initialRect.width || 600) / 2;
+    const initialCenterY = (initialRect.height || 400) / 2;
 
     interface SimNode {
       id: string;
@@ -178,8 +194,8 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
         val: n.val,
         color: n.color || '#38bdf8',
         details: n.details,
-        x: centerX + Math.cos(angle) * dist + (Math.random() - 0.5) * 60,
-        y: centerY + Math.sin(angle) * dist + (Math.random() - 0.5) * 60,
+        x: initialCenterX + Math.cos(angle) * dist + (Math.random() - 0.5) * 60,
+        y: initialCenterY + Math.sin(angle) * dist + (Math.random() - 0.5) * 60,
         vx: 0,
         vy: 0,
         radius,
@@ -257,14 +273,18 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
         const fy = (dy / dist) * force;
 
         if (!link.source.isPinned) { link.source.vx += fx; link.source.vy += fy; }
-        if (!link.target.isPinned) { link.target.vx -= fx; link.target.vy -= fy; }
+        if (!link.target.isPinned) { link.target.vx -= fx; link.target.vy += fy; }
       }
 
-      // 3. Gentle gravitational pull towards center
+      // 3. Gentle gravitational pull towards current center
+      const curRect = canvas.getBoundingClientRect();
+      const curCenterX = (curRect.width || 600) / 2;
+      const curCenterY = (curRect.height || 400) / 2;
+
       for (const node of simNodes) {
         if (!node.isPinned) {
-          const dx = centerX - node.x;
-          const dy = centerY - node.y;
+          const dx = curCenterX - node.x;
+          const dy = curCenterY - node.y;
           node.vx += dx * 0.0012;
           node.vy += dy * 0.0012;
 
@@ -282,22 +302,37 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
 
       simulate();
 
+      const bRect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(dpr, dpr);
+      const cssW = Math.max(1, bRect.width);
+      const cssH = Math.max(1, bRect.height);
+      const targetW = Math.round(cssW * dpr);
+      const targetH = Math.round(cssH * dpr);
 
-      // Apply Pan & Zoom
-      ctx.translate(panX + centerX, panY + centerY);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+
+      const curCenterX = cssW / 2;
+      const curCenterY = cssH / 2;
+
+      // Deterministic HiDPI scaling & clean canvas
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      ctx.save();
+      // Apply Pan & Zoom around center
+      ctx.translate(panX + curCenterX, panY + curCenterY);
       ctx.scale(zoom, zoom);
-      ctx.translate(-centerX, -centerY);
+      ctx.translate(-curCenterX, -curCenterY);
 
       // Draw Grid / Stars subtle background
       ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
       const step = 60;
-      const startX = Math.floor((centerX - panX - 2000) / step) * step;
+      const startX = Math.floor((curCenterX - panX - 2000) / step) * step;
       const endX = startX + 4000;
-      const startY = Math.floor((centerY - panY - 2000) / step) * step;
+      const startY = Math.floor((curCenterY - panY - 2000) / step) * step;
       const endY = startY + 4000;
       for (let gx = startX; gx < endX; gx += step) {
         for (let gy = startY; gy < endY; gy += step) {
@@ -388,10 +423,12 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       const bRect = canvas.getBoundingClientRect();
       const mouseScreenX = e.clientX - bRect.left;
       const mouseScreenY = e.clientY - bRect.top;
+      const curCenterX = (bRect.width || 1) / 2;
+      const curCenterY = (bRect.height || 1) / 2;
 
-      // Invert pan & zoom
-      const canvasWorldX = (mouseScreenX - (panX + centerX)) / zoom + centerX;
-      const canvasWorldY = (mouseScreenY - (panY + centerY)) / zoom + centerY;
+      // Invert pan & zoom relative to current center
+      const canvasWorldX = (mouseScreenX - (panX + curCenterX)) / zoom + curCenterX;
+      const canvasWorldY = (mouseScreenY - (panY + curCenterY)) / zoom + curCenterY;
 
       return { x: canvasWorldX, y: canvasWorldY, screenX: mouseScreenX, screenY: mouseScreenY };
     };
@@ -510,6 +547,8 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
     return () => {
       isRunning = false;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', resizeCanvas);
       canvas.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);

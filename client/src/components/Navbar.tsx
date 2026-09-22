@@ -168,10 +168,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ? 'bg-brand-cyan/20 border border-brand-cyan/40 text-brand-cyan font-semibold shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="FrankMD Notes & Knowledge Vault estilo Notion"
+            title="Notes Module (baseado no Frank MD & AI-Memory do Akita)"
           >
             <FileText className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Notas & Vault</span>
+            <span className="hidden md:inline">Notes Module</span>
           </button>
 
           <button
