@@ -57,7 +57,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FrankNote, GraphData, DeletedNoteItem } from '../types';
+import { FrankNote, GraphData, DeletedNoteItem, GitSafeAuditReport } from '../types';
 import { api } from '../api';
 import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
 import { SmartDropzoneModal } from './SmartDropzoneModal';
@@ -135,6 +135,13 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [isDropzoneOpen, setIsDropzoneOpen] = useState<boolean>(false);
   const [initialHomeDropFiles, setInitialHomeDropFiles] = useState<File[] | null>(null);
   const [isHomeDraggingOver, setIsHomeDraggingOver] = useState<boolean>(false);
+
+  // GitSafe Core Security Modal State
+  const [isGitSafeModalOpen, setIsGitSafeModalOpen] = useState<boolean>(false);
+  const [gitSafeReport, setGitSafeReport] = useState<GitSafeAuditReport | null>(null);
+  const [isLoadingAudit, setIsLoadingAudit] = useState<boolean>(false);
+  const [testSanitizeInput, setTestSanitizeInput] = useState<string>('');
+  const [testSanitizeOutput, setTestSanitizeOutput] = useState<{ sanitized: string; redactedCount: number; detectedTypes: string[] } | null>(null);
 
   // Text Selection & Context Menu for Study Engine
   const [selectedText, setSelectedText] = useState<string>('');
@@ -270,6 +277,29 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       // ignore
     } finally {
       setIsLoadingTrash(false);
+    }
+  };
+
+  const handleRunGitSafeAudit = async () => {
+    setIsLoadingAudit(true);
+    setIsGitSafeModalOpen(true);
+    try {
+      const report = await api.auditGitSafe();
+      setGitSafeReport(report);
+    } catch (err: any) {
+      alert(`Falha na auditoria GitSafe: ${err.message}`);
+    } finally {
+      setIsLoadingAudit(false);
+    }
+  };
+
+  const handleTestSanitization = async () => {
+    if (!testSanitizeInput.trim()) return;
+    try {
+      const res = await api.sanitizeText(testSanitizeInput);
+      setTestSanitizeOutput(res);
+    } catch (err: any) {
+      alert(`Erro ao testar sanitização: ${err.message}`);
     }
   };
 
@@ -1294,6 +1324,17 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         category: 'Projetos'
       };
     }
+    if (lower.includes('handoff') || lower.includes('session') || lower.includes('memoria') || lower.includes('agent')) {
+      return {
+        label: notebookName,
+        icon: Sparkles,
+        color: 'text-rose-400',
+        bg: 'bg-rose-950/25 border-rose-500/30',
+        badgeBg: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
+        accentBorder: 'border-rose-500',
+        category: 'Handoffs & Sessões'
+      };
+    }
     if (lower.includes('quick') || lower.includes('anota') || lower.includes('mao') || lower.includes('manuscrito')) {
       return {
         label: notebookName,
@@ -1667,6 +1708,158 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         </div>
       )}
 
+      {/* GitSafe Security Audit & Privacy Modal */}
+      {isGitSafeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
+          <div className="bg-card border border-card-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
+              <div className="flex items-center space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="font-bold text-sm text-slate-100">GitSafe Core</h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-bold">
+                      Nativo Tellus
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">Proteção ativa contra vazamento de chaves de API, credenciais e dados confidenciais.</p>
+                </div>
+              </div>
+              <button onClick={() => setIsGitSafeModalOpen(false)} className="p-1.5 rounded-lg hover:bg-card-border text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto text-xs scrollbar-thin scrollbar-thumb-card-border">
+              {/* Score & General Status Card */}
+              {isLoadingAudit ? (
+                <div className="p-8 flex flex-col items-center justify-center space-y-3 bg-panel rounded-2xl border border-card-border">
+                  <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
+                  <span className="text-slate-300 text-xs font-mono">Executando auditoria GitSafe no repositório e vault...</span>
+                </div>
+              ) : gitSafeReport ? (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-panel border border-card-border flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 font-mono block">Nível de Segurança</span>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <span className={`text-2xl font-black font-mono ${
+                          gitSafeReport.score >= 80 ? 'text-emerald-400' : gitSafeReport.score >= 50 ? 'text-amber-400' : 'text-rose-400'
+                        }`}>
+                          {gitSafeReport.score}/100
+                        </span>
+                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
+                          gitSafeReport.isSafe 
+                            ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300' 
+                            : 'bg-rose-950/50 border-rose-500/40 text-rose-300'
+                        }`}>
+                          {gitSafeReport.isSafe ? '✓ Protegido & Seguro' : '⚠ Requer Atenção'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">{gitSafeReport.summary}</p>
+                    </div>
+
+                    <button
+                      onClick={handleRunGitSafeAudit}
+                      className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-200 hover:text-white flex items-center space-x-1.5 transition-all shadow-sm"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Reauditar</span>
+                    </button>
+                  </div>
+
+                  {/* Audit Checklist Items */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 font-mono block">Verificações de Integridade:</span>
+                    <div className="space-y-2">
+                      {gitSafeReport.items.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-xl border flex items-start justify-between space-x-3 ${
+                            item.passed 
+                              ? 'bg-emerald-950/15 border-emerald-500/20 text-slate-200' 
+                              : 'bg-rose-950/25 border-rose-500/30 text-rose-200'
+                          }`}
+                        >
+                          <div className="flex items-start space-x-2.5">
+                            <div className={`mt-0.5 p-1 rounded-lg shrink-0 ${
+                              item.passed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                            }`}>
+                              {item.passed ? <Check className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-xs">{item.name}</span>
+                                <span className={`text-[9px] uppercase font-mono px-1.5 py-0.2 rounded ${
+                                  item.passed ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300 font-bold'
+                                }`}>
+                                  {item.severity}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{item.details}</p>
+                            </div>
+                          </div>
+                          <span className={`text-[10px] font-mono shrink-0 font-bold ${
+                            item.passed ? 'text-emerald-400' : 'text-rose-400'
+                          }`}>
+                            {item.passed ? 'PASSED' : 'ALERT'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Interactive Sanitizer Test Box */}
+              <div className="pt-4 border-t border-card-border space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 font-mono block">Testar Higienizador GitSafe em Tempo Real:</span>
+                  <span className="text-[10px] text-slate-500 font-mono">Filtra OpenAI, Anthropic, Fish Audio, GCP, GitHub, AWS, etc.</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    placeholder="Cole um texto de teste com chave (ex: Minha key sk-fish-...)"
+                    value={testSanitizeInput}
+                    onChange={(e) => setTestSanitizeInput(e.target.value)}
+                    className="flex-1 bg-panel border border-card-border rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={handleTestSanitization}
+                    disabled={!testSanitizeInput.trim()}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition-all shadow-sm shrink-0"
+                  >
+                    Higienizar
+                  </button>
+                </div>
+
+                {testSanitizeOutput && (
+                  <div className="p-3 bg-panel rounded-xl border border-emerald-500/40 space-y-2 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-emerald-400 font-mono flex items-center space-x-1">
+                        <Check className="w-3 h-3" />
+                        <span>Resultado Sanitizado ({testSanitizeOutput.redactedCount} segredo(s) ofuscado(s)):</span>
+                      </span>
+                      {testSanitizeOutput.detectedTypes.length > 0 && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                          {testSanitizeOutput.detectedTypes.join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-2.5 bg-black/60 rounded-lg border border-card-border font-mono text-xs text-slate-200 select-text break-all">
+                      {testSanitizeOutput.sanitized}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar Controls */}
       <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
         <div className="flex items-center space-x-2.5">
@@ -1773,10 +1966,21 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             )}
           </div>
 
-          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full hidden xl:flex items-center space-x-1">
-            <ShieldCheck className="w-3 h-3" />
-            <span>Obsidian Standard Compatible</span>
-          </span>
+          <div className="hidden xl:flex items-center space-x-2">
+            <span className="text-[10px] text-cyan-400 font-mono bg-cyan-950/40 border border-cyan-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1">
+              <BookOpen className="w-3 h-3 text-cyan-400" />
+              <span>Obsidian Vault</span>
+            </span>
+
+            <button
+              onClick={handleRunGitSafeAudit}
+              className="text-[10px] text-emerald-400 hover:text-emerald-300 font-mono bg-emerald-950/50 hover:bg-emerald-900/50 border border-emerald-500/40 hover:border-emerald-400 px-2.5 py-0.5 rounded-full flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer group"
+              title="GitSafe Core Ativo: Clique para abrir o Painel de Auditoria de Privacidade e Segredos"
+            >
+              <ShieldCheck className="w-3 h-3 text-emerald-400 group-hover:scale-110 transition-transform" />
+              <span className="font-semibold">GitSafe Protected</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center space-x-2">

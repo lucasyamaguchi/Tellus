@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { PrivacySanitizer } from '../security/privacySanitizer.js';
+import { FrankNoteEngine } from '../notes/frankNoteEngine.js';
 
 export interface MemoryPage {
   category: 'decisions' | 'procedures' | 'gotchas' | 'handoffs' | 'general';
@@ -85,8 +87,9 @@ export class MemoryEngine {
 
   public static updateActiveContext(projectPath: string, content: string): void {
     this.initProjectMemory(projectPath);
+    const sanitized = PrivacySanitizer.sanitizeText(content).sanitized;
     const activeContextPath = path.join(this.getMemoryDir(projectPath), 'active_context.md');
-    fs.writeFileSync(activeContextPath, content, 'utf-8');
+    fs.writeFileSync(activeContextPath, sanitized, 'utf-8');
   }
 
   public static listMemoryPages(projectPath: string): MemoryPage[] {
@@ -139,9 +142,15 @@ export class MemoryEngine {
     const catDir = path.join(this.getMemoryDir(projectPath), category);
     const filePath = path.join(catDir, sanitizedFilename);
 
-    let fullBody = content;
-    if (!content.trim().startsWith('#')) {
-      fullBody = `# ${title}\n\n${content}`;
+    // GitSafe Sanitization
+    const sanitizeResult = PrivacySanitizer.sanitizeText(content);
+    let fullBody = sanitizeResult.sanitized;
+    if (sanitizeResult.redactedCount > 0) {
+      console.warn(`[GitSafe Core] Redacted ${sanitizeResult.redactedCount} secret(s) in memory page: "${title}"`);
+    }
+
+    if (!fullBody.trim().startsWith('#')) {
+      fullBody = `# ${title}\n\n${fullBody}`;
     }
 
     if (tags && tags.length > 0) {
@@ -226,7 +235,22 @@ ${immediateNextSteps.length > 0 ? immediateNextSteps.map(s => `- [ ] ${s}`).join
 ${openQuestions.length > 0 ? openQuestions.map(q => `- ${q}`).join('\n') : '- Nenhuma questão pendente registrada.'}
 `;
 
-    return this.writeMemoryPage(projectPath, 'handoffs', filename, title, content, ['handoff', fromModel]);
+    const page = this.writeMemoryPage(projectPath, 'handoffs', filename, title, content, ['handoff', fromModel]);
+
+    // Mirror to Obsidian Vault under "Handoffs" folder so it's accessible in Tellus Notes and Knowledge Graph
+    try {
+      FrankNoteEngine.saveNote({
+        title,
+        folder: 'Handoffs',
+        subject: 'Handoffs',
+        content,
+        isProjectSpecific: false
+      }, projectPath);
+    } catch (err) {
+      console.warn('[MemoryEngine] Warning: Could not mirror handoff to Obsidian Vault:', err);
+    }
+
+    return page;
   }
 
   public static buildContextPrompt(projectPath: string, activeRoutineName?: string): string {
