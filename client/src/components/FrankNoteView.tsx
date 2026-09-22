@@ -144,7 +144,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   // Window Resizing & Layout State (Obsidian / Notion style)
   const [sidebarWidth, setSidebarWidth] = useState<number>(330);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(true);
   const [isNoteMaximized, setIsNoteMaximized] = useState<boolean>(false);
   const [isFullWidth, setIsFullWidth] = useState<boolean>(() => {
     try {
@@ -787,16 +787,18 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     setEditContent(note.content);
     setNoteViewMode('preview'); // Always open in formatted preview first!
 
-    // Focus the sidebar on this note's notebook
+    // Focus the sidebar on this note's notebook and expand sidebar
     const folderPath = note.folder || note.subject || 'Geral';
     const nbId = folderPath.split('/')[0] || 'Geral';
     setSelectedNotebookId(nbId);
+    setIsSidebarCollapsed(false);
   };
 
   const goToHome = () => {
     setSelectedNotebookId('all');
     setActiveNote(null);
     setViewMode('editor');
+    setIsSidebarCollapsed(true);
   };
 
   const goBack = () => {
@@ -810,6 +812,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
     if (selectedNotebookId !== 'all') {
       setSelectedNotebookId('all');
+      setIsSidebarCollapsed(true);
       return;
     }
   };
@@ -817,6 +820,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const openNotebook = (nbId: string) => {
     setSelectedNotebookId(nbId);
     setActiveNote(null);
+    setIsSidebarCollapsed(false);
   };
 
   const handleCreateNoteInFolder = (folderName: string = 'Geral') => {
@@ -2911,16 +2915,23 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                             <div className="flex flex-wrap items-center gap-2 pt-2 text-[11px] font-mono">
                               <span className="px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 flex items-center space-x-1.5">
                                 <FileText className="w-3.5 h-3.5 text-accent-light" />
-                                <span><strong>{dashboardNotes.length}</strong> anotações</span>
+                                <span><strong>{dashboardNotes.length}</strong> {dashboardNotes.length === 1 ? 'anotação' : 'anotações'}</span>
                               </span>
                               <span className="px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 flex items-center space-x-1.5">
                                 <Folder className="w-3.5 h-3.5 text-amber-400" />
-                                <span><strong>{subfoldersList.length}</strong> subpastas</span>
+                                <span><strong>{subfoldersList.length}</strong> {subfoldersList.length === 1 ? 'subpasta' : 'subpastas'}</span>
                               </span>
-                              <span className="px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-400 flex items-center space-x-1.5">
+                              <a
+                                href="https://github.com/akitaonrails/ai-memory"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2.5 py-1 rounded-xl bg-panel hover:bg-card border border-card-border text-slate-300 hover:text-cyan-300 flex items-center space-x-1.5 transition-colors group cursor-pointer"
+                                title="Notes Module baseado no Frank MD e AI-Memory do Akita (https://github.com/akitaonrails/ai-memory)"
+                              >
                                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>FrankMD Vault Conectado</span>
-                              </span>
+                                <span>Notes Module (Frank MD & AI-Memory based)</span>
+                                <ExternalLink className="w-2.5 h-2.5 text-slate-500 group-hover:text-cyan-300" />
+                              </a>
                             </div>
                           </div>
                         </div>
@@ -3111,12 +3122,12 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                               >
                                 <div className="space-y-3">
                                   {/* Notebook Card Header */}
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="flex items-center space-x-3">
+                                  <div className="flex items-start justify-between gap-3 min-w-0">
+                                    <div className="flex items-center space-x-3 min-w-0 flex-1">
                                       <div className={`p-3 rounded-2xl ${nbDet.badgeBg} shadow-sm shrink-0`}>
                                         <IconComp className={`w-5 h-5 ${nbDet.color}`} />
                                       </div>
-                                      <div>
+                                      <div className="min-w-0 flex-1">
                                         <h3 
                                           onClick={() => openNotebook(nb.id)}
                                           className="font-bold text-base text-slate-100 group-hover:text-accent-light transition-colors truncate cursor-pointer"
@@ -3131,13 +3142,13 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                     </div>
 
                                     <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 font-semibold shrink-0">
-                                      {nb.totalCount} nota{nb.totalCount === 1 ? '' : 's'}
+                                      {nb.totalCount} {nb.totalCount === 1 ? 'anotação' : 'anotações'}
                                     </span>
                                   </div>
 
                                   {/* Subpastas Pills inside Notebook */}
                                   {nb.subfolders.length > 0 && (
-                                    <div className="space-y-1.5">
+                                    <div className="space-y-1.5 min-w-0">
                                       <span className="text-[10px] font-mono uppercase text-slate-500 font-semibold block">
                                         Subpastas ({nb.subfolders.length}):
                                       </span>
@@ -3149,12 +3160,12 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                               e.stopPropagation();
                                               openNotebook(nb.id);
                                             }}
-                                            className="px-2 py-0.5 rounded-lg bg-panel/80 hover:bg-card border border-card-border text-[10px] text-amber-300 font-mono transition-colors flex items-center space-x-1 cursor-pointer"
+                                            className="px-2 py-0.5 rounded-lg bg-panel/80 hover:bg-card border border-card-border text-[10px] text-amber-300 font-mono transition-colors flex items-center space-x-1 cursor-pointer max-w-full"
                                             title={`Pasta: ${sub.path}`}
                                           >
-                                            <Folder className="w-3 h-3 text-amber-400" />
-                                            <span className="truncate max-w-[120px]">{sub.name}</span>
-                                            <span className="text-slate-500">({sub.notes.length})</span>
+                                            <Folder className="w-3 h-3 text-amber-400 shrink-0" />
+                                            <span className="truncate max-w-[110px]">{sub.name}</span>
+                                            <span className="text-slate-500 shrink-0">({sub.notes.length})</span>
                                           </button>
                                         ))}
                                         {nb.subfolders.length > 4 && (
@@ -3167,7 +3178,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                   )}
 
                                   {/* Subnotes Preview List */}
-                                  <div className="space-y-1.5 pt-1">
+                                  <div className="space-y-1.5 pt-1 min-w-0">
                                     <span className="text-[10px] font-mono uppercase text-slate-500 font-semibold block">
                                       Anotações no Caderno:
                                     </span>
@@ -3181,13 +3192,13 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                           <div
                                             key={note.id}
                                             onClick={() => selectNote(note)}
-                                            className="px-2.5 py-1.5 rounded-xl bg-card/60 hover:bg-card border border-card-border/60 hover:border-accent/40 text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between group/note"
+                                            className="px-2.5 py-1.5 rounded-xl bg-card/60 hover:bg-card border border-card-border/60 hover:border-accent/40 text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between group/note min-w-0"
                                           >
-                                            <span className="truncate flex items-center space-x-2">
+                                            <span className="truncate flex items-center space-x-2 min-w-0 flex-1">
                                               <FileText className="w-3 h-3 text-accent-light shrink-0" />
                                               <span className="truncate font-medium group-hover/note:text-accent-light">{note.title}</span>
                                             </span>
-                                            <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0" />
+                                            <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0 ml-1" />
                                           </div>
                                         ))}
                                       </div>
@@ -3251,18 +3262,18 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                   handleCreateNoteInFolder(sub.path);
                                 }
                               }}
-                              className="p-3 rounded-2xl bg-card/70 border border-card-border/80 hover:border-amber-500/50 hover:bg-card cursor-pointer transition-all duration-200 flex items-center justify-between group"
+                              className="p-3 rounded-2xl bg-card/70 border border-card-border/80 hover:border-amber-500/50 hover:bg-card cursor-pointer transition-all duration-200 flex items-center justify-between group min-w-0"
                             >
-                              <div className="flex items-center space-x-2.5 truncate">
+                              <div className="flex items-center space-x-2.5 truncate min-w-0 flex-1">
                                 <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
                                   <Folder className="w-4 h-4" />
                                 </div>
-                                <div className="truncate">
+                                <div className="truncate min-w-0 flex-1">
                                   <span className="font-bold text-xs text-slate-200 group-hover:text-amber-300 transition-colors block truncate" title={sub.path}>
                                     {sub.name}
                                   </span>
                                   <span className="text-[10px] text-slate-500 font-mono block">
-                                    {sub.notes.length} anotaç{sub.notes.length === 1 ? 'ão' : 'ões'}
+                                    {sub.notes.length} {sub.notes.length === 1 ? 'anotação' : 'anotações'}
                                   </span>
                                 </div>
                               </div>
@@ -3271,7 +3282,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                   e.stopPropagation();
                                   handleCreateNoteInFolder(sub.path);
                                 }}
-                                className="p-1 rounded hover:bg-panel text-slate-400 hover:text-white"
+                                className="p-1 rounded hover:bg-panel text-slate-400 hover:text-white shrink-0 ml-2"
                                 title={`Criar nova nota em "${sub.path}"`}
                               >
                                 <Plus className="w-3.5 h-3.5" />
