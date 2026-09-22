@@ -14,6 +14,7 @@ import {
   Link as LinkIcon,
   MessageSquareQuote,
   ArrowLeft,
+  ArrowRight,
   Copy,
   Check,
   Tag,
@@ -780,6 +781,38 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     };
   }, [viewMode, graphData, graphShowFolders, graphShowTags, graphShowWikilinks, graphChargeStrength, graphSearchFilter, notes]);
 
+  // Full Navigation History Stack (supports Mouse Back/Forward & Alt+Arrow buttons)
+  interface NoteNavHistoryItem {
+    notebookId: string;
+    noteId: string | null;
+    viewMode: 'editor' | 'graph';
+  }
+
+  const [navHistory, setNavHistory] = useState<NoteNavHistoryItem[]>([
+    { notebookId: 'all', noteId: null, viewMode: 'editor' }
+  ]);
+  const [navHistoryIndex, setNavHistoryIndex] = useState<number>(0);
+  const isNavigatingHistoryRef = useRef<boolean>(false);
+
+  const pushNavHistory = useCallback((item: NoteNavHistoryItem) => {
+    if (isNavigatingHistoryRef.current) return;
+    setNavHistory(prev => {
+      const current = prev[navHistoryIndex];
+      if (
+        current &&
+        current.notebookId === item.notebookId &&
+        current.noteId === item.noteId &&
+        current.viewMode === item.viewMode
+      ) {
+        return prev;
+      }
+      const next = prev.slice(0, navHistoryIndex + 1);
+      next.push(item);
+      return next;
+    });
+    setNavHistoryIndex(prev => prev + 1);
+  }, [navHistoryIndex]);
+
   const selectNote = (note: FrankNote) => {
     setActiveNote(note);
     setEditTitle(note.title);
@@ -792,6 +825,8 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     const nbId = folderPath.split('/')[0] || 'Geral';
     setSelectedNotebookId(nbId);
     setIsSidebarCollapsed(false);
+
+    pushNavHistory({ notebookId: nbId, noteId: note.id, viewMode: 'editor' });
   };
 
   const goToHome = () => {
@@ -799,29 +834,158 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     setActiveNote(null);
     setViewMode('editor');
     setIsSidebarCollapsed(true);
-  };
 
-  const goBack = () => {
-    if (viewMode === 'graph') {
-      setViewMode('editor');
-      return;
-    }
-    if (activeNote) {
-      setActiveNote(null);
-      return;
-    }
-    if (selectedNotebookId !== 'all') {
-      setSelectedNotebookId('all');
-      setIsSidebarCollapsed(true);
-      return;
-    }
+    pushNavHistory({ notebookId: 'all', noteId: null, viewMode: 'editor' });
   };
 
   const openNotebook = (nbId: string) => {
     setSelectedNotebookId(nbId);
     setActiveNote(null);
     setIsSidebarCollapsed(false);
+
+    pushNavHistory({ notebookId: nbId, noteId: null, viewMode: 'editor' });
   };
+
+  const handleNavBack = useCallback(() => {
+    setNavHistoryIndex(prevIndex => {
+      if (prevIndex > 0) {
+        const targetIndex = prevIndex - 1;
+        const target = navHistory[targetIndex];
+        if (target) {
+          isNavigatingHistoryRef.current = true;
+          setSelectedNotebookId(target.notebookId);
+          setViewMode(target.viewMode);
+          if (target.noteId) {
+            const found = notes.find(n => n.id === target.noteId);
+            if (found) {
+              setActiveNote(found);
+              setEditTitle(found.title);
+              setEditFolder(found.folder || found.subject || 'Geral');
+              setEditContent(found.content);
+              setNoteViewMode('preview');
+              setIsSidebarCollapsed(false);
+            } else {
+              setActiveNote(null);
+            }
+          } else {
+            setActiveNote(null);
+            if (target.notebookId === 'all') {
+              setIsSidebarCollapsed(true);
+            } else {
+              setIsSidebarCollapsed(false);
+            }
+          }
+          setTimeout(() => {
+            isNavigatingHistoryRef.current = false;
+          }, 60);
+        }
+        return targetIndex;
+      } else {
+        // Fallback: if already at root of history stack, return to Home if viewing a note or notebook
+        if (activeNote !== null || selectedNotebookId !== 'all' || viewMode === 'graph') {
+          goToHome();
+        }
+        return prevIndex;
+      }
+    });
+  }, [navHistory, notes, activeNote, selectedNotebookId, viewMode]);
+
+  const handleNavForward = useCallback(() => {
+    setNavHistoryIndex(prevIndex => {
+      if (prevIndex < navHistory.length - 1) {
+        const targetIndex = prevIndex + 1;
+        const target = navHistory[targetIndex];
+        if (target) {
+          isNavigatingHistoryRef.current = true;
+          setSelectedNotebookId(target.notebookId);
+          setViewMode(target.viewMode);
+          if (target.noteId) {
+            const found = notes.find(n => n.id === target.noteId);
+            if (found) {
+              setActiveNote(found);
+              setEditTitle(found.title);
+              setEditFolder(found.folder || found.subject || 'Geral');
+              setEditContent(found.content);
+              setNoteViewMode('preview');
+              setIsSidebarCollapsed(false);
+            } else {
+              setActiveNote(null);
+            }
+          } else {
+            setActiveNote(null);
+            if (target.notebookId === 'all') {
+              setIsSidebarCollapsed(true);
+            } else {
+              setIsSidebarCollapsed(false);
+            }
+          }
+          setTimeout(() => {
+            isNavigatingHistoryRef.current = false;
+          }, 60);
+        }
+        return targetIndex;
+      }
+      return prevIndex;
+    });
+  }, [navHistory, notes]);
+
+  const goBack = () => {
+    handleNavBack();
+  };
+
+  // Mouse Buttons (Button 3 = Back, Button 4 = Forward) and Keyboard Navigation
+  useEffect(() => {
+    const handleMouseNav = (e: MouseEvent) => {
+      if (e.button === 3) {
+        // Thumb Back Button
+        e.preventDefault();
+        e.stopPropagation();
+        handleNavBack();
+      } else if (e.button === 4) {
+        // Thumb Forward Button
+        e.preventDefault();
+        e.stopPropagation();
+        handleNavForward();
+      }
+    };
+
+    const handlePreventNativeMouseNav = (e: MouseEvent) => {
+      if (e.button === 3 || e.button === 4) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.isContentEditable
+      );
+      if (isInput) return;
+
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handleNavBack();
+      } else if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNavForward();
+      }
+    };
+
+    window.addEventListener('mouseup', handleMouseNav);
+    window.addEventListener('mousedown', handlePreventNativeMouseNav);
+    window.addEventListener('auxclick', handlePreventNativeMouseNav);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('mouseup', handleMouseNav);
+      window.removeEventListener('mousedown', handlePreventNativeMouseNav);
+      window.removeEventListener('auxclick', handlePreventNativeMouseNav);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleNavBack, handleNavForward]);
 
   const handleCreateNoteInFolder = (folderName: string = 'Geral') => {
     const newNoteTemplate = {
@@ -1528,20 +1692,34 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </button>
           )}
 
-          {/* Practical Back and Home Buttons */}
+          {/* Practical Back, Forward and Home Buttons */}
           <div className="flex items-center space-x-1 bg-card rounded-lg p-0.5 border border-card-border">
             <button
-              onClick={goBack}
-              disabled={activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor'}
+              onClick={handleNavBack}
+              disabled={activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor' && navHistoryIndex <= 0}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center space-x-1.5 transition-all ${
-                activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor'
+                activeNote === null && selectedNotebookId === 'all' && viewMode === 'editor' && navHistoryIndex <= 0
                   ? 'opacity-30 text-slate-500 cursor-not-allowed'
                   : 'hover:bg-panel text-slate-200 hover:text-white cursor-pointer'
               }`}
-              title="Voltar ao nível anterior"
+              title="Voltar à página/nota anterior (ou botão Voltar do mouse)"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Voltar</span>
+            </button>
+
+            <button
+              onClick={handleNavForward}
+              disabled={navHistoryIndex >= navHistory.length - 1}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center space-x-1.5 transition-all ${
+                navHistoryIndex >= navHistory.length - 1
+                  ? 'opacity-30 text-slate-500 cursor-not-allowed'
+                  : 'hover:bg-panel text-slate-200 hover:text-white cursor-pointer'
+              }`}
+              title="Avançar para a próxima página/nota (ou botão Avançar do mouse)"
+            >
+              <ArrowRight className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Avançar</span>
             </button>
 
             <button

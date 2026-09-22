@@ -150,8 +150,11 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
     window.addEventListener('resize', resizeCanvas);
 
     const initialRect = canvas.getBoundingClientRect();
-    const initialCenterX = (initialRect.width || 600) / 2;
-    const initialCenterY = (initialRect.height || 400) / 2;
+    const cssInitW = Math.max(1, initialRect.width || 600);
+    const cssInitH = Math.max(1, initialRect.height || 400);
+    const initialCenterX = cssInitW / 2;
+    const initialCenterY = cssInitH / 2;
+    const spreadRadius = Math.min(cssInitW, cssInitH) * 0.35;
 
     interface SimNode {
       id: string;
@@ -178,7 +181,7 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
     // Initialize Sim Nodes with distributed circular positions
     const simNodes: SimNode[] = filteredRawNodes.map((n, i) => {
       const angle = (i / Math.max(filteredRawNodes.length, 1)) * 2 * Math.PI;
-      const dist = 120 + Math.random() * 260;
+      const dist = Math.min(spreadRadius, 30 + (i % 4) * 25);
       
       let radius = 9;
       if (n.type === 'note') radius = Math.max(7, Math.min(22, 6 + (n.val / 3)));
@@ -194,8 +197,8 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
         val: n.val,
         color: n.color || '#38bdf8',
         details: n.details,
-        x: initialCenterX + Math.cos(angle) * dist + (Math.random() - 0.5) * 60,
-        y: initialCenterY + Math.sin(angle) * dist + (Math.random() - 0.5) * 60,
+        x: initialCenterX + Math.cos(angle) * dist,
+        y: initialCenterY + Math.sin(angle) * dist,
         vx: 0,
         vy: 0,
         radius,
@@ -236,22 +239,26 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       if (ticks > maxTicks) return;
       ticks++;
 
-      const kRepulsion = chargeStrength * 65;
-      const kAttraction = 0.007;
-      const damping = 0.86;
+      // Calibrated, stable force constants
+      const kRepulsion = chargeStrength * 5;
+      const kAttraction = 0.035;
+      const damping = 0.85;
+      const maxSpeed = 6;
 
-      // 1. Repulsion between all node pairs
+      // 1. Repulsion between all node pairs with distance clamp
       for (let i = 0; i < simNodes.length; i++) {
         const n1 = simNodes[i];
         for (let j = i + 1; j < simNodes.length; j++) {
           const n2 = simNodes[j];
           const dx = n2.x - n1.x;
           const dy = n2.y - n1.y;
-          const distSq = dx * dx + dy * dy || 1;
+          // Clamp minimum distance to prevent singularity / explosive repulsion
+          const distSq = Math.max(dx * dx + dy * dy, 900);
           const dist = Math.sqrt(distSq);
 
-          if (dist < 550) {
-            const force = kRepulsion / distSq;
+          if (dist < 450) {
+            // Soft-capped repulsive force
+            const force = Math.min(kRepulsion / distSq, 10);
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
 
@@ -265,33 +272,50 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       for (const link of simLinks) {
         const dx = link.target.x - link.source.x;
         const dy = link.target.y - link.source.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const targetDist = 90;
-        const force = (dist - targetDist) * kAttraction;
+        const dist = Math.hypot(dx, dy) || 1;
+        const targetDist = 70;
+        const displacement = dist - targetDist;
+        const force = Math.min(Math.max(displacement * kAttraction, -15), 15);
 
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
 
         if (!link.source.isPinned) { link.source.vx += fx; link.source.vy += fy; }
-        if (!link.target.isPinned) { link.target.vx -= fx; link.target.vy += fy; }
+        if (!link.target.isPinned) { link.target.vx -= fx; link.target.vy -= fy; }
       }
 
-      // 3. Gentle gravitational pull towards current center
-      const curRect = canvas.getBoundingClientRect();
-      const curCenterX = (curRect.width || 600) / 2;
-      const curCenterY = (curRect.height || 400) / 2;
+      // 3. Centering Gravitational Pull & Soft Boundary Constraints
+      const bRect = canvas.getBoundingClientRect();
+      const cssW = Math.max(1, bRect.width);
+      const cssH = Math.max(1, bRect.height);
+      const curCenterX = cssW / 2;
+      const curCenterY = cssH / 2;
 
       for (const node of simNodes) {
         if (!node.isPinned) {
           const dx = curCenterX - node.x;
           const dy = curCenterY - node.y;
-          node.vx += dx * 0.0012;
-          node.vy += dy * 0.0012;
+          node.vx += dx * 0.012;
+          node.vy += dy * 0.012;
+
+          // Clamp velocity (Speed limit)
+          const speed = Math.hypot(node.vx, node.vy);
+          if (speed > maxSpeed) {
+            node.vx = (node.vx / speed) * maxSpeed;
+            node.vy = (node.vy / speed) * maxSpeed;
+          }
 
           node.vx *= damping;
           node.vy *= damping;
           node.x += node.vx;
           node.y += node.vy;
+
+          // Soft boundary constraints to keep nodes inside visible canvas
+          const pad = node.radius + 15;
+          if (node.x < pad) { node.x = pad; node.vx *= -0.2; }
+          if (node.x > cssW - pad) { node.x = cssW - pad; node.vx *= -0.2; }
+          if (node.y < pad) { node.y = pad; node.vy *= -0.2; }
+          if (node.y > cssH - pad) { node.y = cssH - pad; node.vy *= -0.2; }
         }
       }
     };
