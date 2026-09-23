@@ -169,6 +169,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming, attachments]);
 
+  // Auto-focus textarea on empty/new chat or when done streaming
+  useEffect(() => {
+    if (!isStreaming) {
+      const timer = setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [messages.length, isStreaming]);
+
   // Auto-resize textarea height to fit content smoothly without covering text
   useEffect(() => {
     if (textareaRef.current) {
@@ -329,8 +339,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin scrollbar-thumb-card-border">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-16 space-y-6">
-            <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-card-border/80 shadow-xl shadow-accent/5 flex items-center justify-center shrink-0 animate-in fade-in zoom-in-95">
+          <div 
+            onClick={(e) => {
+              const target = e.target as HTMLElement;
+              if (!target.closest('button')) {
+                textareaRef.current?.focus();
+              }
+            }}
+            className="min-h-[380px] h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-8 space-y-5"
+          >
+            <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-card-border/80 shadow-xl shadow-accent/5 flex items-center justify-center shrink-0 animate-in fade-in zoom-in-95 cursor-pointer" onClick={() => textareaRef.current?.focus()}>
               <img src="/logo.png" alt="Tellus Logo" className="w-full h-full object-contain" />
             </div>
 
@@ -993,7 +1011,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
           {messages.length > 0 && (
             <button
-              onClick={onClearChat}
+              onClick={() => {
+                onClearChat();
+                setTimeout(() => textareaRef.current?.focus(), 50);
+              }}
               className="px-2 py-1 rounded-lg bg-card hover:bg-rose-950/30 border border-card-border hover:border-rose-800/40 text-slate-400 hover:text-rose-300 transition-colors ml-auto flex items-center space-x-1"
               title="Limpar Conversa"
             >
@@ -1004,9 +1025,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         </div>
 
         {/* Auto-Expanding Input Bar Card (Flexbox - Buttons NEVER overlap text!) */}
-        <div className={`rounded-2xl bg-card border border-card-border focus-within:border-accent shadow-xl shadow-black/40 transition-all flex flex-col p-3 gap-2.5 ${
-          isExpandedEditor ? 'ring-2 ring-accent/30' : ''
-        }`}>
+        <div 
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('button') && !target.closest('input')) {
+              textareaRef.current?.focus();
+            }
+          }}
+          className={`rounded-2xl bg-card border border-card-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30 shadow-xl shadow-black/40 transition-all flex flex-col p-3 gap-2.5 cursor-text ${
+            isExpandedEditor ? 'ring-2 ring-accent/30' : ''
+          }`}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -1017,10 +1046,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           />
 
           {/* Top Bar inside Input Box: Expand Button & Status */}
-          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-0.5">
-            <span className="text-[10px] text-slate-500">
-              {input.length > 0 ? `${input.length} caracteres` : 'Escreva uma mensagem ou instrução para o agente...'}
-            </span>
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-0.5 select-none">
+            <div className="flex items-center space-x-1.5">
+              {input.length > 0 ? (
+                <span className="text-[10px] text-amber-400 font-mono font-medium">
+                  {input.length} caracteres
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-500 font-sans flex items-center space-x-1">
+                  <Sparkles className="w-3 h-3 text-accent-light inline opacity-70" />
+                  <span>Chat com Tellus</span>
+                </span>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setIsExpandedEditor(!isExpandedEditor)}
@@ -1045,8 +1083,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             }}
             onKeyDown={handleKeyDown}
             placeholder="Digite uma mensagem, instrução para o agente, ou use @ para citar outro chat..."
-            className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none leading-relaxed overflow-y-auto font-sans"
+            className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none leading-relaxed overflow-y-auto font-sans caret-amber-400 selection:bg-accent/40 selection:text-white"
             style={{ minHeight: isExpandedEditor ? '240px' : '48px' }}
+            autoFocus
           />
 
           {/* Bottom Toolbar naturally below the text (NEVER covering text!) */}
