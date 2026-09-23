@@ -235,8 +235,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <div className="space-y-1.5 pt-1">
               {sessions.length === 0 ? (
-                <div className="p-4 text-center text-slate-500 text-xs">
-                  Nenhuma conversa salva ainda.
+                <div className="p-4 text-center text-slate-500 text-xs space-y-2">
+                  <p>Nenhuma conversa salva ainda.</p>
+                  <button
+                    type="button"
+                    onClick={onNewSession}
+                    className="px-3 py-1.5 rounded-lg bg-accent/20 hover:bg-accent hover:text-white text-accent-light text-xs font-medium inline-flex items-center space-x-1.5 transition-all"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Iniciar Novo Chat</span>
+                  </button>
                 </div>
               ) : (
                 sessions.map((s) => {

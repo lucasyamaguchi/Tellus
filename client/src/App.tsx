@@ -236,12 +236,10 @@ export const App: React.FC = () => {
       await api.deleteSession(sessionId);
       const updated = sessions.filter(s => s.id !== sessionId);
       setSessions(updated);
-      if (activeSessionId === sessionId) {
-        if (updated.length > 0) {
-          handleSelectSession(updated[0].id);
-        } else {
-          handleNewSession();
-        }
+      if (updated.length === 0) {
+        handleNewSession();
+      } else if (activeSessionId === sessionId) {
+        handleSelectSession(updated[0].id);
       }
     } catch {
       // ignore
