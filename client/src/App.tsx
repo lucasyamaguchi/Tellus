@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Navbar } from './components/Navbar';
+import { Navbar, LanguageOption } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { CodeViewer } from './components/CodeViewer';
@@ -15,6 +15,7 @@ import { WindowPickerModal } from './components/WindowPickerModal';
 import { FloatingOverlay } from './components/FloatingOverlay';
 import { PipelineMindMapModal } from './components/PipelineMindMapModal';
 import { LiveVoiceModal } from './components/LiveVoiceModal';
+import { CreditsModal } from './components/CreditsModal';
 import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
@@ -33,6 +34,9 @@ import {
   AgentPipelineConfig
 } from './types';
 import { api } from './api';
+import { voiceService } from './services/voiceService';
+import { voiceToneAnalyzer } from './services/voiceToneAnalyzer';
+import { parseLiveResponse } from './components/LiveVoiceModal';
 
 export const App: React.FC = () => {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -51,6 +55,14 @@ export const App: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [quotedMessage, setQuotedMessage] = useState<QuotedMessage | null>(null);
   const stopStreamRef = useRef<(() => void) | null>(null);
+
+  // Per-Chat Live Voice State & Modes
+  const [isLiveVoiceActiveInChat, setIsLiveVoiceActiveInChat] = useState<boolean>(false);
+  const [chatLiveVoiceMode, setChatLiveVoiceMode] = useState<'voice_only' | 'mixed' | 'voice_output_only'>('mixed');
+  const isLiveVoiceActiveInChatRef = useRef<boolean>(false);
+  useEffect(() => {
+    isLiveVoiceActiveInChatRef.current = isLiveVoiceActiveInChat;
+  }, [isLiveVoiceActiveInChat]);
 
   // Panel & Resizing Layout State
   const [sidebarWidth, setSidebarWidth] = useState<number>(240);
@@ -72,6 +84,7 @@ export const App: React.FC = () => {
   const [isMentionModalOpen, setIsMentionModalOpen] = useState<boolean>(false);
   const [isWindowPickerOpen, setIsWindowPickerOpen] = useState<boolean>(false);
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
+  const [isCreditsModalOpen, setIsCreditsModalOpen] = useState<boolean>(false);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
   const [openProjects, setOpenProjects] = useState<ProjectOverview[]>([]);
 
@@ -172,20 +185,75 @@ export const App: React.FC = () => {
       if (list.length > 0 && !activeSessionId) {
         handleSelectSession(list[0].id);
       } else if (list.length === 0) {
-        handleNewSession();
+        await handleNewSession();
       }
     } catch {
       // ignore
     }
   };
 
-  const handleNewSession = () => {
+  const handleNewSession = async () => {
     handleStopStreaming();
+    setIsStreaming(false);
+    setIsLiveVoiceOpen(false);
+    try {
+      voiceToneAnalyzer.stop();
+    } catch {}
+    try {
+      voiceService.stopAll();
+    } catch {}
     const newId = 'session_' + Math.random().toString(36).substring(2, 9);
     setActiveSessionId(newId);
     setMessages([]);
     setQuotedMessage(null);
+    setMainViewMode('agent');
+    setIsLiveVoiceActiveInChat(false);
+    setChatLiveVoiceMode('mixed');
+    const pipeline = {
+      primaryModel: activeModel,
+      plannerModel: '',
+      codingModel: '',
+      reasoningModel: '',
+      fastToolsModel: ''
+    };
+    setAgentPipeline(pipeline);
+    try {
+      await api.saveSession({
+        id: newId,
+        title: 'Novo Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: activeModel,
+        routineId: activeRoutine?.id,
+        tokenEfficiency,
+        pipeline,
+        messages: [],
+        isLiveVoice: false,
+        liveVoiceMode: 'mixed'
+      });
+      const list = await api.listSessions();
+      setSessions(list);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleStartLiveVoiceChat = async (
+    mode: 'voice_only' | 'mixed' | 'voice_output_only' = 'mixed',
+    customTitle?: string,
+    initialPrompt?: string
+  ) => {
+    handleStopStreaming();
+    const newId = 'session_' + Math.random().toString(36).substring(2, 9);
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const title = customTitle || `🎙️ Live Voice (${timeStr})`;
+    setActiveSessionId(newId);
+    setMessages([]);
+    setQuotedMessage(null);
     setIsStreaming(false);
+    setMainViewMode('agent');
+    setIsLiveVoiceActiveInChat(true);
+    setChatLiveVoiceMode(mode);
     setAgentPipeline({
       primaryModel: activeModel,
       plannerModel: '',
@@ -193,16 +261,65 @@ export const App: React.FC = () => {
       reasoningModel: '',
       fastToolsModel: ''
     });
+    try {
+      await api.saveSession({
+        id: newId,
+        title,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: activeModel,
+        routineId: activeRoutine?.id,
+        tokenEfficiency,
+        pipeline: agentPipeline,
+        messages: [],
+        isLiveVoice: true,
+        liveVoiceMode: mode
+      });
+      api.listSessions().then(list => setSessions(list));
+      if (initialPrompt) {
+        setTimeout(() => {
+          handleSendMessage(initialPrompt);
+        }, 150);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleToggleLiveVoiceInChat = () => {
+    const nextActive = !isLiveVoiceActiveInChat;
+    setIsLiveVoiceActiveInChat(nextActive);
+    if (activeSessionId) {
+      saveCurrentSession(messages, nextActive, chatLiveVoiceMode);
+    }
+  };
+
+  const handleChangeLiveVoiceMode = (mode: 'voice_only' | 'mixed' | 'voice_output_only') => {
+    setChatLiveVoiceMode(mode);
+    if (activeSessionId) {
+      saveCurrentSession(messages, isLiveVoiceActiveInChat, mode);
+    }
   };
 
   const handleSelectSession = async (sessionId: string) => {
     handleStopStreaming();
     setIsStreaming(false);
+    setIsLiveVoiceOpen(false);
+    try {
+      voiceToneAnalyzer.stop();
+    } catch {}
+    try {
+      voiceService.stopAll();
+    } catch {}
+    setMainViewMode('agent');
     try {
       const session = await api.getSession(sessionId);
       if (session) {
         setActiveSessionId(session.id);
         setMessages(session.messages || []);
+        setIsLiveVoiceActiveInChat(!!session.isLiveVoice);
+        setChatLiveVoiceMode(session.liveVoiceMode || 'mixed');
+
         if (session.model) {
           const cleanModel = session.model.replace(/:batch$/i, '').trim();
           setActiveModel(cleanModel);
@@ -232,26 +349,45 @@ export const App: React.FC = () => {
   const handleDeleteSession = async (sessionId: string) => {
     handleStopStreaming();
     setIsStreaming(false);
+    setIsLiveVoiceOpen(false);
+    try {
+      voiceToneAnalyzer.stop();
+    } catch {}
+    try {
+      voiceService.stopAll();
+    } catch {}
     try {
       await api.deleteSession(sessionId);
       const updated = sessions.filter(s => s.id !== sessionId);
-      setSessions(updated);
       if (updated.length === 0) {
-        handleNewSession();
-      } else if (activeSessionId === sessionId) {
-        handleSelectSession(updated[0].id);
+        await handleNewSession();
+      } else {
+        setSessions(updated);
+        if (activeSessionId === sessionId) {
+          handleSelectSession(updated[0].id);
+        }
       }
     } catch {
       // ignore
     }
   };
 
-  const saveCurrentSession = async (currentMsgs: Message[]) => {
+  const saveCurrentSession = async (
+    currentMsgs: Message[],
+    overrideLiveVoice?: boolean,
+    overrideMode?: 'voice_only' | 'mixed' | 'voice_output_only'
+  ) => {
     const currentId = activeSessionId || ('session_' + Math.random().toString(36).substring(2, 9));
     if (!activeSessionId) setActiveSessionId(currentId);
 
+    const isVoice = overrideLiveVoice !== undefined ? overrideLiveVoice : isLiveVoiceActiveInChat;
+    const vMode = overrideMode !== undefined ? overrideMode : chatLiveVoiceMode;
+
     const firstUserMsg = currentMsgs.find(m => m.role === 'user');
-    const title = firstUserMsg ? firstUserMsg.content.slice(0, 35) + (firstUserMsg.content.length > 35 ? '...' : '') : 'Novo Chat';
+    const defaultTitle = isVoice ? `🎙️ Live Voice (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : 'Novo Chat';
+    const title = firstUserMsg 
+      ? (isVoice ? '🎙️ ' : '') + firstUserMsg.content.slice(0, 35) + (firstUserMsg.content.length > 35 ? '...' : '') 
+      : defaultTitle;
 
     try {
       await api.saveSession({
@@ -263,7 +399,9 @@ export const App: React.FC = () => {
         routineId: activeRoutine?.id,
         tokenEfficiency,
         pipeline: agentPipeline,
-        messages: currentMsgs
+        messages: currentMsgs,
+        isLiveVoice: isVoice,
+        liveVoiceMode: vMode
       });
 
       api.listSessions().then(list => setSessions(list));
@@ -376,6 +514,17 @@ export const App: React.FC = () => {
         loadProjectOverview();
         setMessages(latest => {
           saveCurrentSession(latest);
+
+          // If Live Voice is active in this session, synthesize speech automatically!
+          if (isLiveVoiceActiveInChatRef.current) {
+            const assistantMsg = latest.find(m => m.id === assistantMessageId);
+            if (assistantMsg && assistantMsg.content) {
+              const parsed = parseLiveResponse(assistantMsg.content);
+              const textToSpeak = parsed.spokenText || assistantMsg.content;
+              voiceService.speak(textToSpeak);
+            }
+          }
+
           return latest;
         });
       },
@@ -432,6 +581,7 @@ export const App: React.FC = () => {
       stopStreamRef.current();
       stopStreamRef.current = null;
     }
+    voiceService.stop();
     setIsStreaming(false);
   };
 
@@ -509,6 +659,29 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleSelectLanguage = async (opt: LanguageOption) => {
+    try {
+      const updated = await api.updateConfig({
+        locale: opt.locale,
+        language: opt.language,
+        country: opt.country,
+        enforceStrictLanguage: true
+      });
+      setConfig(updated);
+    } catch (err: any) {
+      alert(`Erro ao alterar idioma: ${err.message}`);
+    }
+  };
+
+  // Anti-lock: When returning to agent mode (e.g. after editing or deleting notes, or navigating tabs),
+  // immediately clear any stale background streaming locks so the chat is never disabled or stuck.
+  useEffect(() => {
+    if (mainViewMode === 'agent') {
+      handleStopStreaming();
+      setIsStreaming(false);
+    }
+  }, [mainViewMode]);
+
   return (
     <div className={`h-screen w-screen flex flex-col bg-background text-slate-100 font-sans overflow-hidden ${
       isDraggingSidebar || isDraggingRightPanel ? 'select-none' : ''
@@ -527,8 +700,14 @@ export const App: React.FC = () => {
         hasCustomPipeline={!!(agentPipeline?.plannerModel || agentPipeline?.codingModel || agentPipeline?.reasoningModel || agentPipeline?.fastToolsModel)}
         theme={theme}
         onToggleTheme={handleToggleTheme}
-        onOpenLiveVoice={() => setIsLiveVoiceOpen(true)}
-        onSetMainViewMode={setMainViewMode}
+        onOpenLiveVoice={() => handleStartLiveVoiceChat('mixed')}
+        onSetMainViewMode={(mode) => {
+          if (mode === 'agent') {
+            handleStopStreaming();
+            setIsStreaming(false);
+          }
+          setMainViewMode(mode);
+        }}
         onToggleRightPanel={() => setIsRightPanelOpen(!isRightPanelOpen)}
         onToggleOverlay={() => setIsOverlayActive(!isOverlayActive)}
         onToggleTokenEfficiency={() => setTokenEfficiency(!tokenEfficiency)}
@@ -538,6 +717,8 @@ export const App: React.FC = () => {
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         onOpenProjectModal={() => setIsProjectModalOpen(true)}
         onSelectRoutine={handleSelectRoutine}
+        onSelectLanguage={handleSelectLanguage}
+        onNewChat={handleNewSession}
       />
 
       {/* MODE 1: DEDICATED NOTION-STYLE FRANKMD NOTES & VAULT */}
@@ -545,21 +726,39 @@ export const App: React.FC = () => {
         <div className="flex-1 flex overflow-hidden">
           <FrankNoteView
             targetNoteIdOrTitle={targetNoteIdOrTitle}
-            onMentionInChat={(note) => {
+            onMentionInChat={async (note) => {
               setMainViewMode('agent');
-              handleNewSession();
+              await handleNewSession();
               setTimeout(() => {
                 handleSendMessage(note.content);
               }, 100);
             }}
-            onStudyTopic={(topic) => {
+            onStudyTopic={async (topic) => {
               setMainViewMode('agent');
-              handleNewSession();
+              await handleNewSession();
               setTimeout(() => {
                 handleSendMessage(`Quero estudar sobre ${topic}`);
               }, 100);
             }}
-            onReturnToAgent={() => setMainViewMode('agent')}
+            onReturnToAgent={async () => {
+              setMainViewMode('agent');
+              if (sessions.length === 0 || !activeSessionId) {
+                await handleNewSession();
+              }
+            }}
+            onSearchInNewChat={async (query) => {
+              setMainViewMode('agent');
+              await handleNewSession();
+              setTimeout(() => {
+                handleSendMessage(query);
+              }, 120);
+            }}
+            onStartLiveVoice={async (topic, initialContent) => {
+              const prompt = initialContent 
+                ? `Quero conversar por voz e revisar sobre "${topic}". Conteúdo de referência:\n\n${initialContent.slice(0, 600)}`
+                : `Olá! Quero conversar e estudar por voz sobre o tema: ${topic}`;
+              handleStartLiveVoiceChat('mixed', `🎙️ Live Voice: ${topic.slice(0, 25)}`, prompt);
+            }}
           />
         </div>
       )}
@@ -628,6 +827,10 @@ export const App: React.FC = () => {
           {!isRightPanelMaximized && (
             <div className="flex-1 flex flex-col min-w-[320px] overflow-hidden">
               <ChatArea
+                key={activeSessionId || 'default'}
+                activeSessionId={activeSessionId}
+                activeSessionTitle={sessions.find(s => s.id === activeSessionId)?.title}
+                onQuoteSnippet={(quoted) => setQuotedMessage(quoted)}
                 messages={messages}
                 isStreaming={isStreaming}
                 activeModel={activeModel}
@@ -635,11 +838,17 @@ export const App: React.FC = () => {
                 onSendMessage={handleSendMessage}
                 onStopStreaming={handleStopStreaming}
                 onClearChat={handleNewSession}
+                onNewChat={handleNewSession}
                 onQuickAction={(action) => handleSendMessage(action)}
                 onSelectRoutine={handleSelectRoutine}
                 onOpenMentionModal={() => setIsMentionModalOpen(true)}
                 onOpenWindowPicker={() => setIsWindowPickerOpen(true)}
-                onOpenLiveVoice={() => setIsLiveVoiceOpen(true)}
+                onOpenLiveVoice={() => handleStartLiveVoiceChat('mixed')}
+                isLiveVoiceActive={isLiveVoiceActiveInChat}
+                liveVoiceMode={chatLiveVoiceMode}
+                onToggleLiveVoice={handleToggleLiveVoiceInChat}
+                onChangeLiveVoiceMode={handleChangeLiveVoiceMode}
+                onOpenLiveVoiceOrb={() => setIsLiveVoiceOpen(true)}
                 quotedMessage={quotedMessage}
                 onClearQuotedMessage={() => setQuotedMessage(null)}
                 onOpenNotes={() => setMainViewMode('notes')}
@@ -779,6 +988,12 @@ export const App: React.FC = () => {
           setConfig(c);
           api.getModels().then((m) => setModels(m)).catch(() => {});
         }}
+        onOpenCredits={() => setIsCreditsModalOpen(true)}
+      />
+
+      <CreditsModal
+        isOpen={isCreditsModalOpen}
+        onClose={() => setIsCreditsModalOpen(false)}
       />
 
       <ProjectModal

@@ -8,7 +8,11 @@ export interface ChatSession {
   updatedAt: number;
   model: string;
   routineId?: string;
+  tokenEfficiency?: boolean;
+  pipeline?: any;
   messages: any[];
+  isLiveVoice?: boolean;
+  liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
 }
 
 export interface MessageSearchResult {
@@ -38,6 +42,8 @@ export class SessionManager {
     model: string;
     messageCount: number;
     preview: string;
+    isLiveVoice?: boolean;
+    liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
   }> {
     const dir = this.getSessionsDir(projectPath);
     const files = fs.readdirSync(dir);
@@ -59,7 +65,9 @@ export class SessionManager {
           updatedAt: session.updatedAt || session.createdAt,
           model: session.model,
           messageCount: session.messages.length,
-          preview
+          preview,
+          isLiveVoice: !!session.isLiveVoice,
+          liveVoiceMode: session.liveVoiceMode || 'mixed'
         });
       } catch {
         // ignore corrupted file

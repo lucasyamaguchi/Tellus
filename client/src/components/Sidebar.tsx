@@ -260,15 +260,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onSelectSession(s.id)}
                     >
                       <div className="overflow-hidden pr-2 flex-1">
-                        <span className="font-semibold text-xs truncate block text-slate-100">
-                          {s.title}
-                        </span>
+                        <div className="flex items-center space-x-1.5 truncate">
+                          {s.isLiveVoice && (
+                            <span 
+                              className="text-xs shrink-0" 
+                              title={`Live Voice (${s.liveVoiceMode === 'voice_only' ? 'Somente Voz' : s.liveVoiceMode === 'voice_output_only' ? 'Retorno em Voz' : 'Misto'})`}
+                            >
+                              🎙️
+                            </span>
+                          )}
+                          <span className="font-semibold text-xs truncate text-slate-100">
+                            {s.title}
+                          </span>
+                        </div>
                         <span className="text-[10px] text-slate-400 truncate block mt-0.5 font-mono">
                           {s.preview}
                         </span>
                         <div className="flex items-center space-x-2 text-[9px] text-slate-500 mt-1 font-mono">
                           <span>{new Date(s.updatedAt).toLocaleDateString()}</span>
                           <span>• {s.messageCount} msgs</span>
+                          {s.isLiveVoice && (
+                            <span className="text-red-400 font-medium">
+                              • {s.liveVoiceMode === 'voice_only' ? 'Voz' : s.liveVoiceMode === 'voice_output_only' ? 'Retorno Voz' : 'Misto'}
+                            </span>
+                          )}
                         </div>
                       </div>
 

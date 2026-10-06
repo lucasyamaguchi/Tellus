@@ -43,6 +43,10 @@ export interface AppConfig {
   pipeline?: AgentPipelineConfig;
   theme?: 'dark' | 'light';
   deletedNotesRetention?: '30_days' | '90_days' | '120_days' | '1_year' | 'never';
+  locale?: 'pt-BR' | 'en-US' | 'es-ES' | string;
+  language?: string;
+  country?: string;
+  enforceStrictLanguage?: boolean;
 }
 
 export interface DeletedNoteItem {
@@ -246,6 +250,8 @@ export interface ChatSessionMetadata {
   model: string;
   messageCount: number;
   preview: string;
+  isLiveVoice?: boolean;
+  liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
 }
 
 export interface ChatSession {
@@ -258,6 +264,8 @@ export interface ChatSession {
   tokenEfficiency?: boolean;
   pipeline?: AgentPipelineConfig;
   messages: Message[];
+  isLiveVoice?: boolean;
+  liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
 }
 
 export interface TerminalTask {

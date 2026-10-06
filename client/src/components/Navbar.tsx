@@ -22,10 +22,31 @@ import {
   BrainCircuit,
   Sun,
   Moon,
-  Radio
+  Radio,
+  Globe,
+  Check,
+  Plus
 } from 'lucide-react';
 import { AppConfig, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
+
+export interface LanguageOption {
+  locale: string;
+  language: string;
+  country: string;
+  flag: string;
+  label: string;
+}
+
+export const LANGUAGE_OPTIONS: LanguageOption[] = [
+  { locale: 'pt-BR', language: 'Português (Brasil)', country: 'Brasil', flag: '🇧🇷', label: 'Português (BR)' },
+  { locale: 'en-US', language: 'English (US)', country: 'Estados Unidos', flag: '🇺🇸', label: 'English (US)' },
+  { locale: 'es-ES', language: 'Español', country: 'Espanha', flag: '🇪🇸', label: 'Español' },
+  { locale: 'pt-PT', language: 'Português (Portugal)', country: 'Portugal', flag: '🇵🇹', label: 'Português (PT)' },
+  { locale: 'ja-JP', language: '日本語', country: 'Japão', flag: '🇯🇵', label: '日本語' },
+  { locale: 'de-DE', language: 'Deutsch', country: 'Alemanha', flag: '🇩🇪', label: 'Deutsch' },
+  { locale: 'fr-FR', language: 'Français', country: 'França', flag: '🇫🇷', label: 'Français' },
+];
 
 interface NavbarProps {
   config: AppConfig | null;
@@ -51,6 +72,8 @@ interface NavbarProps {
   onOpenSettingsModal: () => void;
   onOpenProjectModal: () => void;
   onSelectRoutine: (routine: Routine) => void;
+  onSelectLanguage?: (lang: LanguageOption) => void;
+  onNewChat?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -77,11 +100,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettingsModal,
   onOpenProjectModal,
   onSelectRoutine,
+  onSelectLanguage,
+  onNewChat,
 }) => {
   const [isMenuDropdownOpen, setIsMenuDropdownOpen] = useState(false);
+  const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
   const [credits, setCredits] = useState<OpenRouterCredits | null>(null);
   const [isLoadingCredits, setIsLoadingCredits] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const languageRef = useRef<HTMLDivElement>(null);
+
+  const currentLocale = config?.locale || 'pt-BR';
+  const currentLangObj = LANGUAGE_OPTIONS.find(l => l.locale === currentLocale) || LANGUAGE_OPTIONS[0];
 
   const fetchCredits = async () => {
     if (!config?.keys.openrouter) return;
@@ -110,12 +140,15 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsMenuDropdownOpen(false);
       }
+      if (languageRef.current && !languageRef.current.contains(event.target as Node)) {
+        setIsLanguageDropdownOpen(false);
+      }
     };
-    if (isMenuDropdownOpen) {
+    if (isMenuDropdownOpen || isLanguageDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isMenuDropdownOpen]);
+  }, [isMenuDropdownOpen, isLanguageDropdownOpen]);
 
   const configuredKeysCount = [
     config?.keys.openrouter,
@@ -256,6 +289,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden xl:inline text-[11px] font-medium">Live Voice</span>
           </button>
         )}
+
+        {/* Global New Chat Button */}
+        {onNewChat && (
+          <button
+            onClick={onNewChat}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border border-accent/40 bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+            title="Criar um novo chat e focar na digitação imediatamente"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden md:inline text-[11px]">Novo Chat</span>
+          </button>
+        )}
       </div>
 
       {/* 3. Right Section: Live Balance, Right Panel Tabs & Consolidated Menu */}
@@ -331,6 +376,76 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
 
+        {/* Language & Regionalization Quick Selector */}
+        <div className="relative" ref={languageRef}>
+          <button
+            onClick={() => setIsLanguageDropdownOpen(!isLanguageDropdownOpen)}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs transition-all ${
+              isLanguageDropdownOpen 
+                ? 'bg-accent/20 border-accent text-accent-light' 
+                : 'bg-card hover:bg-card-border/70 border-card-border text-slate-300'
+            }`}
+            title={`Idioma e Regionalização do Tellus: ${currentLangObj.label} (${currentLangObj.locale}). Clique para alterar.`}
+          >
+            <span className="text-sm leading-none">{currentLangObj.flag}</span>
+            <span className="font-mono text-[11px] font-semibold hidden md:inline">
+              {currentLangObj.locale}
+            </span>
+            <ChevronDown className="w-3 h-3 text-slate-400" />
+          </button>
+
+          {isLanguageDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-52 bg-card border border-card-border rounded-xl shadow-2xl p-1.5 space-y-1 z-50 text-xs animate-in fade-in">
+              <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-card-border/60 pb-1.5 mb-1">
+                <div className="flex items-center space-x-1.5">
+                  <Globe className="w-3.5 h-3.5 text-accent-light" />
+                  <span>Idioma & Região</span>
+                </div>
+                <span className="text-[9px] font-mono text-emerald-400 font-normal">
+                  {currentLangObj.locale}
+                </span>
+              </div>
+
+              {LANGUAGE_OPTIONS.map((opt) => {
+                const isSelected = (config?.locale || 'pt-BR') === opt.locale;
+                return (
+                  <button
+                    key={opt.locale}
+                    onClick={() => {
+                      setIsLanguageDropdownOpen(false);
+                      onSelectLanguage?.(opt);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between transition-colors ${
+                      isSelected
+                        ? 'bg-accent/20 text-white font-medium border border-accent/30'
+                        : 'hover:bg-panel text-slate-300 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm">{opt.flag}</span>
+                      <span>{opt.label}</span>
+                    </div>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-accent-light" />}
+                  </button>
+                );
+              })}
+
+              <div className="h-[1px] bg-card-border my-1" />
+
+              <button
+                onClick={() => {
+                  setIsLanguageDropdownOpen(false);
+                  onOpenSettingsModal();
+                }}
+                className="w-full text-left px-2.5 py-1 rounded-lg hover:bg-panel text-[11px] text-slate-400 hover:text-slate-200 flex items-center justify-between"
+              >
+                <span>Mais opções de idioma...</span>
+                <ExternalLink className="w-3 h-3 text-slate-500" />
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Consolidated Tools & Settings Dropdown */}
         <div className="relative" ref={menuRef}>
           <button
@@ -345,6 +460,22 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {isMenuDropdownOpen && (
             <div className="absolute right-0 mt-2 w-56 bg-card border border-card-border rounded-xl shadow-2xl p-1.5 space-y-1 z-50 text-xs animate-in fade-in">
+              {/* Language Shortcut inside menu */}
+              <button
+                onClick={() => {
+                  setIsMenuDropdownOpen(false);
+                  setIsLanguageDropdownOpen(true);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-panel text-slate-200 flex items-center justify-between"
+              >
+                <div className="flex items-center space-x-2">
+                  <Globe className="w-3.5 h-3.5 text-brand-cyan" />
+                  <span>Idioma: {currentLangObj.label}</span>
+                </div>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-panel border border-card-border text-slate-300 font-mono">
+                  {currentLangObj.flag} {currentLangObj.locale}
+                </span>
+              </button>
               {/* API Keys Configuration */}
               <button
                 onClick={() => {

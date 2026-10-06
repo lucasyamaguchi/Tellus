@@ -11,13 +11,19 @@ const __dirname = path.dirname(__filename);
 // Ensure Windows Taskbar uses the same AppUserModelID
 app.setAppUserModelId('Tellus.AgenticIDE');
 
-// Allow microphone and media access without permission prompts
+// Automatically permit microphone and media hardware access directly on PC
+app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    if (permission === 'media') {
+    if (permission === 'media' || permission === 'audioCapture' || permission === 'microphone') {
       return callback(true);
     }
     callback(true);
+  });
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    return true;
   });
 });
 

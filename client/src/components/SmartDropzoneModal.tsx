@@ -297,7 +297,7 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
                               onClose();
                             }}
                             className="p-1.5 rounded-lg bg-panel hover:bg-card-border text-slate-400 hover:text-brand-cyan transition-colors shrink-0"
-                            title="Abrir no FrankMD"
+                            title="Abrir no Notes Module"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                           </button>

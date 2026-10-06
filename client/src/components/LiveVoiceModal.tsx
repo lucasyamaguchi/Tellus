@@ -21,9 +21,11 @@ import {
   CheckCircle2,
   Eye,
   PenTool,
-  Play
+  Play,
+  AlertCircle
 } from 'lucide-react';
 import { voiceService, VoiceOption, FISH_VOICE_PRESETS, VoiceProvider } from '../services/voiceService';
+import { voiceToneAnalyzer, ToneAnalysisResult } from '../services/voiceToneAnalyzer';
 import { api } from '../api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -104,8 +106,10 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
   onOpenNote
 }) => {
   const [voiceState, setVoiceState] = useState<LiveVoiceState>('idle');
+  const voiceStateRef = useRef<LiveVoiceState>('idle');
   const [topic, setTopic] = useState<string>(initialTopic);
-  const [isHandsFree, setIsHandsFree] = useState<boolean>(true);
+  const [isHandsFree, setIsHandsFree] = useState<boolean>(false);
+  const isHandsFreeRef = useRef<boolean>(false);
   const [currentTranscript, setCurrentTranscript] = useState<string>('');
   const [latestAiResponse, setLatestAiResponse] = useState<string>('');
   const [latestAiSpoken, setLatestAiSpoken] = useState<string>('');
@@ -122,12 +126,26 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
   const [speechRate, setSpeechRate] = useState<number>(1.0);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [isSavedToVault, setIsSavedToVault] = useState<boolean>(false);
+  const [isTestingAudio, setIsTestingAudio] = useState<boolean>(false);
+  const isTestingAudioRef = useRef<boolean>(false);
+  const [detectedUserTone, setDetectedUserTone] = useState<ToneAnalysisResult | null>(null);
+  const [micErrorMsg, setMicErrorMsg] = useState<string | null>(null);
 
   // References
   const recognizerRef = useRef<any>(null);
   const silenceTimeoutRef = useRef<any>(null);
   const abortControllerRef = useRef<(() => void) | null>(null);
   const isComponentMounted = useRef<boolean>(true);
+
+  // Helper to ensure voiceState and voiceStateRef are always in lockstep
+  const updateVoiceState = (state: LiveVoiceState) => {
+    voiceStateRef.current = state;
+    setVoiceState(state);
+  };
+
+  useEffect(() => {
+    isHandsFreeRef.current = isHandsFree;
+  }, [isHandsFree]);
 
   useEffect(() => {
     isComponentMounted.current = true;
@@ -156,18 +174,14 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
 
     loadVoices();
     voiceService.onVoicesReady(loadVoices);
-
-    // If hands free and open, start listening after a brief delay
-    if (isHandsFree) {
-      const timer = setTimeout(() => {
-        startListening();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
   }, [isOpen]);
 
   const stopAll = () => {
+    isTestingAudioRef.current = false;
+    setIsTestingAudio(false);
     voiceService.stop();
+    voiceService.releaseMicrophone();
+    voiceToneAnalyzer.cleanup();
     if (recognizerRef.current) {
       try { recognizerRef.current.abort(); } catch {}
       recognizerRef.current = null;
@@ -180,30 +194,64 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
       abortControllerRef.current();
       abortControllerRef.current = null;
     }
-    setVoiceState('idle');
+    updateVoiceState('idle');
   };
 
-  const startListening = () => {
+  const startListening = async () => {
     if (!voiceService.isSpeechRecognitionAvailable()) {
-      alert('Seu navegador ou ambiente não suporta Web Speech Recognition. Você pode usar o Whisper nas mensagens normais.');
+      setMicErrorMsg('Seu navegador ou ambiente não suporta Web Speech Recognition nativo. Utilize Google Chrome ou Edge.');
       return;
     }
+
+    if (isTestingAudioRef.current) {
+      voiceService.stop();
+      isTestingAudioRef.current = false;
+      setIsTestingAudio(false);
+    }
+
+    // Do not double-start if already actively listening
+    if (voiceStateRef.current === 'listening' && recognizerRef.current) {
+      return;
+    }
+
+    if (!isComponentMounted.current) return;
+
+    // 1. Explicitly prompt and verify microphone permission via getUserMedia
+    const micCheck = await voiceService.requestMicrophoneAccess();
+    if (!micCheck.granted) {
+      setMicErrorMsg(micCheck.error || 'Permissão de microfone negada ou bloqueada.');
+      updateVoiceState('idle');
+      return;
+    }
+    setMicErrorMsg(null);
 
     voiceService.stop();
     if (recognizerRef.current) {
       try { recognizerRef.current.abort(); } catch {}
+      recognizerRef.current = null;
     }
 
-    setVoiceState('listening');
+    updateVoiceState('listening');
     setCurrentTranscript('');
 
+    // Start real-time acoustic tone analysis alongside SpeechRecognition using the verified stream
     try {
-      recognizerRef.current = voiceService.createSpeechRecognizer({
+      voiceToneAnalyzer.start(micCheck.stream).catch(err => {
+        console.warn('[LiveVoice] Tone analyzer start failed:', err);
+      });
+    } catch {}
+
+    try {
+      const recognizer = voiceService.createSpeechRecognizer({
         lang: 'pt-BR',
         onStart: () => {
-          setVoiceState('listening');
+          if (isComponentMounted.current) {
+            updateVoiceState('listening');
+            setMicErrorMsg(null);
+          }
         },
         onResult: (transcript, isFinal) => {
+          if (!isComponentMounted.current) return;
           setCurrentTranscript(transcript);
 
           if (silenceTimeoutRef.current) {
@@ -212,36 +260,135 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
 
           if (isFinal) {
             handleUserSpeechCompleted(transcript);
-          } else if (isHandsFree && transcript.trim().length > 3) {
-            // If hands free, wait for 1.5s of silence after interim text to submit
+          } else if (isHandsFreeRef.current && transcript.trim().length > 3) {
+            // If hands free, wait for 1.6s of silence after interim text to submit
             silenceTimeoutRef.current = setTimeout(() => {
-              handleUserSpeechCompleted(transcript);
+              if (isComponentMounted.current && voiceStateRef.current === 'listening') {
+                handleUserSpeechCompleted(transcript);
+              }
             }, 1600);
           }
         },
         onError: (err) => {
           console.warn('[LiveVoice] Recognition error:', err);
-          if (err !== 'no-speech') {
-            setVoiceState('idle');
+          if (err === 'not-allowed') {
+            setMicErrorMsg(voiceService.isElectron() 
+              ? 'Microfone não autorizado no Windows. Verifique Configurações > Privacidade e Segurança > Microfone.' 
+              : 'Microfone bloqueado: Permita o acesso ao microfone no navegador.');
+          } else if (err === 'network') {
+            // Se Web Speech der erro de rede, o DirectMic já entra em ação e não precisa assustar o usuário
+            return;
+          } else if (err !== 'no-speech' && err !== 'aborted') {
+            setMicErrorMsg(`Aviso de captura de áudio: ${err}`);
+          }
+          // 'no-speech' is expected during pauses and shouldn't kill the session
+          if (err !== 'no-speech' && err !== 'aborted') {
+            if (isComponentMounted.current) {
+              updateVoiceState('idle');
+            }
           }
         },
         onEnd: () => {
-          // If still in listening state and hands-free, restart
-          if (voiceState === 'listening' && isHandsFree && isComponentMounted.current) {
-            try {
-              recognizerRef.current?.start();
-            } catch {
-              // ignore
+          // If still marked as listening and hands-free, seamlessly restart the recognizer
+          if (
+            isComponentMounted.current &&
+            voiceStateRef.current === 'listening' &&
+            isHandsFreeRef.current &&
+            !isTestingAudioRef.current
+          ) {
+            setTimeout(() => {
+              if (
+                isComponentMounted.current &&
+                voiceStateRef.current === 'listening' &&
+                isHandsFreeRef.current &&
+                !isTestingAudioRef.current
+              ) {
+                try {
+                  recognizerRef.current?.start();
+                } catch {
+                  // Ignore harmless restarts
+                }
+              }
+            }, 250);
+          } else if (voiceStateRef.current === 'listening' && !isHandsFreeRef.current) {
+            if (isComponentMounted.current) {
+              updateVoiceState('idle');
             }
           }
         }
       });
 
-      recognizerRef.current.start();
+      recognizerRef.current = recognizer;
+      recognizer.start();
     } catch (e: any) {
       console.error('[LiveVoice] Failed to start recognition:', e);
-      setVoiceState('idle');
+      if (isComponentMounted.current) {
+        updateVoiceState('idle');
+      }
     }
+  };
+
+  const handleTestAudio = () => {
+    if (isTestingAudio) {
+      voiceService.stop();
+      isTestingAudioRef.current = false;
+      setIsTestingAudio(false);
+      if (isHandsFreeRef.current) {
+        startListening();
+      }
+      return;
+    }
+
+    // Temporarily pause listening while testing audio to avoid microphone hearing the speakers
+    if (recognizerRef.current) {
+      try { recognizerRef.current.abort(); } catch {}
+    }
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+    }
+
+    isTestingAudioRef.current = true;
+    setIsTestingAudio(true);
+
+    const testPhrase = voiceProvider === 'fish-audio'
+      ? (fishVoiceId === '82d13948027e4be69892dd3d0104e681'
+          ? 'Olá! Eu sou o Jarvis. Síntese de voz em alta definição conectada com sucesso no Tellus.'
+          : fishVoiceId === '2714f32ab7f8475fa45e277f840c8c23'
+          ? 'Oie! Ahri pronta para estudar com você no Tellus. Áudio e voz funcionando perfeitamente!'
+          : 'Olá! Testando a síntese de voz do Tellus em tempo real.')
+      : 'Olá! Testando a voz nativa do sistema no Tellus.';
+
+    voiceService.speak(testPhrase, {
+      forceProvider: voiceProvider,
+      referenceId: fishVoiceId,
+      voiceURI: selectedVoiceUri,
+      rate: speechRate,
+      onStart: () => {
+        if (isComponentMounted.current) {
+          isTestingAudioRef.current = true;
+          setIsTestingAudio(true);
+        }
+      },
+      onEnd: () => {
+        if (!isComponentMounted.current) return;
+        isTestingAudioRef.current = false;
+        setIsTestingAudio(false);
+        // Resume listening automatically if hands-free is enabled
+        if (isHandsFreeRef.current) {
+          setTimeout(() => {
+            if (isComponentMounted.current && !isTestingAudioRef.current) {
+              startListening();
+            }
+          }, 400);
+        }
+      },
+      onError: (err) => {
+        console.error('[LiveVoice] Erro no teste de áudio:', err);
+        if (!isComponentMounted.current) return;
+        isTestingAudioRef.current = false;
+        setIsTestingAudio(false);
+      }
+    });
   };
 
   const handleUserSpeechCompleted = async (spokenText: string) => {
@@ -255,15 +402,33 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
       clearTimeout(silenceTimeoutRef.current);
     }
 
-    setVoiceState('thinking');
+    // Stop and classify acoustic + semantic voice tone
+    const toneResult = voiceToneAnalyzer.stopAndAnalyze(text);
+    setDetectedUserTone(toneResult);
+
+    updateVoiceState('thinking');
     const updatedHistory = [...conversationHistory, { role: 'user' as const, content: text }];
     setConversationHistory(updatedHistory);
 
-    // Call LLM with strict oral speech vs written action separation
+    // Call LLM with strict oral speech vs written action separation + acoustic tone mirroring
     const liveSystemPrompt = `[🎙️ MODO LIVE VOICE & ASSISTENTE INTELIGENTE]
 - Você é a assistente pessoal do usuário em uma conversa ao vivo por VOZ sobre o tema: "${topic}".
 - Responda OBRIGATORIAMENTE em PORTUGUÊS DO BRASIL (pt-BR).
 - Seu tom deve ser natural, inteligente, amigável, acolhedor e ágil, como uma pessoa real conversando.
+
+[🎭 SINTONIA & ESPELHAMENTO DE TOM DE VOZ (FISH AUDIO S2.1 EMOTIONS)]
+- Tom detectado na fala do usuário agora: ${toneResult.emoji} ${toneResult.label} (Confiança: ${Math.round(toneResult.confidence * 100)}%).
+- Diagnóstico acústico: ${toneResult.description}
+- REGRA OBRIGATÓRIA DE ESPELHAMENTO EMOCIONAL (EMPATHIC MIRRORING):
+  * SE O USUÁRIO ESTIVER SUSSURRANDO (whispering): Você DEVE sussurrar de volta! Abra a sua fala dentro de [FALA] obrigatoriamente com a tag "[whispering]" e use vocabulário íntimo, suave, cúmplice e em voz baixa (ex: "[FALA] [whispering] psst... compreendi. Vou te explicar baixinho... [/FALA]").
+  * SE O USUÁRIO ESTIVER ALEGRE / ENTUSIASMADO (excited): Seja vibrante, alegre e transmita energia positiva! Use tags como "[excited]" ou "[happy]" com tom motivador e caloroso.
+  * SE O USUÁRIO ESTIVER CALMO / TRANQUILO (calm): Responda em tom suave, calmo e relaxado com a tag "[calm]" ou "[softly]".
+  * SE O USUÁRIO ESTIVER NEUTRO / OBJETIVO (neutral): Mantenha tom claro, equilibrado e direto ao ponto com a tag "[calm]" ou "[thoughtful]".
+- IMPORTANTE: No Fish Audio, a tag de emoção em colchetes DEVE vir logo no início da sua resposta falada dentro de [FALA].
+Exemplo de formato:
+[FALA]
+${toneResult.tag} [sua resposta falada curta e natural de 1 a 3 frases]
+[/FALA]
 
 [REGRA DE OURO: SEPARAÇÃO ENTRE FALA ORAL E ESCRITA NO VAULT]
 Para manter a conversa natural e fluida SEM gastar voz e tokens à toa lendo textos longos:
@@ -348,7 +513,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
 
   const handleAiSpeechReady = async (aiText: string, updatedHistory: Array<{ role: 'user' | 'assistant'; content: string }>) => {
     if (!aiText.trim()) {
-      setVoiceState('idle');
+      updateVoiceState('idle');
       return;
     }
 
@@ -382,7 +547,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
     }
 
     setConversationHistory([...updatedHistory, { role: 'assistant', content: historyEntry }]);
-    setVoiceState('speaking');
+    updateVoiceState('speaking');
 
     // Speak ONLY the concise oral portion (avoids wasting tokens, prevents long monotone speeches)
     voiceService.speak(textToSpeak, {
@@ -391,20 +556,26 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
       voiceURI: selectedVoiceUri,
       rate: speechRate,
       onStart: () => {
-        setVoiceState('speaking');
+        if (isComponentMounted.current) {
+          updateVoiceState('speaking');
+        }
       },
       onEnd: () => {
         if (!isComponentMounted.current) return;
-        setVoiceState('idle');
+        updateVoiceState('idle');
         // If hands-free, automatically resume listening
-        if (isHandsFree) {
+        if (isHandsFreeRef.current) {
           setTimeout(() => {
-            if (isComponentMounted.current) startListening();
+            if (isComponentMounted.current && !isTestingAudioRef.current) {
+              startListening();
+            }
           }, 600);
         }
       },
       onError: () => {
-        setVoiceState('idle');
+        if (isComponentMounted.current) {
+          updateVoiceState('idle');
+        }
       }
     });
   };
@@ -595,18 +766,25 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
               {/* Test Button */}
               <button
                 type="button"
-                onClick={() => {
-                  voiceService.speak('Olá! Testando a síntese de voz do Tellus em tempo real.', {
-                    forceProvider: voiceProvider,
-                    referenceId: fishVoiceId,
-                    voiceURI: selectedVoiceUri,
-                    rate: speechRate
-                  });
-                }}
-                className="px-3 py-1 rounded-xl bg-panel hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-[11px] flex items-center space-x-1.5 transition-colors"
+                onClick={handleTestAudio}
+                className={`px-3 py-1.5 rounded-xl border text-[11px] font-medium flex items-center space-x-1.5 transition-all cursor-pointer ${
+                  isTestingAudio
+                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse'
+                    : 'bg-panel hover:bg-card-border border-card-border text-slate-300 hover:text-white'
+                }`}
+                title={isTestingAudio ? 'Parar teste de áudio' : 'Ouvir demonstração da voz selecionada'}
               >
-                <Play className="w-3 h-3 fill-slate-300" />
-                <span>Testar Áudio</span>
+                {isTestingAudio ? (
+                  <>
+                    <Square className="w-3 h-3 fill-rose-400 text-rose-400" />
+                    <span>Parar Teste</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3 h-3 fill-slate-300" />
+                    <span>Testar Áudio</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -754,9 +932,72 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
             </span>
           </div>
 
+          {/* Microphone Diagnostic Alert Banner */}
+          {micErrorMsg && (
+            <div className="w-full max-w-xl mt-4 p-3.5 rounded-2xl bg-amber-950/70 border border-amber-500/60 shadow-xl space-y-1.5 text-xs text-amber-200 relative z-20 animate-in fade-in">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <span className="font-bold text-amber-300 block">Diagnóstico de Microfone do Live Voice:</span>
+                    <p className="text-[11px] leading-relaxed text-amber-100">{micErrorMsg}</p>
+                    <div className="text-[10px] text-amber-300/90 font-mono space-y-0.5 pt-1">
+                      {voiceService.isElectron() ? (
+                        <>
+                          <p>• No Windows: <strong>Configurações &gt; Privacidade e Segurança &gt; Microfone</strong> &gt; Ativar acesso.</p>
+                          <p>• Verifique se o microfone padrão está ativo no Painel de Controle de Som.</p>
+                          <p>• Captura direta por hardware (WASAPI) habilitada no aplicativo desktop.</p>
+                        </>
+                      ) : (
+                        <>
+                          <p>• Clique no ícone de 🔒 (cadeado/permissões) na barra de endereço do navegador.</p>
+                          <p>• Altere <strong>Microfone</strong> para <strong>Permitir</strong>.</p>
+                          <p>• No Windows: <strong>Configurações &gt; Privacidade e Segurança &gt; Microfone</strong> &gt; Ativar acesso.</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMicErrorMsg(null)}
+                  className="p-1 rounded-lg hover:bg-amber-500/20 text-amber-400 hover:text-amber-200 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Real-time Subtitles / Live Transcript Floating Card */}
-          {(currentTranscript || latestAiSpoken || latestAiResponse || latestCreatedNote) && (
+          {(currentTranscript || latestAiSpoken || latestAiResponse || latestCreatedNote || detectedUserTone) && (
             <div className="w-full max-w-xl mt-6 p-4 rounded-2xl bg-card/90 border border-card-border/80 shadow-2xl backdrop-blur-md space-y-2.5 text-xs relative z-10 animate-in fade-in">
+              {/* Detected User Tone Badge */}
+              {detectedUserTone && (
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-card-border/50 text-[11px]">
+                  <div className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-panel border border-card-border/80 text-slate-300 font-mono shadow-xs">
+                    <span>{detectedUserTone.emoji}</span>
+                    <span className="text-slate-400">Tom de voz:</span>
+                    <span className="font-semibold text-accent-light">{detectedUserTone.label}</span>
+                  </div>
+                  {detectedUserTone.type === 'whispering' && (
+                    <span className="text-[10px] text-amber-300 font-medium italic animate-pulse">
+                      🤫 Sussurrando de volta...
+                    </span>
+                  )}
+                  {detectedUserTone.type === 'excited' && (
+                    <span className="text-[10px] text-emerald-300 font-medium italic animate-pulse">
+                      ⚡ Respondendo com energia!
+                    </span>
+                  )}
+                  {detectedUserTone.type === 'calm' && (
+                    <span className="text-[10px] text-cyan-300 font-medium italic">
+                      🌿 Tom sereno e tranquilo
+                    </span>
+                  )}
+                </div>
+              )}
+
               {currentTranscript && (
                 <div className="space-y-0.5">
                   <span className="text-[10px] font-bold uppercase text-purple-300 font-mono flex items-center space-x-1">
@@ -774,7 +1015,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                     <span>Assistente (Fala):</span>
                   </span>
                   <p className="text-slate-100 text-sm font-medium leading-relaxed">
-                    {latestAiSpoken || parseLiveResponse(latestAiResponse).spokenText}
+                    {(latestAiSpoken || parseLiveResponse(latestAiResponse).spokenText).replace(/^\[[a-zA-Z\s_-]+\]\s*/, '')}
                   </p>
                 </div>
               )}
@@ -814,7 +1055,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                         onOpenNote?.(title);
                       }}
                       className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-200 hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all shadow-xs cursor-pointer"
-                      title="Abrir nota no editor do FrankMD Vault"
+                      title="Abrir nota no editor do Notes Module (Vault)"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       <span>Abrir no Vault</span>
@@ -834,6 +1075,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
             onClick={() => {
               const next = !isHandsFree;
               setIsHandsFree(next);
+              isHandsFreeRef.current = next;
               if (!next) stopAll();
               else startListening();
             }}
@@ -896,7 +1138,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                   ? 'bg-emerald-600 border-emerald-500 text-white'
                   : 'bg-panel hover:bg-card-border border-card-border text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer'
               }`}
-              title="Salvar diálogo como nota estruturada no FrankMD Vault"
+              title="Salvar diálogo como nota estruturada no Notes Module (Vault)"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{isSavedToVault ? 'Salvo no Vault!' : 'Salvar no Vault'}</span>

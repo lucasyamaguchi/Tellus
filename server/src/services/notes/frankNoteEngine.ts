@@ -62,6 +62,9 @@ const GLOBAL_NOTES_DIR = OBSIDIAN_VAULT_DIR;
 const BACKUPS_DIR = path.join(OBSIDIAN_VAULT_DIR, '.backups');
 
 export class FrankNoteEngine {
+  public static readonly VAULT_DIR = OBSIDIAN_VAULT_DIR;
+  public static readonly ATTACHMENTS_DIR = path.join(OBSIDIAN_VAULT_DIR, '_attachments');
+
   private static ensureDirs(projectPath?: string) {
     if (!fs.existsSync(GLOBAL_NOTES_DIR)) {
       fs.mkdirSync(GLOBAL_NOTES_DIR, { recursive: true });
@@ -69,6 +72,26 @@ export class FrankNoteEngine {
     if (!fs.existsSync(BACKUPS_DIR)) {
       fs.mkdirSync(BACKUPS_DIR, { recursive: true });
     }
+    if (!fs.existsSync(this.ATTACHMENTS_DIR)) {
+      fs.mkdirSync(this.ATTACHMENTS_DIR, { recursive: true });
+    }
+  }
+
+  // Save an image/file attachment into Vault _attachments folder
+  public static saveAttachment(originalName: string, buffer: Buffer): { filename: string; relativePath: string; urlPath: string; wikilink: string } {
+    this.ensureDirs();
+    const ext = path.extname(originalName) || '.png';
+    const baseName = this.sanitizeName(path.basename(originalName, ext)) || 'imagem';
+    const timestamp = Date.now();
+    const safeFilename = `${baseName}_${timestamp}${ext}`;
+    const targetPath = path.join(this.ATTACHMENTS_DIR, safeFilename);
+    fs.writeFileSync(targetPath, buffer);
+    return {
+      filename: safeFilename,
+      relativePath: `_attachments/${safeFilename}`,
+      urlPath: `/api/notes/attachments/${encodeURIComponent(safeFilename)}`,
+      wikilink: `![[${safeFilename}]]`
+    };
   }
 
   // Extract [[Wikilinks]] from markdown content
@@ -91,12 +114,49 @@ export class FrankNoteEngine {
   // Sanitize path for hierarchical subfolders (e.g. "Carreira/Vaga Data Engineer")
   public static sanitizePath(folderPath: string): string {
     if (!folderPath) return 'Geral';
-    return folderPath
-      .replace(/\\/g, '/')
+    // Normaliza qualquer notação plana com hífen "Caderno - Subpasta" -> "Caderno/Subpasta"
+    let normalized = folderPath.replace(/\\/g, '/').trim();
+    normalized = normalized.replace(/\s+-\s+/g, '/');
+    return normalized
       .split('/')
       .map(part => part.replace(/[<>:"|?*]/g, '_').trim())
       .filter(part => part && part !== '.' && part !== '..')
       .join('/') || 'Geral';
+  }
+
+  // Helper para normalização preventiva de termos em espanhol/portunhol em títulos e pastas
+  public static normalizePortuguese(text: string): string {
+    if (!text) return text;
+    let normalized = text;
+    const replacements: [RegExp, string][] = [
+      [/\bArquitectura\b/gi, 'Arquitetura'],
+      [/\bIntroducción\b/gi, 'Introdução'],
+      [/\bConceptos\b/gi, 'Conceitos'],
+      [/\bFundamentos y\b/gi, 'Fundamentos e'],
+      [/\bEjercicios\b/gi, 'Exercícios'],
+      [/\bProgramación\b/gi, 'Programação'],
+      [/\bConfiguración\b/gi, 'Configuração'],
+      [/\bQué es la\b/gi, 'O que é a'],
+      [/\bQué es el\b/gi, 'O que é o'],
+      [/\bQué son los\b/gi, 'O que são os'],
+      [/\bQué son las\b/gi, 'O que são as'],
+      [/\bPatrones de Diseño\b/gi, 'Padrões de Projeto'],
+      [/\bMicroservicios\b/gi, 'Microsserviços'],
+      [/\bInformación\b/gi, 'Informação'],
+      [/\bComentarios\b/gi, 'Comentários'],
+      [/\bDescripción\b/gi, 'Descrição'],
+      [/\bIntegración\b/gi, 'Integração'],
+      [/\bDocumentación\b/gi, 'Documentação'],
+      [/\bSeguridad\b/gi, 'Segurança'],
+      [/\bGestión\b/gi, 'Gestão'],
+      [/\bAutenticación\b/gi, 'Autenticação'],
+      [/\bAutorización\b/gi, 'Autorização']
+    ];
+
+    for (const [pattern, target] of replacements) {
+      normalized = normalized.replace(pattern, target);
+    }
+    return normalized;
   }
 
   // Extract subject / category from frontmatter or default to "Geral"
@@ -128,8 +188,13 @@ export class FrankNoteEngine {
     const physicalFolder = dirRelative && dirRelative !== '.' ? dirRelative : 'Geral';
 
     const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
-    const subject = subjectMatch ? subjectMatch[1].trim() : physicalFolder;
-    const folder = physicalFolder !== 'Geral' ? physicalFolder : (folderName !== 'Geral' ? folderName : (subject !== 'Geral' ? subject : 'Geral'));
+    let rawSubject = subjectMatch ? subjectMatch[1].trim() : (physicalFolder.includes('/') ? physicalFolder.split('/').slice(1).join('/') : physicalFolder);
+    if (rawSubject.includes(' - ')) {
+      const parts = rawSubject.split(/\s+-\s+/);
+      rawSubject = parts[parts.length - 1];
+    }
+    const subject = this.normalizePortuguese(rawSubject);
+    const folder = this.sanitizePath(physicalFolder !== 'Geral' ? physicalFolder : (folderName !== 'Geral' ? folderName : 'Geral'));
 
     const tags = this.extractTags(content);
     const links = this.extractWikilinks(content);
@@ -194,10 +259,10 @@ export class FrankNoteEngine {
     if (!fs.existsSync(initFlagPath) && notes.length === 0) {
       fs.writeFileSync(initFlagPath, 'true', 'utf-8');
       this.saveNote({
-        title: 'Bem-vindo ao FrankMD Notes',
+        title: 'Bem-vindo ao Notes Module',
         folder: 'Início',
         subject: 'Início',
-        content: `# Bem-vindo ao FrankMD Notes\n\nSistema de anotações seguras baseado no conceito **FrankMD** e no grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian.\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n`,
+        content: `# Bem-vindo ao Notes Module\n\nSistema de anotações seguras baseado no conceito **Frank MD** e na arquitetura **AI-Memory** com suporte ao grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian (\`E:\\Die-Sonne\\Vault\`).\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n- Seus dados permanecem 100% locais e protegidos com sanitização de segredos antes da gravação.\n`,
         isProjectSpecific: false
       });
       return this.listNotes(projectPath);
@@ -228,11 +293,12 @@ export class FrankNoteEngine {
 
     scanFolders(GLOBAL_NOTES_DIR);
 
-    // Also include folders and subjects from all existing notes
+    // Also include folders from all existing notes (do not treat subject as folder)
     const notes = this.listNotes(projectPath);
     for (const note of notes) {
-      if (note.folder && !note.folder.startsWith('.')) folders.add(this.sanitizePath(note.folder));
-      if (note.subject && !note.subject.startsWith('.')) folders.add(this.sanitizePath(note.subject));
+      if (note.folder && !note.folder.startsWith('.')) {
+        folders.add(this.sanitizePath(note.folder));
+      }
     }
 
     return Array.from(folders).filter(f => f && !f.startsWith('.')).sort();
@@ -357,10 +423,11 @@ export class FrankNoteEngine {
   }, projectPath?: string): FrankNote {
     this.ensureDirs(projectPath);
 
-    const safeTitle = data.title.trim() || 'Sem Título';
+    const safeTitle = this.normalizePortuguese(data.title.trim()) || 'Sem Título';
     const id = data.id || safeTitle.toLowerCase().replace(/[^a-z0-9\u00C0-\u00FF]/gi, '-').replace(/-+/g, '-').slice(0, 50);
     const filename = `${id}.md`;
-    const folder = data.folder ? this.sanitizePath(data.folder) : (data.subject ? this.sanitizePath(data.subject) : 'Geral');
+    const rawFolder = data.folder ? this.normalizePortuguese(data.folder) : (data.subject ? this.normalizePortuguese(data.subject) : 'Geral');
+    const folder = this.sanitizePath(rawFolder);
 
     let targetDir = GLOBAL_NOTES_DIR;
     if (folder && folder !== 'Geral') {
@@ -386,9 +453,17 @@ export class FrankNoteEngine {
       console.warn(`[GitSafe Core] Redacted ${sanitizeResult.redactedCount} secret(s) (${sanitizeResult.detectedTypes.join(', ')}) in note: "${safeTitle}"`);
     }
 
-    const subject = data.subject || folder;
+    let subject = data.subject || (folder.includes('/') ? folder.split('/').slice(1).join('/') : folder);
+    if (subject.includes(' - ')) {
+      const parts = subject.split(/\s+-\s+/);
+      subject = parts[parts.length - 1];
+    }
+    subject = this.normalizePortuguese(subject.trim());
+
     if (!finalContent.includes('<!-- subject:')) {
-      finalContent = `<!-- subject: ${subject} -->\n${finalContent}`;
+      finalContent = `<!-- subject: ${folder} -->\n${finalContent}`;
+    } else {
+      finalContent = finalContent.replace(/<!--\s*subject:\s*(.*?)\s*-->/i, `<!-- subject: ${folder} -->`);
     }
 
     fs.writeFileSync(filePath, finalContent, 'utf-8');
@@ -841,3 +916,5 @@ export class FrankNoteEngine {
     return cleanedCount;
   }
 }
+
+export const NotesEngine = FrankNoteEngine;
