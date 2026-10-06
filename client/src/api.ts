@@ -203,6 +203,15 @@ export const api = {
     return res.json();
   },
 
+  async uploadNoteAttachment(filename: string, base64Data: string): Promise<{ filename: string; relativePath: string; urlPath: string; wikilink: string }> {
+    const res = await fetch(`${API_BASE}/notes/upload-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, base64Data })
+    });
+    return res.json();
+  },
+
   async moveNote(id: string, targetFolder: string): Promise<FrankNote> {
     const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(id)}/move`, {
       method: 'POST',
@@ -255,6 +264,20 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Falha na busca ponderada' }));
       throw new Error(err.error || 'Falha na busca de notas');
+    }
+    return res.json();
+  },
+
+  // Export note or notebook directly to OS Downloads folder
+  async exportNoteToDownloads(data: { filename: string; content: string; openFolder?: boolean }): Promise<{ success: boolean; filePath: string; filename: string; downloadsDir: string }> {
+    const res = await fetch(`${API_BASE}/notes/export-to-downloads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao salvar na pasta Downloads' }));
+      throw new Error(err.error || 'Falha ao salvar na pasta Downloads');
     }
     return res.json();
   },

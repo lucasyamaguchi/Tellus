@@ -9,6 +9,73 @@ import { FrankNoteEngine } from './notes/frankNoteEngine.js';
 import { SkillManager } from './skills/skillManager.js';
 import { ProviderHub } from './providers/providerHub.js';
 import { ChatMessage, ToolDefinition } from './providers/openrouter.js';
+import { ConfigManager } from './configManager.js';
+
+// Strict Portunhol / Spanish replacement map for Portuguese responses (especially from DeepSeek)
+const PORTUNHOL_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/\bdesarrollo\b/gi, 'desenvolvimento'],
+  [/\bdesarrollos\b/gi, 'desenvolvimentos'],
+  [/\bdesarrollar\b/gi, 'desenvolver'],
+  [/\bdesarrollando\b/gi, 'desenvolvendo'],
+  [/\bdesarrollador\b/gi, 'desenvolvedor'],
+  [/\bdesarrolladores\b/gi, 'desenvolvedores'],
+  [/\btambien\b/gi, 'também'],
+  [/\bademas\b/gi, 'além disso'],
+  [/\bcarpetas?\b/gi, 'pasta'],
+  [/\barchivos?\b/gi, 'arquivo'],
+  [/\bpantallas?\b/gi, 'tela'],
+  [/\barquitectura\b/gi, 'arquitetura'],
+  [/\barquitecturas\b/gi, 'arquiteturas'],
+  [/\bejercicios?\b/gi, 'exercício'],
+  [/\bpreguntas?\b/gi, 'pergunta'],
+  [/\brespuestas?\b/gi, 'resposta'],
+  [/\bherramientas?\b/gi, 'ferramenta'],
+  [/\bcrear\b/gi, 'criar'],
+  [/\bhacer\b/gi, 'fazer'],
+  [/\bhaciendo\b/gi, 'fazendo'],
+  [/\bhecho\b/gi, 'feito'],
+  [/\bguardar\b/gi, 'salvar'],
+  [/\busted\b/gi, 'você'],
+  [/\bustedes\b/gi, 'vocês'],
+  [/\bdespues\b/gi, 'depois'],
+  [/\bentonces\b/gi, 'então'],
+  [/\bpero\b/gi, 'mas'],
+  [/\bcodigo\b/gi, 'código'],
+  [/\bcodigos\b/gi, 'códigos'],
+  [/\bseguridad\b/gi, 'segurança'],
+  [/\bcomunicacion\b/gi, 'comunicação'],
+  [/\bconfiguracion\b/gi, 'configuração'],
+  [/\bfuncionalidad\b/gi, 'funcionalidade'],
+  [/\bfuncionalidades\b/gi, 'funcionalidades'],
+  [/\bautenticacion\b/gi, 'autenticação'],
+  [/\bautorizacion\b/gi, 'autorização'],
+  [/\bvalidacion\b/gi, 'validação'],
+  [/\boptimizacion\b/gi, 'otimização'],
+  [/\bintroduccion\b/gi, 'introdução'],
+  [/\bconclusiones\b/gi, 'conclusões'],
+  [/\bconclusion\b/gi, 'conclusão'],
+  [/\bejecutar\b/gi, 'executar'],
+  [/\bejecucion\b/gi, 'execução'],
+  [/\bdiseno\b/gi, 'design'],
+  [/\binterfaz\b/gi, 'interface'],
+  [/\binterfaces\b/gi, 'interfaces'],
+  [/\busuario\b/gi, 'usuário'],
+  [/\busuarios\b/gi, 'usuários']
+];
+
+export function sanitizePortugueseText(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+  let sanitized = text;
+  for (const [pattern, replacement] of PORTUNHOL_REPLACEMENTS) {
+    sanitized = sanitized.replace(pattern, (match) => {
+      if (match[0] === match[0].toUpperCase()) {
+        return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+      }
+      return replacement;
+    });
+  }
+  return sanitized;
+}
 
 export const AGENT_TOOLS: ToolDefinition[] = [
   {
@@ -196,15 +263,33 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'note_save',
+      description: 'Cria ou atualiza uma anotação estruturada no Notes Module / Obsidian Vault dentro de um Caderno e Subpasta especificados com wikilinks [[Nota]] e tags #tag.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Título claro da nota em português (sem espanhol)' },
+          folder: { type: 'string', description: 'Caminho hierárquico do Caderno e Subpasta no cofre usando barras (ex: "Estudos/Arquitetura de Software", "Carreira/Nestle"). NUNCA use hífen como separador de pasta!' },
+          subject: { type: 'string', description: 'Assunto ou tema principal da nota' },
+          content: { type: 'string', description: 'Conteúdo em Markdown com wikilinks [[Outra Nota]] e #tags' },
+          is_project_specific: { type: 'boolean', description: 'Se true salva no projeto atual, se false salva no cofre global' }
+        },
+        required: ['title', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'frank_note_save',
-      description: 'Cria ou atualiza uma nota segura no sistema FrankMD / Obsidian Vault dentro de um Caderno e Subpasta especificados com wikilinks [[Nota]] e tags #tag.',
+      description: '[Alias de compatibilidade legado para note_save] Cria ou atualiza uma anotação no Notes Module.',
       parameters: {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Título claro da nota' },
-          folder: { type: 'string', description: 'Caminho do Caderno e Subpasta no cofre (ex: "Carreira/Nestle", "Estudos/SPREGULA", "Caderno de Anotações/Manuscritos")' },
+          folder: { type: 'string', description: 'Caminho do Caderno e Subpasta no cofre' },
           subject: { type: 'string', description: 'Assunto ou tema principal da nota' },
-          content: { type: 'string', description: 'Conteúdo em Markdown com wikilinks [[Outra Nota]] e #tags' },
+          content: { type: 'string', description: 'Conteúdo em Markdown' },
           is_project_specific: { type: 'boolean', description: 'Se true salva no projeto atual, se false salva no cofre global' }
         },
         required: ['title', 'content']
@@ -322,13 +407,26 @@ export class AgentLoop {
           );
           return { status: 'success', artifact: { id: artifact.id, title: artifact.title, path: artifact.relativePath } };
         }
+        case 'note_save':
         case 'frank_note_save': {
-          const folder = args.folder || args.subject || 'Geral';
+          const cfg = ConfigManager.getConfig();
+          const isPt = (cfg.locale || 'pt-BR').startsWith('pt');
+          let rawFolder = (args.folder || args.subject || 'Geral').replace(/\\/g, '/').trim();
+          rawFolder = rawFolder.replace(/\s+-\s+/g, '/');
+          const cleanTitle = isPt ? sanitizePortugueseText(args.title) : args.title;
+          const cleanFolder = isPt ? sanitizePortugueseText(rawFolder) : rawFolder;
+          let rawSubject = args.subject || (cleanFolder.includes('/') ? cleanFolder.split('/').slice(1).join('/') : cleanFolder);
+          if (rawSubject.includes(' - ')) {
+            const parts = rawSubject.split(/\s+-\s+/);
+            rawSubject = parts[parts.length - 1];
+          }
+          const cleanSubject = isPt ? sanitizePortugueseText(rawSubject) : rawSubject;
+          const cleanContent = isPt ? sanitizePortugueseText(args.content) : args.content;
           const note = FrankNoteEngine.saveNote({
-            title: args.title,
-            folder,
-            subject: args.subject || folder,
-            content: args.content,
+            title: cleanTitle,
+            folder: cleanFolder,
+            subject: cleanSubject,
+            content: cleanContent,
             isProjectSpecific: args.is_project_specific
           }, projectPath);
           return { 
@@ -336,7 +434,7 @@ export class AgentLoop {
             note: { 
               id: note.id, 
               title: note.title, 
-              folder: note.folder,
+              folder: note.folder, 
               subject: note.subject,
               relativePath: note.relativePath 
             } 
@@ -376,7 +474,13 @@ export class AgentLoop {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
     const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
     
-    // 1. Dynamic User Language Detection:
+    // 1. Language Harness based on Configuration & Input:
+    const config = ConfigManager.getConfig();
+    const configuredLocale = config.locale || 'pt-BR';
+    const configuredLanguage = config.language || 'Português (Brasil)';
+    const configuredCountry = config.country || 'Brasil';
+    const isStrict = config.enforceStrictLanguage !== false;
+
     const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
     let userText = '';
     if (typeof lastUserMsg?.content === 'string') {
@@ -385,39 +489,74 @@ export class AgentLoop {
       userText = lastUserMsg.content.map(p => p.text || '').join(' ');
     }
 
-    const isEnglish = /\b(the|and|is|are|please|write|create|solve|how|what|why|code)\b/i.test(userText) && !/\b(você|para|como|quero|estudar|anote|vaga|não|com|de|em)\b/i.test(userText);
-    const isSpanishExplicit = /\b(quiero|estudiar|anota|esto|por favor|prueba|preguntas)\b/i.test(userText) && !/\b(você|para|como|quero|anote|vaga|não|com|de|em|estudos)\b/i.test(userText);
-    
-    let targetLanguage = 'PORTUGUÊS DO BRASIL (pt-BR)';
-    if (isEnglish) targetLanguage = 'INGLÊS (English)';
-    else if (isSpanishExplicit) targetLanguage = 'ESPANHOL (Español)';
+    const isTargetPortuguese = configuredLocale.startsWith('pt') || configuredLanguage.toLowerCase().includes('portugu');
+    let targetLanguage = configuredLanguage;
+    let targetLocale = configuredLocale;
+    if (!isStrict) {
+      const isEnglishOnly = /\b(the|and|is|are|please|write|create|solve|how|what|why|code)\b/i.test(userText) && !/\b(você|para|como|quero|estudar|anote|vaga|não|com|de|em|olá|oi|bom|boa)\b/i.test(userText);
+      if (isEnglishOnly) {
+        targetLanguage = 'INGLÊS (English - en-US)';
+        targetLocale = 'en-US';
+      }
+    }
 
     // Dynamic Language Enforcement Anchor:
-    const languageAnchor = `[🌐 DIRETRIZ MANDATÓRIA DE IDIOMA - RECONHECIMENTO DINÂMICO]
-- IDIOMA DE ENTRADA DO USUÁRIO IDENTIFICADO: **${targetLanguage}**.
-- Você DEVE OBRIGATORIAMENTE responder, dialogar, explicar e redigir TODAS as anotações, planos de estudo, cadernos e notas do FrankMD estritamente no idioma de entrada: **${targetLanguage}**.
-- SE O USUÁRIO ESCREVEU EM PORTUGUÊS, É ESTRITAMENTE PROIBIDO RESPONDER OU GERAR ARQUIVOS EM ESPANHOL OU PORTUNHOL!
-- Ignore e rejeite qualquer contaminação linguística de mensagens antigas do histórico que tenham sido redigidas em outro idioma.
-- NUNCA use termos em espanhol como "preguntas", "análisis", "derecho", "orzamento", "desconhecimento" se o idioma for português; use sempre os termos corretos da língua portuguesa ("questões", "análise", "direito", "orçamento", etc.).`;
+    const languageAnchor = `[🚨 HARNESS OFICIAL E MANDATÓRIA DE IDIOMA E REGIONALIZAÇÃO TELLUS - ZERO TOLERÂNCIA A PORTUNHOL/ESPANHOL]
+- IDIOMA OFICIAL MANDATÓRIO CONFIGURADO PELO USUÁRIO: **${targetLanguage}** (Locale: ${targetLocale}, Regionalização: ${configuredCountry}).
+${isTargetPortuguese ? `- DIRETRIZ CRÍTICA PARA MODELOS DEEPSEEK (V3, V4, R1) E OUTROS MODELOS MULTILÍNGUES:
+  Modelos DeepSeek frequentemente contaminam respostas em português com termos em espanhol. ISTO É TERMINANTEMENTE PROIBIDO NESTE SISTEMA!
+  - NUNCA use termos em espanhol como: "desarrollo", "tambien", "pero", "ademas", "hacer", "pantalla", "archivo", "carpeta", "arquitectura", "ejercicios", "preguntas", "codigo", "requisitos".
+  - SEMPRE use português brasileiro legítimo: "desenvolvimento", "também", "mas / porém", "além disso", "fazer", "tela", "arquivo", "pasta", "arquitetura", "exercícios", "perguntas", "código", "requisitos".
+  - 100% de todas as palavras, explicações, saídas, raciocínios (deep thought/reasoning), títulos de notas, nomes de pastas e chamadas de ferramenta devem ser em ${targetLanguage}.` : `- VOCÊ DEVE RESPONDER 100% NO IDIOMA OFICIAL: **${targetLanguage}** (${targetLocale}).
+  Todas as explicações, raciocínios, anotações, títulos e respostas devem seguir rigorosamente o idioma configurado.`}
+- Toda e qualquer nota deve ser salva chamando a ferramenta 'note_save' com o título e a pasta no idioma oficial configurado.
+- Ignore e rejeite qualquer contaminação linguística de mensagens antigas do histórico que tenham sido redigidas em outro idioma.`;
 
     // Handwritten Notebook OCR & Visual Note-Taking Policy
     const handwrittenOcrPolicy = `[📸 RECONHECIMENTO DE FOTOS DE CADERNO E ANOTAÇÕES MANUSCRITAS ("Anote Isso")]
 - Quando o usuário anexar uma foto de caderno, anotação manuscrita, lousa ou papel e pedir para "anotar", "anote isso", "digitalizar", "transcrever" ou "salvar nas notas":
   1. Realize OCR visual minucioso da caligrafia, transcrevendo com precisão o texto manuscrito para Markdown estruturado e limpo.
   2. Preserve fórmulas matemáticas em LaTeX ($...$ ou $$...$$), diagramas (em Mermaid ou blocos de código), tabelas, títulos e listas com marcadores.
-  3. Salve AUTOMATICAMENTE a anotação transcrita chamando a ferramenta 'frank_note_save', escolhendo um título expressivo e direcionando para o Caderno apropriado (ex: folder: "Caderno de Anotações/Manuscritos" ou "Estudos/Anotações à Mão").
-  4. Responda no chat em português confirmando a digitalização com um resumo objetivo e o link clicável da nota criada.`;
+  3. Salve AUTOMATICAMENTE a anotação transcrita chamando a ferramenta 'note_save', escolhendo um título expressivo e direcionando para o Caderno apropriado (ex: folder: "Caderno de Anotações/Manuscritos" ou "Estudos/Anotações à Mão").
+  4. Responda no chat no idioma oficial (${targetLanguage}) confirmando a digitalização com um resumo objetivo e o link clicável da nota criada.`;
 
     // Notebooks & Subfolders System Guidelines
-    const notebooksPolicy = `[📓 SISTEMA DE CADERNOS (NOTEBOOKS) E SUBPASTAS DO FRANKMD VAULT]
+    const notebooksPolicy = `[📓 SISTEMA DE CADERNOS (NOTEBOOKS) E SUBPASTAS DO NOTES MODULE VAULT]
 - O cofre é organizado na hierarquia: CADERNO (Pasta Principal) ➔ SUBPASTA ➔ NOTA.
-- Sempre que criar notas com 'frank_note_save', defina o parâmetro 'folder' com a estrutura "Caderno/Subpasta" (ex: "Carreira/Vaga Nestle", "Estudos/SPREGULA", "Caderno de Anotações/Manuscritos").`;
+- Sempre que criar notas com 'note_save', defina o parâmetro 'folder' com a estrutura "Caderno/Subpasta" (ex: "Carreira/Vaga Nestle", "Estudos/Arquitetura de Software", "Caderno de Anotações/Manuscritos").`;
 
-    // Strict Deleted Notes & Live Vault State Guidelines
-    const deletedNotesPolicy = `[🗑️ DIRETRIZ MANDATÓRIA DE NOTAS EXCLUÍDAS E ESTADO ATIVO DO VAULT]
-- Verificação de Existência Real: NUNCA presuma que arquivos, roteiros, cadernos de estudo ou pacotes de candidatura (ex: aplicacao-nestle/, cadernos de concurso, etc.) já estão prontos apenas porque constam em mensagens antigas do chat.
-- Notas Excluídas são INATIVAS / NÃO CONCLUÍDAS: Se o usuário reenviar um pedido de estudo ou candidatura para uma vaga/conteúdo cujo diretório ou notas foram excluídos, desconsidere o material antigo e crie um NOVO roteiro, plano de estudos, atividades e módulos do zero no Vault ativo.
-- Consulta sobre Notas Excluídas: Se o usuário perguntar especificamente sobre uma nota, roteiro ou assunto que foi excluído, consulte o histórico de exclusões e informe claramente quando foi excluída, o contexto do arquivo e por que pode ser útil mantê-la ou restaurá-la.`;
+    // Strict Deleted Notes & Live Vault State Guidelines with Real Vault Inspection
+    const activeNotes = FrankNoteEngine.listNotes(projectPath);
+    const activeNotesSummary = activeNotes.length > 0 
+      ? activeNotes.map(n => `- "${n.title}" (Pasta: ${n.folder || 'Geral'})`).join('\n')
+      : '(Nenhuma nota ativa no Vault no momento)';
+
+    const deletedNotesPolicy = `[🛡️ VERIFICAÇÃO MANDATÓRIA DE NOTAS ATIVAS NO COFRE DO OBSIDIAN/TELLUS]
+- LISTA REAL E ATUALIZADA DE NOTAS ATIVAS NO VAULT NESTE MOMENTO:
+${activeNotesSummary}
+
+REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
+1. SE NÃO HÁ NOTAS ATIVAS NO VAULT PARA O TEMA SOLICITADO:
+   - Se o usuário pedir para aprender ou estudar um assunto (ex: "quero aprender arquitetura de software", "quero estudar X", "preparação para vaga Y"):
+     NUNCA presuma que já existe um plano pronto, roteiro em andamento ou módulo concluído/iniciado!
+     MESMO QUE mensagens antigas do histórico ou o bloco de active_context mencionem anotações ou módulos anteriores, se essas notas NÃO constam na lista de NOTAS ATIVAS acima, significa que o usuário EXCLUIU o material e quer RECOMEÇAR ou CRIAR UM PLANO NOVO!
+   - É TOTALMENTE PROIBIDO dizer frases como: "Ótimo! Já começamos pelo Módulo 01...", "Como já temos o plano feito...", "Continuando de onde paramos...".
+   - Você DEVE tratar o tema como um NOVO ESTUDO / NOVO PLANO, propor a trilha e CRIAR NOTAS ATIVAS NOVAS chamando a ferramenta 'note_save' (ou 'frank_note_save').
+2. NOTAS EXCLUÍDAS (.backups) NÃO SÃO ATIVAS:
+   - Arquivos na lixeira (.backups) são considerados INEXISTENTES para o fluxo de estudo atual. Nunca espere respostas de microtarefas de notas que já foram excluídas.
+   - Só consulte ou mencione arquivos excluídos se o usuário perguntar expressamente: "o que foi para a lixeira?", "posso restaurar o que apaguei?". Caso contrário, crie notas novas ativas no Vault.
+3. DISPARO IMEDIATO DO MOTOR DE ENSINO ("QUERO APRENDER..." + "DO ZERO" / INICIANTE):
+   - Se o usuário pediu para aprender ou estudar um assunto ("quero aprender [X]", "vamos estudar Y", "quero me preparar para vaga Z", "concurso para W") E na sequência disser "do zero", "comece do zero", "quero do zero", "iniciante", "pode começar", "vamos lá", "sim", "bora":
+     VOCÊ DEVE ATIVAR IMEDIATAMENTE O PROTOCOLO DO MOTOR UNIVERSAL DE ESTUDO ESQUEMATIZADO ('tellus-study-engine') NESTA MESMA RESPOSTA!
+   - É PROIBIDO continuar enrolando no chat com novas perguntas ou textos soltos sem criar as notas!
+   - EXECUÇÃO MANDATÓRIA NESTE TURNO (ROADMAMP COMPLETO + SEM FATIAMENTO + ANTI-INFODUMP):
+     a) Crie imediatamente a subpasta 'Estudos/[Assunto]' (ou 'Carreira/Vaga - [Cargo]') chamando a ferramenta 'note_save' (ou 'frank_note_save') com a ESTRUTURA COMPLETA:
+        - '00_Roadmap_e_Ementa_Geral': Raio-X geral, checklist de todos os módulos (- [ ] [[Modulo_01_...]]) e referências oficiais/bancas de questões.
+        - 'Modulo_01_[Tema]', 'Modulo_02_[Tema]' ... 'Modulo_N_[Tema]': Todos os módulos com conteúdo em ALTA DENSIDADE ESQUEMATIZADA (mapas conceituais, tabelas comparativas, regras essenciais, mnemônicos e avisos de pegadinha da banca/pontos de quebra — ZERO prosa prolixa acadêmica!).
+        - 'Caderno_de_Questoes_e_Atividades': Questões e atividades práticas 100% ACOPLADAS tópico a tópico (situações hipotéticas de concurso ou cenários reais de engenharia com gabarito justificado ao final).
+        * NUNCA faça conteúdo picado ou retenha módulos futuros! Entregue o material completo para livre navegação.
+     b) No chat: Apresente em 2 parágrafos a visão panorâmica do Roadmap, confirme as notas completas criadas no Vault com wikilinks, dê uma síntese esquematizada do Módulo 01 e destaque as primeiras questões para aquecimento.
+     c) Dê autonomia ao aluno para resolver no chat, pedir aprofundamento ou avançar pelas notas no Vault no seu próprio ritmo!`;
 
     const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
@@ -472,12 +611,14 @@ export class AgentLoop {
           AGENT_TOOLS,
           {
             onContentChunk: (chunk) => {
-              assistantContent += chunk;
-              onEvent({ type: 'content', data: chunk });
+              const processedChunk = isTargetPortuguese ? sanitizePortugueseText(chunk) : chunk;
+              assistantContent += processedChunk;
+              onEvent({ type: 'content', data: processedChunk });
             },
             onReasoningChunk: (chunk) => {
-              assistantReasoning += chunk;
-              onEvent({ type: 'reasoning', data: chunk });
+              const processedChunk = isTargetPortuguese ? sanitizePortugueseText(chunk) : chunk;
+              assistantReasoning += processedChunk;
+              onEvent({ type: 'reasoning', data: processedChunk });
             },
             onToolCalls: (tcs) => {
               toolCalls = tcs;

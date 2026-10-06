@@ -53,38 +53,109 @@ import {
   PenTool,
   Camera,
   LayoutGrid,
-  Home
+  Home,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  CheckSquare,
+  Image as ImageIcon,
+  Palette,
+  Highlighter,
+  Quote,
+  Code,
+  Table as TableIcon,
+  Minus,
+  ArrowUp,
+  ArrowDown,
+  ListTree,
+  Smile,
+  ArrowUpDown,
+  Mic,
+  Radio,
+  Loader2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { FrankNote, GraphData, DeletedNoteItem, GitSafeAuditReport } from '../types';
 import { api } from '../api';
 import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
 import { SmartDropzoneModal } from './SmartDropzoneModal';
+import { CreditsModal } from './CreditsModal';
+import { downloadNoteInFormat, downloadFormattedNotebook, ExportFormat, markdownToEditorHtml, editorHtmlToMarkdown } from '../utils/noteFormatter';
+
+const TEXT_COLORS = [
+  { name: 'Padrão', hex: '#f8fafc', bg: 'bg-slate-200' },
+  { name: 'Âmbar', hex: '#f59e0b', bg: 'bg-amber-500' },
+  { name: 'Dourado', hex: '#eab308', bg: 'bg-yellow-500' },
+  { name: 'Esmeralda', hex: '#10b981', bg: 'bg-emerald-500' },
+  { name: 'Azul Céu', hex: '#38bdf8', bg: 'bg-sky-400' },
+  { name: 'Púrpura', hex: '#a855f7', bg: 'bg-purple-500' },
+  { name: 'Magenta', hex: '#ec4899', bg: 'bg-pink-500' },
+  { name: 'Coral', hex: '#f43f5e', bg: 'bg-rose-500' },
+];
+
+const HIGHLIGHT_COLORS = [
+  { name: 'Amarelo', bg: 'rgba(234, 179, 8, 0.25)', text: '#fef08a', circle: 'bg-yellow-400' },
+  { name: 'Verde', bg: 'rgba(16, 185, 129, 0.25)', text: '#a7f3d0', circle: 'bg-emerald-400' },
+  { name: 'Azul', bg: 'rgba(56, 189, 248, 0.25)', text: '#bae6fd', circle: 'bg-sky-400' },
+  { name: 'Roxo', bg: 'rgba(168, 85, 247, 0.25)', text: '#e9d5ff', circle: 'bg-purple-400' },
+  { name: 'Laranja', bg: 'rgba(249, 115, 22, 0.25)', text: '#fed7aa', circle: 'bg-orange-400' },
+  { name: 'Rosa', bg: 'rgba(236, 72, 153, 0.25)', text: '#fbcfe8', circle: 'bg-pink-400' },
+];
+
+const EMOJI_PRESETS = ['📝', '🧠', '💡', '📚', '🎯', '⚡', '🚀', '💻', '📌', '🔬', '🎨', '💼', '📊', '🔥', '🏆', '⭐'];
+
+interface NoteSectionBlock {
+  id: string;
+  heading: string;
+  level: number;
+  content: string;
+}
 
 interface FrankNoteViewProps {
   onMentionInChat?: (note: FrankNote) => void;
   onStudyTopic?: (topic: string) => void;
   onReturnToAgent?: () => void;
   targetNoteIdOrTitle?: string | null;
+  onStartLiveVoice?: (topic: string, initialContent?: string) => void;
+  onSearchInNewChat?: (query: string) => void;
 }
 
 export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   onMentionInChat,
   onStudyTopic,
   onReturnToAgent,
-  targetNoteIdOrTitle
+  targetNoteIdOrTitle,
+  onStartLiveVoice,
+  onSearchInNewChat
 }) => {
   const [notes, setNotes] = useState<FrankNote[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [collapsedFolders, setCollapsedFolders] = useState<{ [f: string]: boolean }>({});
+  const [isSingleNotebookMode, setIsSingleNotebookMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('notes_single_notebook_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isCreditsOpen, setIsCreditsOpen] = useState<boolean>(false);
   const [activeNote, setActiveNote] = useState<FrankNote | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedFolderFilter, setSelectedFolderFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'editor' | 'graph'>('editor');
   
-  // Note View Mode: 'preview' (Default) vs 'edit'
-  const [noteViewMode, setNoteViewMode] = useState<'preview' | 'edit'>('preview');
+  // Note Editor: Canvas 100% formatado e visual (Markdown é puramente de background)
+  const editableContainerRef = useRef<HTMLDivElement | null>(null);
+  const currentLoadedNoteIdRef = useRef<string | null>(null);
+  const saveDebounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sidebar Tab: 'folders' (Active Notes) vs 'trash' (Deleted Notes)
   const [sidebarTab, setSidebarTab] = useState<'folders' | 'trash'>('folders');
@@ -97,9 +168,277 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [editTitle, setEditTitle] = useState<string>('');
   const [editFolder, setEditFolder] = useState<string>('Geral');
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Rich Document Refs & Popover States
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const colorPickerRef = useRef<HTMLDivElement | null>(null);
+  const floatingColorPickerRef = useRef<HTMLDivElement | null>(null);
+  const highlightPickerRef = useRef<HTMLDivElement | null>(null);
+  const floatingHighlightPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Export dropdown & notification toast
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportToast, setExportToast] = useState<{ message: string; filename?: string } | null>(null);
+  const floatingBarRef = useRef<HTMLDivElement | null>(null);
+
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState<boolean>(false);
+  const [isHighlightPickerOpen, setIsHighlightPickerOpen] = useState<boolean>(false);
+  const [isFloatingColorPickerOpen, setIsFloatingColorPickerOpen] = useState<boolean>(false);
+  const [isFloatingHighlightPickerOpen, setIsFloatingHighlightPickerOpen] = useState<boolean>(false);
+  const [isReorderModalOpen, setIsReorderModalOpen] = useState<boolean>(false);
+  const [isWikilinkModalOpen, setIsWikilinkModalOpen] = useState<boolean>(false);
+  const [wikilinkSearch, setWikilinkSearch] = useState<string>('');
+  const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
+  const [noteEmoji, setNoteEmoji] = useState<string>('📝');
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState<boolean>(false);
+  const [notebookSortOrder, setNotebookSortOrder] = useState<'name' | 'recent' | 'count'>('name');
+
+  // Fechar caixas suspensas e paletas ao clicar fora ou no texto da nota
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (isColorPickerOpen && colorPickerRef.current && !colorPickerRef.current.contains(target)) {
+        setIsColorPickerOpen(false);
+      }
+      if (isHighlightPickerOpen && highlightPickerRef.current && !highlightPickerRef.current.contains(target)) {
+        setIsHighlightPickerOpen(false);
+      }
+      if (isFloatingColorPickerOpen && floatingColorPickerRef.current && !floatingColorPickerRef.current.contains(target)) {
+        setIsFloatingColorPickerOpen(false);
+      }
+      if (isFloatingHighlightPickerOpen && floatingHighlightPickerRef.current && !floatingHighlightPickerRef.current.contains(target)) {
+        setIsFloatingHighlightPickerOpen(false);
+      }
+      if (isEmojiPickerOpen && emojiPickerRef.current && !emojiPickerRef.current.contains(target)) {
+        setIsEmojiPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isColorPickerOpen, isHighlightPickerOpen, isFloatingColorPickerOpen, isFloatingHighlightPickerOpen, isEmojiPickerOpen]);
+
+  const fetchNotesAndFolders = async () => {
+    try {
+      const [notesList, foldersList] = await Promise.all([
+        api.listNotes(),
+        api.listFolders()
+      ]);
+      setNotes(notesList);
+      setFolders(foldersList);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Sincroniza o HTML do editor formatado de volta para Markdown limpo para salvar no Vault em background
+  const syncEditorToMarkdownAndSave = useCallback((overrideMd?: string) => {
+    let md = overrideMd;
+    if (md === undefined && editableContainerRef.current) {
+      const html = editableContainerRef.current.innerHTML;
+      md = editorHtmlToMarkdown(html);
+    }
+    if (md !== undefined) {
+      setEditContent(md);
+      if (saveDebounceTimeoutRef.current) clearTimeout(saveDebounceTimeoutRef.current);
+      saveDebounceTimeoutRef.current = setTimeout(async () => {
+        if (!activeNote) return;
+        try {
+          setIsSaving(true);
+          const updated = await api.saveNote({
+            id: activeNote.id,
+            title: editTitle,
+            folder: editFolder,
+            subject: editFolder,
+            content: md,
+            isProjectSpecific: activeNote.isProjectSpecific
+          });
+          setActiveNote(updated);
+          setLastSavedTime(new Date());
+          fetchNotesAndFolders();
+        } catch (err) {
+          console.error('Falha no auto-save da nota:', err);
+        } finally {
+          setIsSaving(false);
+        }
+      }, 800);
+    }
+  }, [activeNote, editTitle, editFolder]);
+
+  const insertImageAtCursor = useCallback((url: string, alt: string) => {
+    if (editableContainerRef.current) {
+      const imgHtml = `<img src="${url}" alt="${alt}" class="rounded-2xl max-h-[460px] w-auto max-w-full my-4 border border-card-border/80 shadow-2xl object-contain" style="max-width: 100%; border-radius: 12px; margin: 12px 0; display: block;" /><p><br></p>`;
+      editableContainerRef.current.focus();
+      document.execCommand('insertHTML', false, imgHtml);
+      syncEditorToMarkdownAndSave();
+    } else {
+      const mdImg = `\n![${alt}](${url})\n`;
+      setEditContent(prev => prev + mdImg);
+      syncEditorToMarkdownAndSave(editContent + mdImg);
+    }
+  }, [editContent, syncEditorToMarkdownAndSave]);
+
+  const handleImageUpload = useCallback(async (file: File) => {
+    if (!file) return;
+    setIsUploadingImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+        const res = await api.uploadNoteAttachment(file.name, base64);
+        insertImageAtCursor(res.urlPath, file.name.replace(/\.[^.]+$/, ''));
+        setIsUploadingImage(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Falha ao subir imagem:', err);
+      alert('Erro ao enviar imagem: ' + (err.message || 'Falha de upload'));
+      setIsUploadingImage(false);
+    }
+  }, [insertImageAtCursor]);
+
+  const handleEditorPasteFormatted = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const file = e.clipboardData.files[0];
+      if (file.type.startsWith('image/')) {
+        e.preventDefault();
+        handleImageUpload(file);
+      }
+    }
+  }, [handleImageUpload]);
+
+  const handleEditorDropFormatted = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleImageUpload(file);
+      }
+    }
+  }, [handleImageUpload]);
+
+  const handleEditorInput = useCallback(() => {
+    if (editableContainerRef.current) {
+      const html = editableContainerRef.current.innerHTML;
+      const md = editorHtmlToMarkdown(html);
+      setEditContent(md);
+      syncEditorToMarkdownAndSave(md);
+    }
+  }, [syncEditorToMarkdownAndSave]);
+
+  const handleEditorClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+
+    // Checkbox toggle (- [ ] <-> - [x])
+    if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
+      const checkbox = target as HTMLInputElement;
+      const taskRow = checkbox.closest('.note-task-row') || checkbox.closest('li') || checkbox.parentElement;
+      const span = taskRow?.querySelector('span');
+      if (span) {
+        if (checkbox.checked) {
+          span.classList.add('line-through', 'text-slate-400');
+          taskRow?.classList.add('opacity-70');
+        } else {
+          span.classList.remove('line-through', 'text-slate-400');
+          taskRow?.classList.remove('opacity-70');
+        }
+      }
+      setTimeout(() => {
+        if (editableContainerRef.current) {
+          const html = editableContainerRef.current.innerHTML;
+          const md = editorHtmlToMarkdown(html);
+          setEditContent(md);
+          syncEditorToMarkdownAndSave(md);
+        }
+      }, 20);
+      return;
+    }
+
+    // Wikilink Click
+    const wikilinkEl = target.closest('[data-wikilink]') as HTMLElement;
+    if (wikilinkEl) {
+      const noteName = wikilinkEl.getAttribute('data-wikilink');
+      if (noteName) {
+        const found = notes.find(n => n.title.toLowerCase() === noteName.toLowerCase() || n.id.toLowerCase() === noteName.toLowerCase());
+        if (found) {
+          selectNote(found);
+        }
+      }
+    }
+  }, [notes, syncEditorToMarkdownAndSave]);
+
+
+  // Section / Block Reordering Logic
+  const parseMarkdownSections = useCallback((markdown: string): NoteSectionBlock[] => {
+    if (!markdown) return [];
+    const lines = markdown.split('\n');
+    const sections: NoteSectionBlock[] = [];
+    let currentHeading = 'Introdução';
+    let currentLevel = 0;
+    let currentLines: string[] = [];
+    let sectionIndex = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const match = line.match(/^(#{1,4})\s+(.+)/);
+      if (match) {
+        if (currentLines.length > 0 || currentHeading !== 'Introdução') {
+          sections.push({
+            id: `sec-${sectionIndex++}`,
+            heading: currentHeading,
+            level: currentLevel,
+            content: currentLines.join('\n').trim()
+          });
+          currentLines = [];
+        }
+        currentLevel = match[1].length;
+        currentHeading = match[2].trim();
+      } else {
+        currentLines.push(line);
+      }
+    }
+
+    if (currentLines.length > 0 || currentHeading) {
+      sections.push({
+        id: `sec-${sectionIndex++}`,
+        heading: currentHeading,
+        level: currentLevel,
+        content: currentLines.join('\n').trim()
+      });
+    }
+
+    return sections;
+  }, []);
+
+  const moveSection = useCallback((index: number, direction: 'up' | 'down') => {
+    const sections = parseMarkdownSections(editContent);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= sections.length) return;
+
+    const temp = sections[index];
+    sections[index] = sections[targetIndex];
+    sections[targetIndex] = temp;
+
+    const newMarkdown = sections.map(s => {
+      if (s.level === 0) {
+        return s.content;
+      }
+      const hashes = '#'.repeat(s.level);
+      return `${hashes} ${s.heading}\n\n${s.content}`.trim();
+    }).join('\n\n');
+
+    setEditContent(newMarkdown);
+  }, [editContent, parseMarkdownSections]);
 
   // Graph Controls State (Obsidian Style)
   const [graphShowFolders, setGraphShowFolders] = useState<boolean>(true);
@@ -173,32 +512,31 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     });
   }, []);
 
-  // Edit Mode Resizable Split
-  const [editSplitRatio, setEditSplitRatio] = useState<number>(50); // percentage (default 50%)
-  const [editSplitMode, setEditSplitMode] = useState<'both' | 'editor' | 'preview'>('both');
-  const [isDraggingEditSplit, setIsDraggingEditSplit] = useState<boolean>(false);
-  const editContainerRef = useRef<HTMLDivElement | null>(null);
+  const normalizeFolderPath = useCallback((p?: string | null): string => {
+    if (!p) return 'Geral';
+    return p.replace(/\\/g, '/').replace(/\s+-\s+/g, '/').trim() || 'Geral';
+  }, []);
 
-  // Mouse Drag Handlers for Resizing
+  const getNoteFolder = useCallback((n?: { folder?: string; subject?: string } | null): string => {
+    if (!n) return 'Geral';
+    const raw = n.folder || 'Geral';
+    return normalizeFolderPath(raw);
+  }, [normalizeFolderPath]);
+
+  // Mouse Drag Handlers for Resizing Sidebar
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isDraggingSidebar) {
       const newWidth = Math.min(Math.max(e.clientX, 220), 650);
       setSidebarWidth(newWidth);
-    } else if (isDraggingEditSplit && editContainerRef.current) {
-      const rect = editContainerRef.current.getBoundingClientRect();
-      const relativeX = e.clientX - rect.left;
-      const percentage = Math.min(Math.max((relativeX / rect.width) * 100, 20), 80);
-      setEditSplitRatio(percentage);
     }
-  }, [isDraggingSidebar, isDraggingEditSplit]);
+  }, [isDraggingSidebar]);
 
   const handleMouseUp = useCallback(() => {
     setIsDraggingSidebar(false);
-    setIsDraggingEditSplit(false);
   }, []);
 
   useEffect(() => {
-    if (isDraggingSidebar || isDraggingEditSplit) {
+    if (isDraggingSidebar) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
     } else {
@@ -209,37 +547,226 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDraggingSidebar, isDraggingEditSplit, handleMouseMove, handleMouseUp]);
+  }, [isDraggingSidebar, handleMouseMove, handleMouseUp]);
 
   useEffect(() => {
-    const handleGlobalClick = () => {
+    const handleGlobalClick = (e: MouseEvent) => {
       setContextMenuPos(null);
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
     };
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
 
-  const fetchNotesAndFolders = async () => {
-    try {
-      const [notesList, foldersList] = await Promise.all([
-        api.listNotes(),
-        api.listFolders()
-      ]);
-      setNotes(notesList);
-      setFolders(foldersList);
-      // Keep activeNote null by default so user opens the Home Dashboard
-    } catch {
-      // ignore
+
+  // Aplica formatação direta na seleção da nota preservando rigorosamente a posição de rolagem
+  const formatSelectionInNote = useCallback(async (prefix: string, suffix: string = prefix) => {
+    if (!activeNote || !selectedText) return;
+    const container = previewContainerRef.current;
+    const scrollPos = container?.scrollTop ?? 0;
+
+    const content = activeNote.content;
+    const idx = content.indexOf(selectedText);
+    if (idx === -1) {
+      applyFormatting(prefix, suffix);
+      return;
     }
-  };
+
+    const formatted = `${prefix}${selectedText}${suffix}`;
+    const newContent = content.substring(0, idx) + formatted + content.substring(idx + selectedText.length);
+
+    setEditContent(newContent);
+    setActiveNote(prev => prev ? ({ ...prev, content: newContent }) : null);
+
+    try {
+      await api.saveNote({
+        id: activeNote.id,
+        title: activeNote.title,
+        folder: activeNote.folder,
+        subject: activeNote.subject,
+        content: newContent,
+        isProjectSpecific: activeNote.isProjectSpecific
+      });
+      fetchNotesAndFolders();
+    } catch (err) {
+      console.error('Falha ao salvar formatação na nota:', err);
+    }
+
+    setTimeout(() => {
+      if (container) {
+        container.scrollTop = scrollPos;
+      }
+    }, 15);
+
+    setShowFloatingAction(false);
+    setIsColorPickerOpen(false);
+    setIsHighlightPickerOpen(false);
+    setIsFloatingColorPickerOpen(false);
+    setIsFloatingHighlightPickerOpen(false);
+  }, [activeNote, selectedText, fetchNotesAndFolders]);
+
+
+  // Formatting Action Handlers (Aplica diretamente no editor visual rico)
+  const applyFormatting = useCallback((prefix: string, suffix: string = prefix) => {
+    if (editableContainerRef.current) {
+      if (prefix === '**') {
+        document.execCommand('bold', false);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '*') {
+        document.execCommand('italic', false);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '<u>') {
+        document.execCommand('underline', false);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '~~') {
+        document.execCommand('strikeThrough', false);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '`') {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+          const range = sel.getRangeAt(0);
+          const code = document.createElement('code');
+          code.className = 'bg-card border border-card-border/60 text-amber-300 px-1.5 py-0.5 rounded-md font-mono text-xs';
+          code.appendChild(range.extractContents());
+          range.insertNode(code);
+          syncEditorToMarkdownAndSave();
+          return;
+        }
+      }
+    }
+    if (selectedText && activeNote) {
+      formatSelectionInNote(prefix, suffix);
+    }
+  }, [syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+
+  const applyLinePrefix = useCallback((prefix: string) => {
+    if (editableContainerRef.current) {
+      if (prefix === '# ') {
+        document.execCommand('formatBlock', false, '<h1>');
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '## ') {
+        document.execCommand('formatBlock', false, '<h2>');
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '### ') {
+        document.execCommand('formatBlock', false, '<h3>');
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '- ') {
+        document.execCommand('insertUnorderedList', false);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '1. ') {
+        document.execCommand('insertOrderedList', false);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '- [ ] ') {
+        const taskHtml = `<div class="note-task-row flex items-start space-x-2.5 my-1.5" data-task="true"><input type="checkbox" class="mt-1 w-4 h-4 rounded border-slate-600 accent-emerald-500 cursor-pointer" /><span>Nova tarefa</span></div><p><br></p>`;
+        document.execCommand('insertHTML', false, taskHtml);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+      if (prefix === '> 💡 ') {
+        const calloutHtml = `<blockquote class="border-l-4 border-accent pl-3.5 my-3 italic text-slate-400 bg-card/40 py-2 rounded-r-xl">💡 Destaque ou anotação importante</blockquote><p><br></p>`;
+        document.execCommand('insertHTML', false, calloutHtml);
+        syncEditorToMarkdownAndSave();
+        return;
+      }
+    }
+  }, [syncEditorToMarkdownAndSave]);
+
+  const applyTextColor = useCallback((hex: string) => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const span = document.createElement('span');
+      span.style.color = hex;
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      syncEditorToMarkdownAndSave();
+    } else if (selectedText && activeNote) {
+      formatSelectionInNote(`<span style="color: ${hex}">`, '</span>');
+    }
+    setIsColorPickerOpen(false);
+    setIsFloatingColorPickerOpen(false);
+  }, [syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+
+  const applyHighlight = useCallback((bg: string, color: string) => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const mark = document.createElement('mark');
+      mark.style.backgroundColor = bg;
+      mark.style.color = color;
+      mark.style.padding = '2px 6px';
+      mark.style.borderRadius = '4px';
+      mark.appendChild(range.extractContents());
+      range.insertNode(mark);
+      syncEditorToMarkdownAndSave();
+    } else if (selectedText && activeNote) {
+      formatSelectionInNote(`<mark style="background: ${bg}; color: ${color}; padding: 2px 6px; border-radius: 4px">`, '</mark>');
+    }
+    setIsHighlightPickerOpen(false);
+    setIsFloatingHighlightPickerOpen(false);
+    setIsColorPickerOpen(false);
+  }, [syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+
+  const insertTable = useCallback(() => {
+    const tableHtml = `<div class="my-4 overflow-x-auto rounded-xl border border-card-border/80 bg-panel/30 shadow-md"><table class="w-full border-collapse text-left text-xs leading-relaxed" style="width: 100%; border-collapse: collapse;"><thead class="bg-card/90 text-slate-200 border-b border-card-border"><tr style="border-bottom: 1px solid rgba(255,255,255,0.15);"><th class="px-3.5 py-2.5 font-bold text-accent-light border-r border-card-border/40" style="padding: 8px 12px; font-weight: 700; color: #38bdf8; border-right: 1px solid rgba(255,255,255,0.1);">Item</th><th class="px-3.5 py-2.5 font-bold text-accent-light" style="padding: 8px 12px; font-weight: 700; color: #38bdf8;">Descrição</th></tr></thead><tbody><tr class="hover:bg-card/40 border-b border-card-border/30" style="border-bottom: 1px solid rgba(255,255,255,0.06);"><td class="px-3.5 py-2.5 border-r border-card-border/30 text-slate-300" style="padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);">1</td><td class="px-3.5 py-2.5 text-slate-300" style="padding: 8px 12px;">Detalhes do item</td></tr></tbody></table></div><p><br></p>`;
+    if (editableContainerRef.current) {
+      editableContainerRef.current.focus();
+      document.execCommand('insertHTML', false, tableHtml);
+      syncEditorToMarkdownAndSave();
+    }
+  }, [syncEditorToMarkdownAndSave]);
+
+  const insertDivider = useCallback(() => {
+    const hrHtml = `<hr class="border-0 border-t border-card-border/80 my-6" /><p><br></p>`;
+    if (editableContainerRef.current) {
+      editableContainerRef.current.focus();
+      document.execCommand('insertHTML', false, hrHtml);
+      syncEditorToMarkdownAndSave();
+    }
+  }, [syncEditorToMarkdownAndSave]);
+
+  const insertWikilinkDirect = useCallback((noteTitle: string) => {
+    const badgeHtml = `<span class="wikilink-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-accent/15 border border-accent/30 text-accent-light font-medium text-xs cursor-pointer select-none" data-wikilink="${noteTitle}">[[ ${noteTitle} ]]</span>&nbsp;`;
+    if (editableContainerRef.current) {
+      editableContainerRef.current.focus();
+      document.execCommand('insertHTML', false, badgeHtml);
+      syncEditorToMarkdownAndSave();
+    }
+    setIsWikilinkModalOpen(false);
+    setWikilinkSearch('');
+  }, [syncEditorToMarkdownAndSave]);
+
+
+
 
   const handleMoveNote = async (noteId: string, targetFolder: string) => {
     try {
-      const updated = await api.moveNote(noteId, targetFolder);
+      const cleanTarget = normalizeFolderPath(targetFolder);
+      const updated = await api.moveNote(noteId, cleanTarget);
       await fetchNotesAndFolders();
       if (activeNote?.id === noteId) {
         setActiveNote(updated);
-        setEditFolder(updated.folder || updated.subject || targetFolder);
+        setEditFolder(getNoteFolder(updated));
       }
       setMoveModalNote(null);
     } catch (err: any) {
@@ -375,11 +902,27 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     );
     if (found) {
       selectNote(found);
-      setNoteViewMode('preview');
       setViewMode('editor');
       setSidebarTab('folders');
     }
   }, [targetNoteIdOrTitle, notes]);
+
+  useEffect(() => {
+    if (activeNote) {
+      if (currentLoadedNoteIdRef.current !== activeNote.id) {
+        currentLoadedNoteIdRef.current = activeNote.id;
+        setEditTitle(activeNote.title);
+        setEditFolder(getNoteFolder(activeNote));
+        setEditContent(activeNote.content);
+        if (editableContainerRef.current) {
+          editableContainerRef.current.innerHTML = markdownToEditorHtml(activeNote.content);
+        }
+      }
+    } else {
+      currentLoadedNoteIdRef.current = null;
+    }
+  }, [activeNote, getNoteFolder]);
+
 
   useEffect(() => {
     if (viewMode === 'graph') {
@@ -846,18 +1389,25 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const selectNote = (note: FrankNote) => {
     setActiveNote(note);
     setEditTitle(note.title);
-    setEditFolder(note.folder || note.subject || 'Geral');
+    const folderPath = getNoteFolder(note);
+    setEditFolder(folderPath);
     setEditContent(note.content);
-    setNoteViewMode('preview'); // Always open in formatted preview first!
+    currentLoadedNoteIdRef.current = note.id;
+
+    if (editableContainerRef.current) {
+      editableContainerRef.current.innerHTML = markdownToEditorHtml(note.content);
+    }
 
     // Focus the sidebar on this note's notebook and expand sidebar
-    const folderPath = note.folder || note.subject || 'Geral';
     const nbId = folderPath.split('/')[0] || 'Geral';
     setSelectedNotebookId(nbId);
     setIsSidebarCollapsed(false);
+    // Expand the notebook and subfolder in sidebar so the active note is visible
+    setCollapsedFolders(prev => ({ ...prev, [folderPath]: false, [`nb:${nbId}`]: false }));
 
     pushNavHistory({ notebookId: nbId, noteId: note.id, viewMode: 'editor' });
   };
+
 
   const goToHome = () => {
     setSelectedNotebookId('all');
@@ -890,9 +1440,12 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
             if (found) {
               setActiveNote(found);
               setEditTitle(found.title);
-              setEditFolder(found.folder || found.subject || 'Geral');
+              setEditFolder(getNoteFolder(found));
               setEditContent(found.content);
-              setNoteViewMode('preview');
+              currentLoadedNoteIdRef.current = found.id;
+              if (editableContainerRef.current) {
+                editableContainerRef.current.innerHTML = markdownToEditorHtml(found.content);
+              }
               setIsSidebarCollapsed(false);
             } else {
               setActiveNote(null);
@@ -934,9 +1487,12 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
             if (found) {
               setActiveNote(found);
               setEditTitle(found.title);
-              setEditFolder(found.folder || found.subject || 'Geral');
+              setEditFolder(getNoteFolder(found));
               setEditContent(found.content);
-              setNoteViewMode('preview');
+              currentLoadedNoteIdRef.current = found.id;
+              if (editableContainerRef.current) {
+                editableContainerRef.current.innerHTML = markdownToEditorHtml(found.content);
+              }
               setIsSidebarCollapsed(false);
             } else {
               setActiveNote(null);
@@ -958,6 +1514,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       return prevIndex;
     });
   }, [navHistory, notes]);
+
 
   const goBack = () => {
     handleNavBack();
@@ -1022,19 +1579,16 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       title: 'Nova Anotação ' + new Date().toLocaleDateString('pt-BR'),
       folder: folderName,
       subject: folderName,
-      content: `# Nova Anotação\n\nEscreva suas notas aqui no formato Notion/Markdown.\n\nUse \`[[Nome de Outra Nota]]\` para criar conexões e #tags para categorizar.\n`,
+      content: `# Nova Anotação\n\nComece a escrever sua anotação aqui... Use a barra de ferramentas para negrito, cores, marca-texto, tabelas ou checklists.\n`,
       isProjectSpecific: false
     };
 
     api.saveNote(newNoteTemplate).then((created) => {
       fetchNotesAndFolders();
-      setActiveNote(created);
-      setEditTitle(created.title);
-      setEditFolder(created.folder || folderName);
-      setEditContent(created.content);
-      setNoteViewMode('edit'); // Open new notes in edit mode
+      selectNote(created);
     });
   };
+
 
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1065,14 +1619,28 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   };
 
   const toggleFolderCollapse = (folderName: string) => {
-    setCollapsedFolders(prev => ({
-      ...prev,
-      [folderName]: !prev[folderName]
-    }));
+    setCollapsedFolders(prev => {
+      const willBeExpanded = !!prev[folderName]; // if currently collapsed, will expand
+      if (isSingleNotebookMode && folderName.startsWith('nb:') && willBeExpanded) {
+        // Modo foco em um caderno por vez: colapsa todos os outros cadernos
+        const next: Record<string, boolean> = {};
+        // fecha todos
+        notebooksList.forEach(nb => {
+          next[`nb:${nb.id}`] = true;
+        });
+        next[folderName] = false;
+        return next;
+      }
+      return {
+        ...prev,
+        [folderName]: !prev[folderName]
+      };
+    });
   };
 
   const handleReviewFolderWithAgent = (folderName: string) => {
-    const folderNotes = notes.filter(n => (n.folder || n.subject || 'Geral') === folderName);
+    const cleanFolder = normalizeFolderPath(folderName);
+    const folderNotes = notes.filter(n => getNoteFolder(n) === cleanFolder);
     if (folderNotes.length === 0) {
       alert(`A pasta "${folderName}" está vazia.`);
       return;
@@ -1084,7 +1652,7 @@ Aqui estão as notas atuais da pasta:
 
 ${folderNotes.map(n => `### [[${n.title}]] (Arquivo: ${n.filename})\n${n.content}`).join('\n\n---\n\n')}
 
-Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comparativas, diagramas Mermaid, callouts de destaque e checklists estruturados para deixar as anotações visualmente muito agradáveis, claras e profissionais. Salve as melhorias diretamente no FrankMD Vault usando a ferramenta frank_note_save.`;
+Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comparativas, diagramas Mermaid, callouts de destaque e checklists estruturados para deixar as anotações visualmente muito agradáveis, claras e profissionais. Salve as melhorias diretamente no Notes Module Vault usando a ferramenta note_save.`;
 
     if (onMentionInChat) {
       onMentionInChat({
@@ -1106,17 +1674,22 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
   const handleSaveActiveNote = async () => {
     if (!activeNote) return;
     setIsSaving(true);
+    let mdToSave = editContent;
+    if (editableContainerRef.current) {
+      mdToSave = editorHtmlToMarkdown(editableContainerRef.current.innerHTML);
+      setEditContent(mdToSave);
+    }
     try {
       const updated = await api.saveNote({
         id: activeNote.id,
         title: editTitle,
         folder: editFolder,
         subject: editFolder,
-        content: editContent,
+        content: mdToSave,
         isProjectSpecific: activeNote.isProjectSpecific
       });
       setActiveNote(updated);
-      setNoteViewMode('preview'); // Switch to preview after saving
+      setLastSavedTime(new Date());
       fetchNotesAndFolders();
     } catch (err: any) {
       alert(`Erro ao salvar: ${err.message}`);
@@ -1124,6 +1697,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       setIsSaving(false);
     }
   };
+
 
   const handleDeleteNote = async (id: string, isProjectSpecific?: boolean) => {
     const targetNote = notes.find(n => n.id === id);
@@ -1151,9 +1725,10 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       alert('A pasta padrão "Geral" não pode ser excluída.');
       return;
     }
+    const cleanFolder = normalizeFolderPath(folderName);
     const folderNotes = notes.filter(n => {
-      const f = n.folder || n.subject || 'Geral';
-      return f === folderName || f.startsWith(`${folderName}/`);
+      const f = getNoteFolder(n);
+      return f === cleanFolder || f.startsWith(`${cleanFolder}/`);
     });
     
     const countMsg = folderNotes.length === 1 ? '1 nota' : `${folderNotes.length} notas`;
@@ -1173,13 +1748,62 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         setSelectedNotebookId('all');
       }
       if (activeNote) {
-        const activeNoteFolder = activeNote.folder || activeNote.subject || 'Geral';
-        if (activeNoteFolder === folderName || activeNoteFolder.startsWith(`${folderName}/`)) {
+        const activeNoteFolder = getNoteFolder(activeNote);
+        if (activeNoteFolder === cleanFolder || activeNoteFolder.startsWith(`${cleanFolder}/`)) {
           setActiveNote(null);
         }
       }
     } catch (err: any) {
       alert(`Erro ao excluir pasta: ${err.message}`);
+    }
+  };
+
+  const handleDownloadSingleNote = async (note: FrankNote, format: ExportFormat = 'md_clean') => {
+    setIsExporting(true);
+    setIsExportMenuOpen(false);
+    try {
+      const res = await downloadNoteInFormat(note, format);
+      const label = format === 'pdf' ? 'PDF' : format === 'word' ? 'Word (.doc)' : format === 'md_tags' ? 'Markdown (.md com tags)' : 'Markdown (.md)';
+      setExportToast({
+        message: `Nota exportada em ${label} para a pasta Downloads!`,
+        filename: res.filename
+      });
+      setTimeout(() => setExportToast(null), 4500);
+    } catch (err: any) {
+      alert(`Erro ao exportar nota: ${err.message}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDownloadEntireNotebook = async (notebookName: string, format: ExportFormat = 'md_clean') => {
+    const isAll = notebookName === 'all' || !notebookName;
+    const targetNotes = isAll 
+      ? notes 
+      : notes.filter(n => {
+          const f = n.folder || 'Geral';
+          return f === notebookName || f.startsWith(`${notebookName}/`);
+        });
+
+    if (targetNotes.length === 0) {
+      alert(`Nenhuma anotação encontrada no caderno "${notebookName}".`);
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const title = isAll ? 'Todos_os_Cadernos' : notebookName;
+      const res = await downloadFormattedNotebook(title, targetNotes, format);
+      const label = format === 'pdf' ? 'PDF' : format === 'word' ? 'Word (.doc)' : format === 'md_tags' ? 'Markdown (.md com tags)' : 'Markdown (.md)';
+      setExportToast({
+        message: `Caderno completo exportado em ${label} para a pasta Downloads!`,
+        filename: res.filename
+      });
+      setTimeout(() => setExportToast(null), 4500);
+    } catch (err: any) {
+      alert(`Erro ao exportar caderno: ${err.message}`);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -1253,9 +1877,10 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         if (selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
           const rect = range.getBoundingClientRect();
+          const topPos = rect.top < 80 ? rect.bottom + 12 : rect.top - 52;
           setFloatingActionPos({
-            x: Math.min(Math.max(rect.left + rect.width / 2 - 130, 20), window.innerWidth - 320),
-            y: Math.max(rect.top - 48, 12)
+            x: Math.min(Math.max(rect.left + rect.width / 2 - 130, 20), window.innerWidth - 340),
+            y: Math.max(topPos, 12)
           });
           setShowFloatingAction(true);
         }
@@ -1280,15 +1905,16 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
   // Group notes by folder
   const allFolderNames = Array.from(new Set([
-    ...folders,
-    ...notes.map(n => n.folder || n.subject || 'Geral')
-  ]));
+    ...folders.map(normalizeFolderPath),
+    ...notes.map(n => getNoteFolder(n))
+  ])).filter(f => f && !f.startsWith('.')).sort();
 
   const filteredNotes = notes.filter(n => {
     const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
       n.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesFolder = selectedFolderFilter === 'all' || (n.folder || n.subject || 'Geral') === selectedFolderFilter;
+    const noteFolder = getNoteFolder(n);
+    const matchesFolder = selectedFolderFilter === 'all' || noteFolder === selectedFolderFilter;
     return matchesQuery && matchesFolder;
   });
 
@@ -1395,7 +2021,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
   });
 
   filteredNotes.forEach(note => {
-    const folderPath = note.folder || note.subject || 'Geral';
+    const folderPath = getNoteFolder(note);
     const segments = folderPath.split('/');
     const notebookId = segments[0] || 'Geral';
 
@@ -1425,15 +2051,42 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     }
   });
 
-  const notebooksList = Array.from(notebooksMap.values()).map(nb => ({
-    id: nb.id,
-    subfolders: Array.from(nb.subfolders.values()),
-    directNotes: nb.directNotes,
-    allNotes: nb.allNotes,
-    totalCount: nb.allNotes.length
-  })).sort((a, b) => {
+  const notebooksList = Array.from(notebooksMap.values()).map(nb => {
+    const sortedSubfolders = Array.from(nb.subfolders.values()).map(sub => ({
+      ...sub,
+      notes: sub.notes.slice().sort((a, b) => {
+        if (notebookSortOrder === 'recent') {
+          return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+        }
+        return a.title.localeCompare(b.title);
+      })
+    })).sort((a, b) => a.name.localeCompare(b.name));
+
+    const sortedDirectNotes = nb.directNotes.slice().sort((a, b) => {
+      if (notebookSortOrder === 'recent') {
+        return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+      }
+      return a.title.localeCompare(b.title);
+    });
+
+    return {
+      id: nb.id,
+      subfolders: sortedSubfolders,
+      directNotes: sortedDirectNotes,
+      allNotes: nb.allNotes,
+      totalCount: nb.allNotes.length
+    };
+  }).sort((a, b) => {
     if (a.id === 'Geral') return 1;
     if (b.id === 'Geral') return -1;
+    if (notebookSortOrder === 'count') {
+      return b.totalCount - a.totalCount;
+    }
+    if (notebookSortOrder === 'recent') {
+      const maxTimeA = Math.max(0, ...a.allNotes.map(n => n.updatedAt || n.createdAt || 0));
+      const maxTimeB = Math.max(0, ...b.allNotes.map(n => n.updatedAt || n.createdAt || 0));
+      return maxTimeB - maxTimeA;
+    }
     return a.id.localeCompare(b.id);
   });
 
@@ -1443,38 +2096,181 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
   return (
     <div className="h-full flex flex-col bg-background text-slate-200 overflow-hidden select-none font-sans relative">
-      {/* Floating Action Pill on Text Selection */}
+      {/* Floating Action Toolbar on Text Selection */}
       {showFloatingAction && selectedText && (
         <div
+          ref={floatingBarRef}
           style={{ left: `${floatingActionPos.x}px`, top: `${floatingActionPos.y}px` }}
-          className="fixed z-50 bg-card/95 backdrop-blur-md border border-accent/60 shadow-2xl rounded-2xl p-1.5 flex items-center space-x-1.5 animate-in fade-in zoom-in-95"
+          className="fixed z-50 bg-[#161822]/95 backdrop-blur-md border border-accent/60 shadow-2xl rounded-2xl p-1.5 flex items-center space-x-1 animate-in fade-in zoom-in-95 text-xs select-none"
+          onClick={(e) => e.stopPropagation()}
         >
+          {/* Quick Formatting Tools */}
+          <div className="flex items-center space-x-0.5 pr-1 border-r border-card-border/80">
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={() => formatSelectionInNote('**', '**')}
+              className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+              title="Negrito (**)"
+            >
+              <Bold className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={() => formatSelectionInNote('*', '*')}
+              className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+              title="Itálico (*)"
+            >
+              <Italic className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={() => formatSelectionInNote('<u>', '</u>')}
+              className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+              title="Sublinhado (<u>)"
+            >
+              <Underline className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={() => formatSelectionInNote('~~', '~~')}
+              className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+              title="Tachado (~~)"
+            >
+              <Strikethrough className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Floating Color Palette */}
+            <div className="relative" ref={floatingColorPickerRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={() => {
+                  setIsFloatingColorPickerOpen(!isFloatingColorPickerOpen);
+                  setIsFloatingHighlightPickerOpen(false);
+                }}
+                className="p-1.5 rounded-lg hover:bg-card-border text-amber-300 hover:text-amber-200 transition-colors flex items-center space-x-0.5"
+                title="Cor do Texto"
+              >
+                <Palette className="w-3.5 h-3.5" />
+              </button>
+
+              {isFloatingColorPickerOpen && (
+                <div 
+                  className="absolute left-0 bottom-full mb-2 p-2 rounded-xl bg-card border border-card-border shadow-2xl z-50 flex items-center space-x-1.5 backdrop-blur-md"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                >
+                  {TEXT_COLORS.map(c => (
+                    <button
+                      key={c.hex}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onClick={() => applyTextColor(c.hex)}
+                      className="p-1 rounded-full hover:scale-125 transition-transform"
+                      title={c.name}
+                    >
+                      <span className={`w-3.5 h-3.5 rounded-full ${c.bg} block ring-1 ring-white/20`} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Floating Highlighter Palette */}
+            <div className="relative" ref={floatingHighlightPickerRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={() => {
+                  setIsFloatingHighlightPickerOpen(!isFloatingHighlightPickerOpen);
+                  setIsFloatingColorPickerOpen(false);
+                }}
+                className="p-1.5 rounded-lg hover:bg-card-border text-yellow-300 hover:text-yellow-200 transition-colors flex items-center space-x-0.5"
+                title="Marca-texto / Destaque"
+              >
+                <Highlighter className="w-3.5 h-3.5" />
+              </button>
+
+              {isFloatingHighlightPickerOpen && (
+                <div 
+                  className="absolute left-0 bottom-full mb-2 p-2 rounded-xl bg-card border border-card-border shadow-2xl z-50 flex items-center space-x-1.5 backdrop-blur-md"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                >
+                  {HIGHLIGHT_COLORS.map(h => (
+                    <button
+                      key={h.name}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onClick={() => applyHighlight(h.bg, h.text)}
+                      className="p-1 rounded hover:scale-110 transition-transform"
+                      title={h.name}
+                    >
+                      <span className={`w-4 h-4 rounded ${h.circle} block ring-1 ring-white/20`} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Action Buttons */}
           <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => {
               setShowFloatingAction(false);
               onStudyTopic?.(selectedText);
             }}
-            className="px-3 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all"
-            title="Iniciar Roteiro de Estudo Ativo no Chat"
+            className="px-2.5 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all"
+            title="Iniciar estudo sobre este trecho no chat"
           >
             <GraduationCap className="w-3.5 h-3.5 text-accent-light" />
-            <span>Estudar sobre "{selectedText.slice(0, 20)}{selectedText.length > 20 ? '...' : ''}"</span>
+            <span>Estudar</span>
           </button>
 
           <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => {
               setShowFloatingAction(false);
-              if (activeNote) {
-                onMentionInChat?.({
-                  ...activeNote,
-                  content: `Pergunta sobre o trecho "${selectedText}" na anotação [[${activeNote.title}]]:\n\n${activeNote.content}`
-                });
-              }
+              onSearchInNewChat?.(`Quero pesquisar e aprofundar sobre o trecho da nota:\n\n"${selectedText}"`);
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-cyan-600/90 hover:bg-cyan-600 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all"
+            title="Abrir um novo chat e pesquisar este trecho"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-cyan-200" />
+            <span>Pesquisar em Novo Chat</span>
+          </button>
+
+          {onStartLiveVoice && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={() => {
+                setShowFloatingAction(false);
+                onStartLiveVoice(selectedText, activeNote?.content);
+              }}
+              className="p-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 transition-colors"
+              title="Iniciar Live Voice sobre este trecho"
+            >
+              <Radio className="w-3.5 h-3.5 text-red-400" />
+            </button>
+          )}
+
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onClick={() => {
+              navigator.clipboard.writeText(selectedText);
+              setShowFloatingAction(false);
             }}
             className="p-1.5 rounded-xl hover:bg-card-border text-slate-300 hover:text-white transition-colors"
-            title="Perguntar no Chat"
+            title="Copiar trecho"
           >
-            <MessageSquare className="w-3.5 h-3.5" />
+            <Copy className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
@@ -1543,6 +2339,166 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         </div>
       )}
 
+      {/* Notion-style Block / Section Reordering Modal */}
+      {isReorderModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
+          <div className="bg-card border border-card-border rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                  <ArrowUpDown className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Organizar Tópicos & Seções da Nota</h3>
+                  <p className="text-[11px] text-slate-400">Reordene os blocos e ideias da sua nota à sua preferência</p>
+                </div>
+              </div>
+              <button onClick={() => setIsReorderModalOpen(false)} className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-2.5">
+              {(() => {
+                const sections = parseMarkdownSections(editContent);
+                if (sections.length <= 1) {
+                  return (
+                    <div className="p-6 text-center text-slate-400 text-xs space-y-2">
+                      <p className="font-semibold text-slate-300">Poucas seções identificadas na nota.</p>
+                      <p className="text-[11px]">
+                        Adicione títulos com <strong>#</strong>, <strong>##</strong> ou <strong>###</strong> para dividir o documento em tópicos que podem ser facilmente reordenados!
+                      </p>
+                    </div>
+                  );
+                }
+
+                return sections.map((sec, idx) => (
+                  <div
+                    key={sec.id}
+                    className="p-3 rounded-2xl bg-panel/70 border border-card-border/80 flex items-center justify-between gap-3 group hover:border-accent/40 transition-all"
+                  >
+                    <div className="flex items-center space-x-3 flex-1 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-card border border-card-border flex items-center justify-center text-xs font-mono font-bold text-slate-400 shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-2">
+                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded uppercase font-bold ${
+                            sec.level === 1 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
+                            sec.level === 2 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                            sec.level === 3 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
+                            'bg-slate-700/30 text-slate-300'
+                          }`}>
+                            {sec.level === 0 ? 'Intro' : `H${sec.level}`}
+                          </span>
+                          <span className="font-bold text-xs text-slate-100 truncate">{sec.heading}</span>
+                        </div>
+                        {sec.content && (
+                          <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                            {sec.content.replace(/[#*`~\[\]]/g, '').slice(0, 70)}...
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => moveSection(idx, 'up')}
+                        disabled={idx === 0}
+                        className="p-1.5 rounded-xl hover:bg-card-border text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+                        title="Mover tópico para cima"
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveSection(idx, 'down')}
+                        disabled={idx === sections.length - 1}
+                        className="p-1.5 rounded-xl hover:bg-card-border text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+                        title="Mover tópico para baixo"
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            <div className="p-4 border-t border-card-border bg-sidebar flex items-center justify-between text-xs">
+              <span className="text-slate-400 font-mono">
+                {parseMarkdownSections(editContent).length} tópicos na nota
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsReorderModalOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold transition-all shadow-md shadow-accent/20"
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Obsidian Wikilink Quick Inserter Modal */}
+      {isWikilinkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
+          <div className="bg-card border border-card-border rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center">
+                  <LinkIcon className="w-4 h-4 text-accent-light" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Inserir Conexão [[Wikilink]]</h3>
+                  <p className="text-[11px] text-slate-400">Conecta com outra nota e indexa nos grafos do Obsidian</p>
+                </div>
+              </div>
+              <button onClick={() => setIsWikilinkModalOpen(false)} className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-card-border bg-panel">
+              <input
+                type="text"
+                value={wikilinkSearch}
+                onChange={(e) => setWikilinkSearch(e.target.value)}
+                placeholder="Buscar nota para conectar..."
+                className="w-full px-3 py-2 rounded-xl bg-card border border-card-border text-xs text-slate-100 focus:outline-none focus:border-accent"
+                autoFocus
+              />
+            </div>
+
+            <div className="p-3 overflow-y-auto flex-1 space-y-1">
+              {notes
+                .filter(n => !wikilinkSearch || n.title.toLowerCase().includes(wikilinkSearch.toLowerCase()) || n.id.toLowerCase().includes(wikilinkSearch.toLowerCase()))
+                .slice(0, 30)
+                .map(n => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => {
+                      applyFormatting(`[[${n.title}]]`, '');
+                      setIsWikilinkModalOpen(false);
+                      setWikilinkSearch('');
+                    }}
+                    className="w-full text-left p-2.5 rounded-xl hover:bg-accent/20 hover:text-white text-slate-300 text-xs flex items-center justify-between transition-colors group"
+                  >
+                    <div className="flex items-center space-x-2 truncate">
+                      <FileText className="w-3.5 h-3.5 text-slate-500 group-hover:text-accent-light shrink-0" />
+                      <span className="font-medium truncate">{n.title}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-500 shrink-0">📁 {getNoteFolder(n)}</span>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Quick Move Note Modal */}
       {moveModalNote && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
@@ -1570,7 +2526,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     key={f}
                     onClick={() => handleMoveNote(moveModalNote.id, f)}
                     className={`w-full text-left px-3 py-2 rounded-xl border flex items-center justify-between transition-all ${
-                      (moveModalNote.folder || moveModalNote.subject || 'Geral') === f
+                      getNoteFolder(moveModalNote) === f
                         ? 'bg-accent/20 border-accent text-accent-light font-semibold'
                         : 'bg-panel border-card-border text-slate-300 hover:bg-card-border hover:text-white'
                     }`}
@@ -1579,7 +2535,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       <Folder className="w-3.5 h-3.5 text-amber-400" />
                       <span>{f}</span>
                     </div>
-                    {(moveModalNote.folder || moveModalNote.subject || 'Geral') === f && (
+                    {getNoteFolder(moveModalNote) === f && (
                       <span className="text-[10px] text-accent-light font-mono">(Atual)</span>
                     )}
                   </button>
@@ -1864,6 +2820,9 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         </div>
       )}
 
+      {/* Credits & Architectural Foundations Modal */}
+      <CreditsModal isOpen={isCreditsOpen} onClose={() => setIsCreditsOpen(false)} />
+
       {/* Top Bar Controls */}
       <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
         <div className="flex items-center space-x-2.5">
@@ -1988,6 +2947,16 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* Credits Button */}
+          <button
+            onClick={() => setIsCreditsOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-panel hover:bg-card border border-card-border text-xs text-slate-300 hover:text-accent-light flex items-center space-x-1.5 transition-all cursor-pointer"
+            title="Créditos e Fundamentos do Notes Module (Frank MD e AI-Memory)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-accent-light" />
+            <span className="hidden sm:inline">Créditos</span>
+          </button>
+
           {/* Notion Import Button */}
           <button
             onClick={() => setIsNotionModalOpen(true)}
@@ -2162,7 +3131,25 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       <Book className="w-3.5 h-3.5 text-accent-light" />
                       <span>Cadernos & Pastas ({allFolderNames.length})</span>
                     </span>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={() => {
+                          const next = !isSingleNotebookMode;
+                          setIsSingleNotebookMode(next);
+                          try {
+                            localStorage.setItem('notes_single_notebook_mode', String(next));
+                          } catch {}
+                        }}
+                        className={`text-[10px] px-1.5 py-0.5 rounded-lg border font-mono transition-all flex items-center space-x-1 cursor-pointer ${
+                          isSingleNotebookMode
+                            ? 'bg-accent/20 border-accent text-accent-light font-bold'
+                            : 'bg-panel border-card-border text-slate-400 hover:text-slate-200'
+                        }`}
+                        title={isSingleNotebookMode ? "Modo 1 Caderno por vez ATIVO (expandir um caderno fecha os demais)" : "Ativar Modo 1 Caderno por vez"}
+                      >
+                        <Layers className="w-3 h-3" />
+                        <span className="hidden sm:inline">1 por vez</span>
+                      </button>
                       <button
                         onClick={() => setIsCreatingNotebook(true)}
                         className="text-[11px] text-cyan-400 hover:text-cyan-200 flex items-center space-x-1 font-semibold transition-colors"
@@ -2178,6 +3165,51 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       >
                         <FolderPlus className="w-3.5 h-3.5" />
                         <span>+ Pasta</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Order / Sort Selector */}
+                  <div className="flex items-center justify-between text-[11px] pt-0.5 pb-1 border-b border-card-border/40">
+                    <span className="text-[10px] text-slate-400 flex items-center space-x-1 font-mono">
+                      <span>Ordem:</span>
+                    </span>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        onClick={() => setNotebookSortOrder('name')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+                          notebookSortOrder === 'name'
+                            ? 'bg-accent/20 border border-accent text-accent-light font-bold shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/40'
+                        }`}
+                        title="Ordenar por Nome (A-Z)"
+                      >
+                        A-Z
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNotebookSortOrder('recent')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+                          notebookSortOrder === 'recent'
+                            ? 'bg-accent/20 border border-accent text-accent-light font-bold shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/40'
+                        }`}
+                        title="Ordenar por Mais Recente"
+                      >
+                        Recentes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNotebookSortOrder('count')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer ${
+                          notebookSortOrder === 'count'
+                            ? 'bg-accent/20 border border-accent text-accent-light font-bold shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/40'
+                        }`}
+                        title="Ordenar por Quantidade de Notas"
+                      >
+                        Qtd
                       </button>
                     </div>
                   </div>
@@ -2437,6 +3469,28 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
                           {/* Notebook Action Tools */}
                           <div className="flex items-center space-x-1 opacity-75 group-hover:opacity-100 transition-opacity">
+                            {onStartLiveVoice && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onStartLiveVoice(`Caderno: ${nb.id}`, `Estudo e diálogo por voz sobre o caderno ${nb.id} com ${nb.totalCount} anotações.`);
+                                }}
+                                className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
+                                title={`Iniciar Live Voice para conversar sobre o caderno "${nb.id}"`}
+                              >
+                                <Mic className="w-3 h-3 text-red-400" />
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadEntireNotebook(nb.id);
+                              }}
+                              className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-accent-light transition-colors"
+                              title={`Baixar todas as anotações do caderno "${nb.id}" formatadas (.md)`}
+                            >
+                              <Download className="w-3 h-3" />
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2558,6 +3612,28 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                     </div>
 
                                     <div className="flex items-center space-x-1 opacity-75 group-hover:opacity-100">
+                                      {onStartLiveVoice && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onStartLiveVoice(`Assunto: ${sub.name}`, `Estudo e diálogo por voz sobre o assunto ${sub.path} com ${sub.notes.length} anotações.`);
+                                          }}
+                                          className="p-0.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
+                                          title={`Iniciar Live Voice sobre o assunto "${sub.name}"`}
+                                        >
+                                          <Mic className="w-2.5 h-2.5 text-red-400" />
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDownloadEntireNotebook(sub.path);
+                                        }}
+                                        className="p-0.5 rounded hover:bg-card-border text-slate-400 hover:text-accent-light transition-colors"
+                                        title={`Baixar anotações da subpasta "${sub.name}" formatadas (.md)`}
+                                      >
+                                        <Download className="w-2.5 h-2.5" />
+                                      </button>
                                       <button
                                         onClick={() => handleReviewFolderWithAgent(sub.path)}
                                         className="px-1.5 py-0.5 rounded bg-accent/20 hover:bg-accent text-accent-light hover:text-white text-[9px] font-semibold flex items-center space-x-1 transition-all border border-accent/30"
@@ -2859,272 +3935,554 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
               {/* Document Header */}
               <div className="p-3.5 border-b border-card-border bg-sidebar/40 flex items-center justify-between shrink-0">
                 <div className="flex items-center space-x-3 flex-1 mr-4 min-w-0">
-                  {noteViewMode === 'edit' ? (
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      placeholder="Título da Anotação..."
-                      className="font-bold text-base bg-transparent text-slate-100 focus:outline-none focus:border-b border-accent flex-1"
-                    />
-                  ) : (
-                    <div className="flex items-center space-x-2 truncate">
-                      <FileText className="w-5 h-5 text-accent-light shrink-0" />
-                      <h2 className="font-bold text-base text-slate-100 truncate">{editTitle}</h2>
-                    </div>
-                  )}
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    onBlur={handleSaveActiveNote}
+                    placeholder="Título da Anotação..."
+                    className="font-bold text-base bg-transparent text-slate-100 focus:outline-none focus:border-b border-accent flex-1"
+                  />
                   
                   {/* Folder Breadcrumb & Switcher */}
                   <div className="flex items-center space-x-1.5 bg-panel border border-card-border px-2.5 py-1 rounded-xl shrink-0">
                     <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    {noteViewMode === 'edit' ? (
-                      <select
-                        value={editFolder}
-                        onChange={(e) => {
-                          const newF = e.target.value;
-                          setEditFolder(newF);
-                          handleMoveNote(activeNote.id, newF);
-                        }}
-                        className="bg-transparent text-xs text-amber-300 focus:outline-none font-mono cursor-pointer max-w-[180px] truncate"
-                        title="Mover anotação para outra pasta"
-                      >
-                        {allFolderNames.map(f => (
-                          <option key={f} value={f} className="bg-card text-slate-200">
-                            📁 {f}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="text-xs text-amber-300 font-mono truncate max-w-[200px]" title={`Pasta: ${editFolder}`}>
-                        {editFolder}
-                      </span>
-                    )}
+                    <select
+                      value={editFolder}
+                      onChange={(e) => {
+                        const newF = e.target.value;
+                        setEditFolder(newF);
+                        handleMoveNote(activeNote.id, newF);
+                      }}
+                      className="bg-transparent text-xs text-amber-300 focus:outline-none font-mono cursor-pointer max-w-[180px] truncate"
+                      title="Mover anotação para outra pasta"
+                    >
+                      {allFolderNames.map(f => (
+                        <option key={f} value={f} className="bg-card text-slate-200">
+                          📁 {f}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
                 {/* Header Action Buttons */}
                 <div className="flex items-center space-x-2 shrink-0">
-                  {noteViewMode === 'preview' ? (
-                    <>
-                      <button
-                        onClick={() => setNoteViewMode('edit')}
-                        className="px-3.5 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-accent/20"
-                        title="Editar conteúdo da nota em Markdown"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Editar Nota</span>
-                      </button>
+                  {onStartLiveVoice && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onStartLiveVoice(activeNote.title, editContent);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-xs text-red-300 hover:text-white flex items-center space-x-1.5 transition-all shadow-sm font-semibold cursor-pointer"
+                      title="Iniciar Live Voice para dialogar ou estudar sobre o conteúdo desta nota"
+                    >
+                      <Radio className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+                      <span>Live Voice</span>
+                    </button>
+                  )}
 
-                      <button
-                        onClick={() => setMoveModalNote(activeNote)}
-                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-amber-300 flex items-center space-x-1.5 transition-all"
-                        title="Mover esta anotação para outra pasta"
-                      >
-                        <FolderInput className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Mover</span>
-                      </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveActiveNote}
+                    disabled={isSaving}
+                    className="px-3.5 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-sm"
+                    title="Salvar alterações no cofre Obsidian (Ctrl+S)"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Salvar</span>
+                      </>
+                    )}
+                  </button>
 
-                      <button
-                        onClick={() => copyNoteContent(editContent, activeNote.id)}
-                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 flex items-center space-x-1.5 transition-all"
-                      >
-                        {copiedId === activeNote.id ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="text-emerald-400 font-medium">Copiado!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copiar Markdown</span>
-                          </>
-                        )}
-                      </button>
+                  <button
+                    type="button"
+                    onClick={() => setMoveModalNote(activeNote)}
+                    className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-amber-300 flex items-center space-x-1.5 transition-all"
+                    title="Mover esta anotação para outra pasta"
+                  >
+                    <FolderInput className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Mover</span>
+                  </button>
 
-                      <button
-                        onClick={() => handleDeleteNote(activeNote.id, activeNote.isProjectSpecific)}
-                        className="p-2 rounded-xl hover:bg-card-border text-slate-400 hover:text-rose-400 transition-colors"
-                        title="Excluir anotação"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                  <button
+                    type="button"
+                    onClick={() => copyNoteContent(editContent, activeNote.id)}
+                    className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 flex items-center space-x-1.5 transition-all"
+                    title="Copiar texto da nota"
+                  >
+                    {copiedId === activeNote.id ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400 font-medium">Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copiar</span>
+                      </>
+                    )}
+                  </button>
 
-                      {/* Full Width Toggle */}
-                      <button
-                        onClick={toggleFullWidth}
-                        className={`p-2 rounded-xl border transition-colors ${
-                          isFullWidth 
-                            ? 'bg-accent/20 border-accent text-accent-light' 
-                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
-                        }`}
-                        title={isFullWidth ? "Largura Total ativada (clique para limitar a 896px)" : "Ocupar toda a largura da tela (Full Width)"}
-                      >
-                        <ArrowLeftRight className="w-4 h-4" />
-                      </button>
+                  {/* Multi-Format Export Dropdown (PDF, Word, MD com Tags, MD Limpo) */}
+                  <div className="relative" ref={exportMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                      disabled={isExporting}
+                      className="px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent border border-accent/40 hover:border-accent text-xs text-accent-light hover:text-white flex items-center space-x-1.5 transition-all cursor-pointer font-semibold shadow-xs"
+                      title="Baixar nota já formatada em PDF, Word (.doc) ou Markdown (.md) para a pasta Downloads"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{isExporting ? 'Baixando...' : 'Baixar Nota'}</span>
+                      <ChevronDown className="w-3 h-3 ml-0.5" />
+                    </button>
 
-                      {/* Maximize / Restore Note */}
-                      <button
-                        onClick={() => {
-                          const nextState = !isNoteMaximized;
-                          setIsNoteMaximized(nextState);
-                          if (nextState) setIsSidebarCollapsed(true);
-                        }}
-                        className={`p-2 rounded-xl border transition-colors ${
-                          isNoteMaximized 
-                            ? 'bg-accent/20 border-accent text-accent-light' 
-                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
-                        }`}
-                        title={isNoteMaximized ? "Restaurar tamanho normal" : "Maximizar nota (foco total na leitura)"}
-                      >
-                        {isNoteMaximized ? (
-                          <Minimize2 className="w-4 h-4 text-accent-light" />
-                        ) : (
-                          <Maximize2 className="w-4 h-4" />
-                        )}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {/* Layout Mode Toggle for Editor */}
-                      <div className="flex items-center bg-card rounded-xl p-0.5 border border-card-border text-[11px] shrink-0">
+                    {isExportMenuOpen && (
+                      <div className="absolute right-0 top-full mt-1.5 w-64 p-1.5 rounded-2xl bg-card border border-card-border shadow-2xl z-50 backdrop-blur-md space-y-1 animate-in fade-in zoom-in-95">
+                        <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 font-mono border-b border-card-border/60">
+                          Salvar em Downloads:
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => setEditSplitMode('editor')}
-                          className={`px-2.5 py-1 rounded-lg transition-all ${
-                            editSplitMode === 'editor'
-                              ? 'bg-accent text-white font-semibold shadow-xs'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                          title="Apenas Editor de Código Markdown"
+                          onClick={() => handleDownloadSingleNote(activeNote, 'pdf')}
+                          className="w-full px-2.5 py-2 rounded-xl hover:bg-rose-500/20 text-slate-200 hover:text-rose-200 text-xs flex items-center space-x-2 transition-colors cursor-pointer text-left"
+                          title="Exportar documento diagramado com capa, cabeçalho e imprimir em PDF"
                         >
-                          Editor
+                          <div className="p-1 rounded-lg bg-rose-500/20 text-rose-400">
+                            <FileText className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-semibold block">PDF Formatado</span>
+                            <span className="text-[10px] text-slate-400 block">Com estilos, tabelas e pronto p/ imprimir</span>
+                          </div>
                         </button>
+
                         <button
                           type="button"
-                          onClick={() => setEditSplitMode('both')}
-                          className={`px-2.5 py-1 rounded-lg transition-all flex items-center space-x-1 ${
-                            editSplitMode === 'both'
-                              ? 'bg-accent text-white font-semibold shadow-xs'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                          title="Dividir: Editor e Preview Lado a Lado"
+                          onClick={() => handleDownloadSingleNote(activeNote, 'word')}
+                          className="w-full px-2.5 py-2 rounded-xl hover:bg-blue-500/20 text-slate-200 hover:text-blue-200 text-xs flex items-center space-x-2 transition-colors cursor-pointer text-left"
+                          title="Exportar arquivo compatível com Microsoft Word (.doc / .docx) com tabelas e formatação"
                         >
-                          <Columns className="w-3 h-3" />
-                          <span>Split</span>
+                          <div className="p-1 rounded-lg bg-blue-500/20 text-blue-400">
+                            <FileText className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-semibold block">Word (.doc / .docx)</span>
+                            <span className="text-[10px] text-slate-400 block">Documento editável com tabelas e negritos</span>
+                          </div>
                         </button>
+
                         <button
                           type="button"
-                          onClick={() => setEditSplitMode('preview')}
-                          className={`px-2.5 py-1 rounded-lg transition-all ${
-                            editSplitMode === 'preview'
-                              ? 'bg-accent text-white font-semibold shadow-xs'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                          title="Apenas Pré-visualização Formatada"
+                          onClick={() => handleDownloadSingleNote(activeNote, 'md_tags')}
+                          className="w-full px-2.5 py-2 rounded-xl hover:bg-amber-500/20 text-slate-200 hover:text-amber-200 text-xs flex items-center space-x-2 transition-colors cursor-pointer text-left"
+                          title="Exportar Markdown completo preservando todas as hashtags (#tags) e wikilinks do Obsidian"
                         >
-                          Preview
+                          <div className="p-1 rounded-lg bg-amber-500/20 text-amber-400">
+                            <Tag className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-semibold block">Markdown (.md com Tags)</span>
+                            <span className="text-[10px] text-slate-400 block">Preserva todas as #tags e wikilinks</span>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSingleNote(activeNote, 'md_clean')}
+                          className="w-full px-2.5 py-2 rounded-xl hover:bg-emerald-500/20 text-slate-200 hover:text-emerald-200 text-xs flex items-center space-x-2 transition-colors cursor-pointer text-left"
+                          title="Exportar Markdown fluido e limpo para leitura (sem hashtags de sistema)"
+                        >
+                          <div className="p-1 rounded-lg bg-emerald-500/20 text-emerald-400">
+                            <FileText className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-semibold block">Markdown (.md Leitura Limpa)</span>
+                            <span className="text-[10px] text-slate-400 block">Sem poluição de tags de sistema</span>
+                          </div>
                         </button>
                       </div>
+                    )}
+                  </div>
 
-                      <button
-                        onClick={() => {
-                          setEditContent(activeNote.content);
-                          setEditTitle(activeNote.title);
-                          setNoteViewMode('preview');
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 transition-all"
-                      >
-                        Cancelar
-                      </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteNote(activeNote.id, activeNote.isProjectSpecific)}
+                    className="p-2 rounded-xl hover:bg-card-border text-slate-400 hover:text-rose-400 transition-colors"
+                    title="Excluir anotação"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
 
-                      <button
-                        onClick={() => setNoteViewMode('preview')}
-                        className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 hover:text-white flex items-center space-x-1.5 transition-all"
-                        title="Ver visualização formatada"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-accent-light" />
-                        <span>Modo Leitura</span>
-                      </button>
+                  {/* Full Width Toggle */}
+                  <button
+                    type="button"
+                    onClick={toggleFullWidth}
+                    className={`p-2 rounded-xl border transition-colors ${
+                      isFullWidth 
+                        ? 'bg-accent/20 border-accent text-accent-light' 
+                        : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
+                    }`}
+                    title={isFullWidth ? "Largura Total ativada (clique para limitar a 896px)" : "Ocupar toda a largura da tela (Full Width)"}
+                  >
+                    <ArrowLeftRight className="w-4 h-4" />
+                  </button>
 
-                      <button
-                        onClick={handleSaveActiveNote}
-                        disabled={isSaving}
-                        className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-emerald-950/30"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        <span>{isSaving ? 'Salvando...' : 'Salvar & Visualizar'}</span>
-                      </button>
-
-                      {/* Full Width Toggle in Edit Mode */}
-                      <button
-                        onClick={toggleFullWidth}
-                        className={`p-2 rounded-xl border transition-colors ${
-                          isFullWidth 
-                            ? 'bg-accent/20 border-accent text-accent-light' 
-                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
-                        }`}
-                        title={isFullWidth ? "Largura Total ativada (clique para limitar a 896px)" : "Ocupar toda a largura da tela (Full Width)"}
-                      >
-                        <ArrowLeftRight className="w-4 h-4" />
-                      </button>
-
-                      {/* Maximize / Restore in Edit Mode */}
-                      <button
-                        onClick={() => {
-                          const nextState = !isNoteMaximized;
-                          setIsNoteMaximized(nextState);
-                          if (nextState) setIsSidebarCollapsed(true);
-                        }}
-                        className={`p-2 rounded-xl border transition-colors ${
-                          isNoteMaximized 
-                            ? 'bg-accent/20 border-accent text-accent-light' 
-                            : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
-                        }`}
-                        title={isNoteMaximized ? "Restaurar tamanho normal" : "Maximizar tela de edição"}
-                      >
-                        {isNoteMaximized ? (
-                          <Minimize2 className="w-4 h-4 text-accent-light" />
-                        ) : (
-                          <Maximize2 className="w-4 h-4" />
-                        )}
-                      </button>
-                    </>
-                  )}
+                  {/* Maximize / Restore Note */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState = !isNoteMaximized;
+                      setIsNoteMaximized(nextState);
+                      if (nextState) setIsSidebarCollapsed(true);
+                    }}
+                    className={`p-2 rounded-xl border transition-colors ${
+                      isNoteMaximized 
+                        ? 'bg-accent/20 border-accent text-accent-light' 
+                        : 'hover:bg-card-border border-transparent text-slate-400 hover:text-white'
+                    }`}
+                    title={isNoteMaximized ? "Restaurar tamanho normal" : "Maximizar nota (foco total na leitura e escrita)"}
+                  >
+                    {isNoteMaximized ? (
+                      <Minimize2 className="w-4 h-4 text-accent-light" />
+                    ) : (
+                      <Maximize2 className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
               </div>
 
-              {/* DOCUMENT BODY */}
-              {noteViewMode === 'preview' ? (
-                /* 1. FORMATTED PREVIEW VIEW (DEFAULT) */
-                <div 
-                  className="flex-1 overflow-y-auto bg-[#0a0c12] p-8 scrollbar-thin scrollbar-thumb-card-border select-text"
+              {/* DOCUMENT BODY - DIGITAL NOTEBOOK CANVAS FORMATADO */}
+              <div 
+                ref={previewContainerRef}
+                  className="flex-1 overflow-y-auto bg-[#0a0c12] p-6 lg:p-8 scrollbar-thin scrollbar-thumb-card-border select-text"
                   onMouseUp={handleTextSelection}
                   onContextMenu={handleContextMenu}
-                  onDoubleClick={() => setNoteViewMode('edit')}
-                  title="Dê duplo clique para editar esta anotação"
                 >
                   <div className={`space-y-6 ${isFullWidth ? 'w-full max-w-none' : 'max-w-4xl mx-auto'}`}>
-                    {/* Top banner info */}
-                    <div className="flex items-center justify-between pb-4 border-b border-card-border/60 text-xs text-slate-400 font-mono">
-                      <span className="flex items-center space-x-1.5">
-                        <Folder className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Caminho: <strong>{activeNote.relativePath || `${editFolder}/${activeNote.filename}`}</strong></span>
-                      </span>
-                      <button
-                        onClick={() => setNoteViewMode('edit')}
-                        className="text-[11px] text-accent-light hover:underline flex items-center space-x-1 font-sans"
-                      >
-                        <Edit3 className="w-3 h-3" />
-                        <span>Clique ou dê duplo-clique para editar</span>
-                      </button>
+                    {/* Cover Banner & Page Header Flexível (Sem sobreposição) */}
+                    <div className="relative mb-4">
+                      <div className="min-h-[90px] py-4 px-5 w-full rounded-3xl bg-gradient-to-r from-violet-950/60 via-accent/25 to-cyan-950/60 border border-card-border/60 shadow-lg relative overflow-visible flex items-center justify-between flex-wrap gap-3">
+                        <div className="absolute top-0 right-0 w-48 h-48 bg-accent/20 rounded-full blur-3xl pointer-events-none" />
+                        <div className="relative z-10 flex items-center justify-between w-full flex-wrap gap-3">
+                          <div className="flex items-center space-x-3.5 min-w-0 flex-1">
+                            <div className="relative shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                                className="text-3xl p-2.5 rounded-2xl bg-card/90 border border-card-border shadow-xl backdrop-blur-md select-none hover:scale-110 transition-transform cursor-pointer"
+                                title="Alterar ícone da página"
+                              >
+                                {noteEmoji}
+                              </button>
+                              {isEmojiPickerOpen && (
+                                <div className="absolute left-0 top-full mt-2 p-2 rounded-2xl bg-card border border-card-border shadow-2xl z-50 grid grid-cols-4 gap-1.5 w-44 backdrop-blur-md" ref={emojiPickerRef}>
+                                  {EMOJI_PRESETS.map(em => (
+                                    <button
+                                      key={em}
+                                      type="button"
+                                      onClick={() => {
+                                        setNoteEmoji(em);
+                                        setIsEmojiPickerOpen(false);
+                                      }}
+                                      className="p-1.5 rounded-lg hover:bg-accent/30 text-lg transition-colors text-center"
+                                    >
+                                      {em}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <input
+                                type="text"
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                onBlur={handleSaveActiveNote}
+                                placeholder="Título da Anotação..."
+                                className="text-xl sm:text-2xl font-black text-slate-100 tracking-tight bg-transparent focus:outline-none focus:border-b border-accent w-full"
+                              />
+                              <p className="text-xs text-slate-400 font-mono flex items-center space-x-1.5 mt-0.5 truncate">
+                                <Folder className="w-3 h-3 text-amber-400 shrink-0" />
+                                <span>{activeNote.relativePath || `${editFolder}/${activeNote.filename}`}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setIsReorderModalOpen(true)}
+                              className="px-3 py-1.5 rounded-xl bg-card/80 hover:bg-card border border-card-border text-xs text-slate-200 hover:text-amber-300 flex items-center space-x-1.5 transition-all shadow-md backdrop-blur-md"
+                              title="Reordenar tópicos e seções da nota"
+                            >
+                              <ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />
+                              <span className="hidden sm:inline">Organizar Tópicos</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Rendered Markdown Document */}
-                    <div className="prose prose-invert max-w-none text-sm leading-relaxed select-text space-y-4">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {editContent}
-                      </ReactMarkdown>
+                    {/* Sticky Rich Formatting Toolbar (Disponível diretamente no Modo Formatado!) */}
+                    <div className="sticky top-0 z-30 mb-4 p-2 rounded-2xl bg-[#13151f]/95 border border-card-border/80 shadow-xl flex flex-wrap items-center gap-1 shrink-0 backdrop-blur-md">
+                      {/* Text Styles */}
+                      <div className="flex items-center space-x-0.5 pr-1.5 border-r border-card-border">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyFormatting('**', '**')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Negrito (**)"
+                        >
+                          <Bold className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyFormatting('*', '*')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Itálico (*)"
+                        >
+                          <Italic className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyFormatting('<u>', '</u>')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Sublinhado (<u>)"
+                        >
+                          <Underline className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyFormatting('~~', '~~')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Tachado (~~)"
+                        >
+                          <Strikethrough className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyFormatting('`', '`')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors font-mono"
+                          title="Código Inline (`código`)"
+                        >
+                          <Code className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Headings */}
+                      <div className="flex items-center space-x-0.5 px-1.5 border-r border-card-border">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyLinePrefix('# ')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-cyan-300 transition-colors font-bold text-xs"
+                          title="Título 1 (#)"
+                        >
+                          H1
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyLinePrefix('## ')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-cyan-300 transition-colors font-bold text-xs"
+                          title="Título 2 (##)"
+                        >
+                          H2
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyLinePrefix('### ')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-cyan-300 transition-colors font-bold text-xs"
+                          title="Título 3 (###)"
+                        >
+                          H3
+                        </button>
+                      </div>
+
+                      {/* Lists & Checklists */}
+                      <div className="flex items-center space-x-0.5 px-1.5 border-r border-card-border">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyLinePrefix('- ')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Lista com Marcadores (-)"
+                        >
+                          <List className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyLinePrefix('1. ')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Lista Numerada (1.)"
+                        >
+                          <ListOrdered className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => applyLinePrefix('- [ ] ')}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-emerald-300 transition-colors"
+                          title="Checklist (- [ ])"
+                        >
+                          <CheckSquare className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Colors Palette & Highlighter */}
+                      <div className="relative flex items-center space-x-0.5 px-1.5 border-r border-card-border" ref={colorPickerRef}>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-amber-300 hover:text-amber-200 transition-colors flex items-center space-x-1"
+                          title="Trocar Cor do Texto e Marca-texto"
+                        >
+                          <Palette className="w-3.5 h-3.5" />
+                          <ChevronDown className="w-2.5 h-2.5" />
+                        </button>
+
+                        {isColorPickerOpen && (
+                          <div 
+                            className="absolute left-0 top-full mt-1.5 p-3 rounded-2xl bg-card border border-card-border shadow-2xl z-50 w-64 backdrop-blur-md space-y-3"
+                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          >
+                            <div>
+                              <span className="text-[10px] font-bold uppercase text-slate-400 font-mono block mb-1.5">Cor do Texto:</span>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {TEXT_COLORS.map(c => (
+                                  <button
+                                    key={c.hex}
+                                    type="button"
+                                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                    onClick={() => applyTextColor(c.hex)}
+                                    className="flex items-center space-x-1 p-1 rounded-lg hover:bg-card-border text-[11px] text-slate-200"
+                                    title={c.name}
+                                  >
+                                    <span className={`w-3 h-3 rounded-full ${c.bg} shrink-0`} />
+                                    <span className="truncate">{c.name}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="pt-2 border-t border-card-border">
+                              <span className="text-[10px] font-bold uppercase text-slate-400 font-mono block mb-1.5">Marca-texto / Destaque:</span>
+                              <div className="grid grid-cols-3 gap-1.5">
+                                {HIGHLIGHT_COLORS.map(h => (
+                                  <button
+                                    key={h.name}
+                                    type="button"
+                                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                    onClick={() => applyHighlight(h.bg, h.text)}
+                                    className="flex items-center space-x-1 p-1 rounded-lg hover:bg-card-border text-[11px] text-slate-200"
+                                    title={`Marca-texto ${h.name}`}
+                                  >
+                                    <span className={`w-3 h-3 rounded-full ${h.circle} shrink-0`} />
+                                    <span className="truncate">{h.name}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Image Upload Button */}
+                      <div className="flex items-center space-x-0.5 px-1.5 border-r border-card-border">
+                        <input
+                          ref={imageInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              handleImageUpload(e.target.files[0]);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => imageInputRef.current?.click()}
+                          disabled={isUploadingImage}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-emerald-400 hover:text-emerald-300 transition-colors flex items-center space-x-1"
+                          title="Inserir Imagem (Upload do PC ou cole prints com Ctrl+V)"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span className="text-[11px] hidden xl:inline">{isUploadingImage ? 'Enviando...' : 'Imagem'}</span>
+                        </button>
+                      </div>
+
+                      {/* Wikilink [[ ]] */}
+                      <div className="flex items-center space-x-0.5 px-1.5 border-r border-card-border">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => setIsWikilinkModalOpen(true)}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-accent-light hover:text-white transition-colors flex items-center space-x-1"
+                          title="Inserir Conexão [[Wikilink]] com outra nota"
+                        >
+                          <LinkIcon className="w-3.5 h-3.5" />
+                          <span className="text-[11px] font-mono hidden xl:inline">[[ ]]</span>
+                        </button>
+                      </div>
+
+                      {/* Reorder Topics */}
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onClick={() => setIsReorderModalOpen(true)}
+                        className="p-1.5 rounded-lg hover:bg-card-border text-amber-300 hover:text-amber-200 transition-colors flex items-center space-x-1 text-xs"
+                        title="Organizar Tópicos (Mover seções para cima ▲ ou baixo ▼)"
+                      >
+                        <ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="hidden xl:inline text-[11px]">Organizar</span>
+                      </button>
+
+                      {/* Live Voice da Nota */}
+                      {onStartLiveVoice && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={() => onStartLiveVoice(activeNote.title, activeNote.content)}
+                          className="ml-auto px-2.5 py-1 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer"
+                          title="Iniciar Live Voice para dialogar sobre esta nota"
+                        >
+                          <Radio className="w-3 h-3 text-red-400 animate-pulse" />
+                          <span>Live Voice</span>
+                        </button>
+                      )}
                     </div>
+
+                    {/* CANVAS DIGITAL FORMATADO E EDITÁVEL (WYSIWYG) */}
+                    <div
+                      ref={editableContainerRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={handleEditorInput}
+                      onClick={handleEditorClick}
+                      onPaste={handleEditorPasteFormatted}
+                      onDrop={handleEditorDropFormatted}
+                      onMouseUp={handleTextSelection}
+                      onContextMenu={handleContextMenu}
+                      className="prose prose-invert max-w-none text-sm leading-relaxed p-6 sm:p-8 bg-[#10131d]/60 rounded-3xl border border-card-border/60 shadow-2xl min-h-[500px] outline-none select-text cursor-text focus:border-accent/40 transition-colors pb-32"
+                    />
 
                     {/* Backlinks Section */}
                     {activeNote.backlinks && activeNote.backlinks.length > 0 && (
@@ -3135,79 +4493,23 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {activeNote.backlinks.map(b => (
-                            <span key={b} className="px-3 py-1 rounded-xl bg-accent/15 border border-accent/30 text-xs text-slate-200 font-medium">
+                            <button
+                              key={b}
+                              type="button"
+                              onClick={() => {
+                                const targetNote = notes.find(n => n.title.toLowerCase() === b.toLowerCase());
+                                if (targetNote) selectNote(targetNote);
+                              }}
+                              className="px-3 py-1 rounded-xl bg-accent/15 hover:bg-accent/30 border border-accent/30 text-xs text-slate-200 font-medium transition-colors cursor-pointer"
+                            >
                               [[{b}]]
-                            </span>
+                            </button>
                           ))}
                         </div>
                       </div>
                     )}
                   </div>
                 </div>
-              ) : (
-                /* 2. SPLIT-SCREEN EDIT MODE */
-                <div 
-                  ref={editContainerRef}
-                  className="flex-1 flex overflow-hidden select-text relative"
-                  onMouseUp={handleTextSelection}
-                  onContextMenu={handleContextMenu}
-                >
-                  {/* Editor Column */}
-                  {(editSplitMode === 'both' || editSplitMode === 'editor') && (
-                    <div 
-                      style={{ width: editSplitMode === 'editor' ? '100%' : `${editSplitRatio}%` }}
-                      className="border-r border-card-border p-6 flex flex-col bg-[#08090e] shrink-0 overflow-hidden"
-                    >
-                      <div className="flex items-center justify-between text-[11px] uppercase font-bold text-slate-500 mb-3 font-mono">
-                        <span>Editor Markdown (suporta [[Wikilinks]] e #tags)</span>
-                        <span className="text-emerald-400">● Protegido por Backup</span>
-                      </div>
-                      <textarea
-                        value={editContent}
-                        onChange={(e) => setEditContent(e.target.value)}
-                        onMouseUp={handleTextSelection}
-                        onContextMenu={handleContextMenu}
-                        placeholder="Escreva seu documento com formatação Markdown, tabelas, código e [[Conexões]]..."
-                        className="flex-1 w-full bg-transparent text-xs text-slate-200 font-mono resize-none focus:outline-none leading-relaxed select-text"
-                      />
-                    </div>
-                  )}
-
-                  {/* Resizable Splitter between Editor and Preview */}
-                  {editSplitMode === 'both' && (
-                    <div
-                      onMouseDown={() => setIsDraggingEditSplit(true)}
-                      className={`w-1.5 cursor-col-resize hover:bg-accent transition-colors z-20 flex items-center justify-center shrink-0 ${
-                        isDraggingEditSplit ? 'bg-accent shadow-sm' : 'bg-transparent hover:bg-accent/40'
-                      }`}
-                      title="Arraste para redimensionar Editor e Pré-visualização"
-                    >
-                      <div className="w-0.5 h-6 rounded-full bg-slate-700/60" />
-                    </div>
-                  )}
-
-                  {/* Live Preview Column */}
-                  {(editSplitMode === 'both' || editSplitMode === 'preview') && (
-                    <div 
-                      className="flex-1 p-8 overflow-y-auto bg-[#0a0c12] scrollbar-thin scrollbar-thumb-card-border select-text"
-                      onMouseUp={handleTextSelection}
-                      onContextMenu={handleContextMenu}
-                    >
-                      <div className={`space-y-6 ${isFullWidth ? 'w-full max-w-none' : 'max-w-3xl mx-auto'}`}>
-                        <span className="text-[11px] uppercase font-bold text-slate-500 block font-mono">
-                          Pré-visualização em Tempo Real
-                        </span>
-
-                        <div className="prose prose-invert max-w-none text-xs leading-relaxed select-text">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {editContent}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           ) : selectedDeletedNote ? (
             /* Deleted Note Preview Mode */
@@ -3344,29 +4646,50 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                 <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                                 <span>Lixeira {deletedNotes.length > 0 ? `(${deletedNotes.length})` : ''}</span>
                               </button>
-                              <a
-                                href="https://github.com/akitaonrails/ai-memory"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2.5 py-1 rounded-xl bg-panel hover:bg-card border border-card-border text-slate-300 hover:text-cyan-300 flex items-center space-x-1.5 transition-colors group cursor-pointer"
-                                title="Notes Module baseado no Frank MD e AI-Memory do Akita (https://github.com/akitaonrails/ai-memory)"
+                              <button
+                                onClick={() => setIsCreditsOpen(true)}
+                                className="px-2.5 py-1 rounded-xl bg-panel hover:bg-card border border-card-border hover:border-emerald-500/40 text-slate-300 hover:text-emerald-300 flex items-center space-x-1.5 transition-colors group cursor-pointer"
+                                title="Abrir Créditos & Fundamentos Arquiteturais (Frank MD e AI-Memory do Akita)"
                               >
-                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Notes Module (Frank MD & AI-Memory based)</span>
-                                <ExternalLink className="w-2.5 h-2.5 text-slate-500 group-hover:text-cyan-300" />
-                              </a>
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                                <span>Notes Module (Frank MD & AI-Memory) • Ver Créditos</span>
+                                <Sparkles className="w-2.5 h-2.5 text-accent-light" />
+                              </button>
                             </div>
                           </div>
                         </div>
 
                         {/* Quick Actions Row */}
                         <div className="flex flex-wrap md:flex-col gap-2 shrink-0">
+                          {onStartLiveVoice && (
+                            <button
+                              onClick={() => {
+                                onStartLiveVoice(
+                                  isAll ? 'Central de Cadernos' : `Caderno: ${currentNb?.id}`,
+                                  `Estudo e diálogo por voz sobre o caderno ${isAll ? 'completo' : currentNb?.id} com ${dashboardNotes.length} anotações.`
+                                );
+                              }}
+                              className="px-3.5 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 hover:text-white font-semibold text-xs flex items-center space-x-2 transition-all cursor-pointer shadow-xs"
+                              title={`Iniciar sessão de Live Voice com o modelo sobre ${isAll ? 'todos os cadernos' : `o caderno ${currentNb?.id}`}`}
+                            >
+                              <Mic className="w-4 h-4 text-red-400" />
+                              <span>🎙️ Live Voice do Caderno</span>
+                            </button>
+                          )}
                           <button
                             onClick={() => handleCreateNoteInFolder(isAll ? 'Geral' : currentNb?.id || 'Geral')}
                             className="px-3.5 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white font-semibold text-xs flex items-center space-x-2 transition-all shadow-md shadow-accent/20 cursor-pointer"
                           >
                             <Plus className="w-4 h-4" />
                             <span>+ Nova Anotação</span>
+                          </button>
+                          <button
+                            onClick={() => handleDownloadEntireNotebook(isAll ? 'all' : (currentNb?.id || selectedNotebookId))}
+                            className="px-3.5 py-2 rounded-xl bg-panel hover:bg-card-border border border-card-border hover:border-accent text-slate-200 hover:text-accent-light font-semibold text-xs flex items-center space-x-2 transition-all cursor-pointer shadow-xs"
+                            title="Baixar todas as notas deste caderno em um único arquivo formatado sem tags (.md) na pasta de Downloads"
+                          >
+                            <Download className="w-4 h-4 text-accent-light" />
+                            <span>📥 Baixar Caderno Completo</span>
                           </button>
                           <button
                             onClick={() => {
@@ -3568,6 +4891,16 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                       <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-panel border border-card-border text-slate-300 font-semibold">
                                         {nb.totalCount} {nb.totalCount === 1 ? 'anotação' : 'anotações'}
                                       </span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDownloadEntireNotebook(nb.id);
+                                        }}
+                                        className="p-1.5 rounded-xl bg-panel hover:bg-accent/20 border border-card-border hover:border-accent/40 text-slate-400 hover:text-accent-light transition-colors cursor-pointer"
+                                        title={`Baixar caderno "${nb.id}" completo formatado sem tags (.md) para a pasta de Downloads`}
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                      </button>
                                       {nb.id !== 'Geral' && (
                                         <button
                                           onClick={(e) => {
@@ -3599,9 +4932,13 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 openNotebook(nb.id);
+                                                setCollapsedFolders(prev => ({ ...prev, [sub.path]: false, [`nb:${nb.id}`]: false }));
+                                                if (sub.notes.length > 0) {
+                                                  selectNote(sub.notes[0]);
+                                                }
                                               }}
-                                              className="flex items-center space-x-1 cursor-pointer truncate max-w-[120px]"
-                                              title={`Pasta: ${sub.path}`}
+                                              className="flex items-center space-x-1 cursor-pointer truncate max-w-[220px]"
+                                              title={`Abrir subpasta: ${sub.path} (${sub.notes.length} anotações)`}
                                             >
                                               <Folder className="w-3 h-3 text-amber-400 shrink-0" />
                                               <span className="truncate">{sub.name}</span>
@@ -3631,7 +4968,11 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                   {/* Subnotes Preview List */}
                                   <div className="space-y-1.5 pt-1 min-w-0">
                                     <span className="text-[10px] font-mono uppercase text-slate-500 font-semibold block">
-                                      Anotações no Caderno:
+                                      {nb.directNotes.length > 0 && nb.subfolders.length > 0
+                                        ? 'Anotações Recentes (Raiz & Subpastas):'
+                                        : nb.directNotes.length === 0 && nb.subfolders.length > 0
+                                        ? 'Anotações nas Subpastas:'
+                                        : 'Anotações no Caderno:'}
                                     </span>
                                     {previewSubnotes.length === 0 ? (
                                       <div className="text-[11px] text-slate-500 italic py-1">
@@ -3639,31 +4980,47 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                       </div>
                                     ) : (
                                       <div className="space-y-1">
-                                        {previewSubnotes.map(note => (
-                                          <div
-                                            key={note.id}
-                                            onClick={() => selectNote(note)}
-                                            className="px-2.5 py-1.5 rounded-xl bg-card/60 hover:bg-card border border-card-border/60 hover:border-accent/40 text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between group/note min-w-0"
-                                          >
-                                            <span className="truncate flex items-center space-x-2 min-w-0 flex-1">
-                                              <FileText className="w-3 h-3 text-accent-light shrink-0" />
-                                              <span className="truncate font-medium group-hover/note:text-accent-light">{note.title}</span>
-                                            </span>
-                                            <div className="flex items-center space-x-1 shrink-0 ml-1">
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleDeleteNote(note.id, note.isProjectSpecific);
-                                                }}
-                                                className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                                                title={`Excluir nota "${note.title}"`}
-                                              >
-                                                <Trash2 className="w-3 h-3" />
-                                              </button>
-                                              <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0" />
+                                        {previewSubnotes.map(note => {
+                                          const noteFolderPath = getNoteFolder(note);
+                                          const subfolderPart = noteFolderPath.includes('/')
+                                            ? noteFolderPath.split('/').slice(1).join('/')
+                                            : null;
+
+                                          return (
+                                            <div
+                                              key={note.id}
+                                              onClick={() => selectNote(note)}
+                                              className="px-2.5 py-1.5 rounded-xl bg-card/60 hover:bg-card border border-card-border/60 hover:border-accent/40 text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between group/note min-w-0"
+                                            >
+                                              <span className="truncate flex items-center space-x-2 min-w-0 flex-1">
+                                                <FileText className="w-3 h-3 text-accent-light shrink-0" />
+                                                <span className="truncate font-medium group-hover/note:text-accent-light">{note.title}</span>
+                                              </span>
+                                              <div className="flex items-center space-x-1 shrink-0 ml-1.5">
+                                                {subfolderPart && (
+                                                  <span 
+                                                    className="text-[9px] font-mono text-amber-300/90 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 max-w-[140px] truncate flex items-center space-x-1 shrink-0"
+                                                    title={`Subpasta: ${noteFolderPath}`}
+                                                  >
+                                                    <Folder className="w-2.5 h-2.5 shrink-0 text-amber-400" />
+                                                    <span className="truncate">{subfolderPart}</span>
+                                                  </span>
+                                                )}
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteNote(note.id, note.isProjectSpecific);
+                                                  }}
+                                                  className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                                  title={`Excluir nota "${note.title}"`}
+                                                >
+                                                  <Trash2 className="w-3 h-3" />
+                                                </button>
+                                                <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0" />
+                                              </div>
                                             </div>
-                                          </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </div>
@@ -3802,7 +5159,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                           {dashboardNotes.map(n => {
-                            const folderName = n.folder || n.subject || 'Geral';
+                            const folderName = getNoteFolder(n);
                             const nbDet = getNotebookDetails(folderName.split('/')[0] || folderName);
                             const excerpt = n.content
                               .replace(/^#+.*?\n/g, '')
@@ -3816,7 +5173,6 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                                 key={n.id}
                                 onClick={() => {
                                   selectNote(n);
-                                  setNoteViewMode('preview'); // Open formatted version first
                                 }}
                                 className="p-4 rounded-2xl border border-card-border/80 bg-card/60 hover:bg-card hover:border-accent/50 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-md flex flex-col justify-between space-y-3 group"
                               >
@@ -3905,6 +5261,30 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
         }}
         onRefreshNotes={fetchNotesAndFolders}
       />
+
+      {/* Export Toast Notification */}
+      {exportToast && (
+        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-card/95 border border-emerald-500/50 shadow-2xl backdrop-blur-md flex items-center space-x-3 text-xs text-slate-200 animate-in fade-in slide-in-from-bottom-3 max-w-md">
+          <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+            <Check className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="font-bold text-emerald-300 block">{exportToast.message}</span>
+            {exportToast.filename && (
+              <span className="text-[11px] text-slate-400 font-mono block truncate mt-0.5">
+                📁 Salvo como: {exportToast.filename}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setExportToast(null)}
+            className="p-1 rounded-lg hover:bg-card-border text-slate-400 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 };

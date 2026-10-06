@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { ConfigManager } from './services/configManager.js';
 import { OpenRouterService } from './services/providers/openrouter.js';
 import { ProjectManager } from './services/projectManager.js';
@@ -11,7 +12,7 @@ import { FileParser } from './services/tools/fileParser.js';
 import { ScreenCapture } from './services/tools/screenCapture.js';
 import { TerminalRunner } from './services/tools/terminalRunner.js';
 import { SessionManager } from './services/sessionManager.js';
-import { AgentLoop } from './services/agentLoop.js';
+import { AgentLoop, sanitizePortugueseText } from './services/agentLoop.js';
 import { FrankNoteEngine } from './services/notes/frankNoteEngine.js';
 import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
@@ -23,6 +24,7 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+app.use('/api/notes/attachments', express.static(FrankNoteEngine.ATTACHMENTS_DIR));
 
 // 1. Config Endpoints
 app.get('/api/config', (req, res) => {
@@ -361,7 +363,7 @@ app.post('/api/voice/fish-audio/tts', async (req, res) => {
       return res.status(400).json({ error: 'Chave da Fish Audio não configurada.' });
     }
 
-    const voiceId = reference_id || config.voiceSettings?.fishAudioVoiceId || '5161d41404314212af1254556477c17d';
+    const voiceId = reference_id || config.voiceSettings?.fishAudioVoiceId || '82d13948027e4be69892dd3d0104e681';
     const selectedModel = model || config.voiceSettings?.fishAudioModel || 's2.1-pro-free';
 
     const fishResponse = await fetch('https://api.fish.audio/v1/tts', {
@@ -486,9 +488,36 @@ app.delete('/api/notes/folders', (req, res) => {
     }
     const currentPath = ProjectManager.getCurrentProject();
     const result = FrankNoteEngine.deleteFolder(folderName, currentPath);
+
+    // Auto-sync Active Context: if current project's active_context.md references this deleted folder/study,
+    // clear the stale reference so AI never presumes notes/modules exist.
+    try {
+      const activeCtx = MemoryEngine.getActiveContext(currentPath);
+      const cleanFolder = folderName.replace(/[-_/]/g, ' ').toLowerCase();
+      if (activeCtx.toLowerCase().includes(folderName.toLowerCase()) || activeCtx.toLowerCase().includes(cleanFolder)) {
+        const cleanedCtx = `# 🎯 Active Context & Estado do Projeto\n\n## 📌 Objetivo Atual\n- O usuário excluiu o diretório/caderno "${folderName}".\n\n## 📂 Arquivos em Foco\n- Nenhum arquivo ativo no momento (notas anteriores foram excluídas).\n\n## 🚀 Progresso Recente\n- [x] Limpeza e remoção do material antigo para permitir novo plano do zero.\n\n## ⚡ Próximos Passos Imediatos\n- Quando o usuário solicitar, crie notas ATIVAS NOVAS do zero usando 'note_save'.\n`;
+        MemoryEngine.updateActiveContext(currentPath, cleanedCtx);
+      }
+    } catch {}
+
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/upload-attachment', (req, res) => {
+  try {
+    const { filename, base64Data } = req.body;
+    if (!base64Data) {
+      return res.status(400).json({ error: 'Nenhum dado de imagem ou arquivo fornecido' });
+    }
+    const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const attachment = FrankNoteEngine.saveAttachment(filename || 'imagem.png', buffer);
+    res.json(attachment);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Falha ao salvar anexo da nota' });
   }
 });
 
@@ -609,6 +638,54 @@ app.post('/api/notes/trash/cleanup', (req, res) => {
   }
 });
 
+// Endpoint to directly save exported notes into the OS Downloads folder
+app.post('/api/notes/export-to-downloads', (req, res) => {
+  try {
+    const { filename, content, openFolder } = req.body;
+    if (!filename || !content) {
+      return res.status(400).json({ error: 'filename e content são obrigatórios' });
+    }
+
+    const homeDir = os.homedir();
+    const downloadsDir = path.join(homeDir, 'Downloads');
+    if (!fs.existsSync(downloadsDir)) {
+      fs.mkdirSync(downloadsDir, { recursive: true });
+    }
+
+    // Sanitize filename
+    const safeFilename = filename.replace(/[<>:"/\\|?*]/g, '_').trim();
+    const targetFilePath = path.join(downloadsDir, safeFilename);
+
+    fs.writeFileSync(targetFilePath, content, 'utf-8');
+    console.log(`[Notes Export] Arquivo salvo em Downloads: ${targetFilePath}`);
+
+    if (openFolder) {
+      try {
+        const { exec } = require('child_process');
+        if (process.platform === 'win32') {
+          exec(`explorer /select,"${targetFilePath}"`);
+        } else if (process.platform === 'darwin') {
+          exec(`open -R "${targetFilePath}"`);
+        } else {
+          exec(`xdg-open "${downloadsDir}"`);
+        }
+      } catch (e: any) {
+        console.warn('[Notes Export] Não foi possível abrir o explorer:', e.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      filePath: targetFilePath,
+      filename: safeFilename,
+      downloadsDir
+    });
+  } catch (err: any) {
+    console.error('[Notes Export Error]', err);
+    res.status(500).json({ error: err.message || 'Falha ao salvar na pasta Downloads' });
+  }
+});
+
 // Parameterized Individual Note Routes
 app.post('/api/notes/:id/move', (req, res) => {
   try {
@@ -632,6 +709,16 @@ app.delete('/api/notes/:id', (req, res) => {
     const currentPath = ProjectManager.getCurrentProject();
     const isProjectSpecific = req.query.isProjectSpecific === 'true';
     const success = FrankNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
+
+    // Auto-clean active_context if it specifically mentions this deleted note ID
+    try {
+      const activeCtx = MemoryEngine.getActiveContext(currentPath);
+      if (activeCtx.toLowerCase().includes(req.params.id.toLowerCase())) {
+        const cleanedCtx = activeCtx.split('\n').filter(line => !line.toLowerCase().includes(req.params.id.toLowerCase())).join('\n');
+        MemoryEngine.updateActiveContext(currentPath, cleanedCtx);
+      }
+    } catch {}
+
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -658,13 +745,18 @@ app.post('/api/notes/generate-from-chat', async (req, res) => {
       return res.status(400).json({ error: 'Nenhum texto relevante para criar nota.' });
     }
 
+    const userLocale = config.locale || 'pt-BR';
+    const userLanguage = config.language || 'Português (Brasil)';
     const promptMessages = [
       {
         role: 'system' as const,
-        content: `Você é o sintetizador de conhecimento do FrankMD Notes.
+        content: `Você é o sintetizador de conhecimento do Notes Module (módulo de notas baseado nas arquiteturas Frank MD e AI-Memory).
+IDIOMA OBRIGATÓRIO: Responda EXCLUSIVAMENTE em ${userLanguage} (${userLocale}).
+É TOTALMENTE PROIBIDO responder em espanhol ou portunhol, mesmo que termos técnicos se assemelhem (ex: use "Arquitetura", jamais "Arquitectura"; use "Exercícios", jamais "Ejercicios"; use "Introdução", jamais "Introducción").
+
 Sua missão é extrair todo o conteúdo relevante da conversa e gerar uma nota rica, clara e estruturada no formato Markdown.
 Estrutura obrigatória:
-<!-- subject: Assunto principal -->
+<!-- subject: Assunto principal em ${userLanguage} -->
 # Título Claro e Específico da Nota
 
 ## 📌 Resumo Executivo
@@ -680,7 +772,7 @@ Breve resumo dos objetivos, contexto e conclusões da discussão.
       },
       {
         role: 'user' as const,
-        content: `Transcrição da conversa "${sessionTitle || 'Sessão'}":\n\n${chatTranscript.slice(0, 25000)}\n\nCrie uma nota completa contendo todo o conteúdo relevante.`
+        content: `Transcrição da conversa "${sessionTitle || 'Sessão'}":\n\n${chatTranscript.slice(0, 25000)}\n\nCrie uma nota completa contendo todo o conteúdo relevante em ${userLanguage}.`
       }
     ];
 
@@ -699,11 +791,20 @@ Breve resumo dos objetivos, contexto e conclusões da discussão.
       }
     );
 
+    if (userLocale.startsWith('pt')) {
+      generatedNoteContent = sanitizePortugueseText(generatedNoteContent);
+    }
+
     const firstH1 = generatedNoteContent.match(/^#+\s*(.*)/m);
-    const title = firstH1 ? firstH1[1].trim() : (sessionTitle ? `Nota: ${sessionTitle}` : `Nota ${new Date().toLocaleDateString()}`);
+    let title = firstH1 ? firstH1[1].trim() : (sessionTitle ? `Nota: ${sessionTitle}` : `Nota ${new Date().toLocaleDateString()}`);
 
     const subjectMatch = generatedNoteContent.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
-    const subject = subjectMatch ? subjectMatch[1].trim() : 'Sessões';
+    let subject = subjectMatch ? subjectMatch[1].trim() : 'Sessões';
+
+    if (userLocale.startsWith('pt')) {
+      title = sanitizePortugueseText(title);
+      subject = sanitizePortugueseText(subject);
+    }
 
     const savedNote = FrankNoteEngine.saveNote({
       title,
@@ -980,7 +1081,7 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 });
 
-// Voice Endpoints: Whisper STT support
+// Voice Endpoints: Multi-Provider Speech-To-Text (Whisper, OpenRouter Gemini 2.5 Flash, Direct Audio)
 app.post('/api/voice/transcribe', async (req, res) => {
   try {
     const { audioBase64, mimeType } = req.body;
@@ -990,47 +1091,146 @@ app.post('/api/voice/transcribe', async (req, res) => {
 
     const config = ConfigManager.getConfig();
     const openaiKey = config.keys.openai;
-
-    if (!openaiKey) {
-      return res.status(400).json({ 
-        error: 'Chave da OpenAI para o Whisper não configurada nas configurações. Utilize o reconhecimento de voz nativo.' 
-      });
-    }
-
+    const openrouterKey = config.keys.openrouter;
+    const googleKey = config.keys.google;
+    const ext = mimeType?.includes('wav') ? 'wav' : (mimeType?.includes('mp3') ? 'mp3' : 'wav');
     const audioBuffer = Buffer.from(audioBase64, 'base64');
-    const ext = mimeType?.includes('wav') ? 'wav' : (mimeType?.includes('mp3') ? 'mp3' : 'webm');
-    
-    // Create FormData for Whisper API
-    const formData = new FormData();
-    const blob = new Blob([audioBuffer], { type: mimeType || 'audio/webm' });
-    formData.append('file', blob, `audio.${ext}`);
-    formData.append('model', 'whisper-1');
-    formData.append('language', 'pt');
 
-    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiKey}`
-      },
-      body: formData
-    });
+    console.log(`[Voice Transcribe] Recebido áudio de ${audioBuffer.length} bytes (${ext}). Iniciando transcrição...`);
 
-    if (!whisperResponse.ok) {
-      const errText = await whisperResponse.text();
-      return res.status(whisperResponse.status).json({ error: `Erro Whisper: ${errText}` });
+    // 1. OpenAI Whisper se chave estiver configurada
+    if (openaiKey) {
+      try {
+        const formData = new FormData();
+        const blob = new Blob([audioBuffer], { type: mimeType || 'audio/wav' });
+        formData.append('file', blob, `audio.${ext}`);
+        formData.append('model', 'whisper-1');
+        formData.append('language', 'pt');
+
+        const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiKey}`
+          },
+          body: formData
+        });
+
+        if (whisperResponse.ok) {
+          const result: any = await whisperResponse.json();
+          const text = (result.text || '').trim();
+          console.log(`[Voice Transcribe] OpenAI Whisper sucesso: "${text}"`);
+          return res.json({ text, provider: 'whisper-1' });
+        }
+      } catch (err: any) {
+        console.warn('[Voice Transcribe] OpenAI Whisper falhou, tentando fallback:', err.message);
+      }
     }
 
-    const result: any = await whisperResponse.json();
-    res.json({ text: result.text || '', provider: 'whisper-1' });
+    // 2. Google Gemini Oficial (se chave direta do Google estiver presente)
+    if (googleKey) {
+      try {
+        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: 'Transcreva com precisão o que foi dito em português do Brasil neste áudio. Se não houver fala compreensível ou se for apenas ruído ambiente ou silêncio, responda exatamente: SILENCIO. Caso haja fala, responda APENAS o texto exato transcrito, sem aspas ou introduções.' },
+                  {
+                    inlineData: {
+                      mimeType: 'audio/wav',
+                      data: audioBase64
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        });
+
+        if (geminiRes.ok) {
+          const gData: any = await geminiRes.json();
+          let transcription = (gData.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+          transcription = transcription.replace(/^["']|["']$/g, '').trim();
+          if (/^sil[eê]ncio\.?$/i.test(transcription)) {
+            transcription = '';
+          }
+          console.log(`[Voice Transcribe] Google Gemini Oficial sucesso: "${transcription}"`);
+          return res.json({ text: transcription, provider: 'google:gemini-2.0-flash' });
+        }
+      } catch (err: any) {
+        console.warn('[Voice Transcribe] Google Gemini direto falhou, tentando fallback:', err.message);
+      }
+    }
+
+    // 3. OpenRouter com Gemini 2.5 Flash / 2.0 Flash
+    if (openrouterKey) {
+      const modelsToTry = ['google/gemini-2.5-flash', 'google/gemini-2.0-flash-001'];
+      for (const modelName of modelsToTry) {
+        try {
+          const orResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${openrouterKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: modelName,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'text',
+                      text: 'Transcreva o áudio falado em português do Brasil com máxima precisão. Se não houver fala humana compreensível ou se for apenas ruído ambiente ou silêncio, responda exatamente: SILENCIO. Caso haja fala, responda APENAS o texto exato transcrito, sem introduções, aspas ou comentários adicionais.'
+                    },
+                    {
+                      type: 'input_audio',
+                      input_audio: {
+                        data: audioBase64,
+                        format: 'wav'
+                      }
+                    }
+                  ]
+                }
+              ]
+            })
+          });
+
+          if (orResponse.ok) {
+            const orData: any = await orResponse.json();
+            let transcription = (orData.choices?.[0]?.message?.content || '').trim();
+            transcription = transcription.replace(/^["']|["']$/g, '').trim();
+            if (/^sil[eê]ncio\.?$/i.test(transcription)) {
+              transcription = '';
+            }
+            console.log(`[Voice Transcribe] OpenRouter (${modelName}) sucesso: "${transcription}"`);
+            return res.json({ text: transcription, provider: `openrouter:${modelName}` });
+          } else {
+            const errText = await orResponse.text();
+            console.warn(`[Voice Transcribe] OpenRouter (${modelName}) erro:`, orResponse.status, errText);
+          }
+        } catch (err: any) {
+          console.warn(`[Voice Transcribe] OpenRouter (${modelName}) falhou:`, err.message);
+        }
+      }
+    }
+
+    return res.status(400).json({
+      error: 'Nenhum provedor de transcrição de áudio configurado (configure OpenRouter ou OpenAI nas configurações).'
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Falha ao transcrever áudio com Whisper' });
+    res.status(500).json({ error: err.message || 'Falha ao transcrever áudio' });
   }
 });
 
 app.get('/api/voice/status', (req, res) => {
   const config = ConfigManager.getConfig();
+  const hasTranscriber = !!config.keys.openrouter || !!config.keys.openai;
   res.json({
-    hasWhisper: !!config.keys.openai,
+    hasWhisper: hasTranscriber,
+    hasOpenRouter: !!config.keys.openrouter,
     webSpeechAvailable: true
   });
 });

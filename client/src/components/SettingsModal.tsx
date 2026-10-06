@@ -14,7 +14,8 @@ import {
   Trash2,
   Volume2,
   Mic,
-  Play
+  Play,
+  Globe
 } from 'lucide-react';
 import { AppConfig } from '../types';
 import { api } from '../api';
@@ -25,6 +26,7 @@ interface SettingsModalProps {
   onClose: () => void;
   config: AppConfig | null;
   onConfigUpdated: (newConfig: AppConfig) => void;
+  onOpenCredits?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -32,6 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   config,
   onConfigUpdated,
+  onOpenCredits,
 }) => {
   const [openrouterKey, setOpenrouterKey] = useState('');
   const [googleKey, setGoogleKey] = useState('');
@@ -41,6 +44,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [deletedNotesRetention, setDeletedNotesRetention] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
   
+  // Localization & Strict Language States
+  const [locale, setLocale] = useState<string>('pt-BR');
+  const [language, setLanguage] = useState<string>('Português (Brasil)');
+  const [country, setCountry] = useState<string>('Brasil');
+  const [enforceStrictLanguage, setEnforceStrictLanguage] = useState<boolean>(true);
+
   // Voice Settings States
   const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>('fish-audio');
   const [fishVoiceId, setFishVoiceId] = useState<string>(FISH_VOICE_PRESETS[0].id);
@@ -63,6 +72,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setFishAudioKey(config.keys.fishAudio || '');
       if (config.theme) setTheme(config.theme);
       if (config.deletedNotesRetention) setDeletedNotesRetention(config.deletedNotesRetention);
+      if (config.locale) setLocale(config.locale);
+      if (config.language) setLanguage(config.language);
+      if (config.country) setCountry(config.country);
+      if (config.enforceStrictLanguage !== undefined) setEnforceStrictLanguage(config.enforceStrictLanguage);
       if (config.voiceSettings?.provider) setVoiceProvider(config.voiceSettings.provider);
       if (config.voiceSettings?.fishAudioVoiceId) setFishVoiceId(config.voiceSettings.fishAudioVoiceId);
       if (config.voiceSettings?.fishAudioModel) setFishModel(config.voiceSettings.fishAudioModel);
@@ -92,7 +105,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return;
     }
     setIsTestingVoice(true);
-    voiceService.speak('Olá! Esta é a voz de síntese do Tellus configurada para você.', {
+    const testPhrase = voiceProvider === 'fish-audio'
+      ? (fishVoiceId === '82d13948027e4be69892dd3d0104e681'
+          ? 'Olá! Eu sou o Jarvis. Síntese de voz em alta definição conectada com sucesso no Tellus.'
+          : fishVoiceId === '2714f32ab7f8475fa45e277f840c8c23'
+          ? 'Oie! Ahri pronta para estudar com você no Tellus. Áudio e voz funcionando perfeitamente!'
+          : 'Olá! Testando a síntese de voz do Tellus em tempo real.')
+      : 'Olá! Esta é a voz de síntese do Tellus configurada para você.';
+
+    voiceService.speak(testPhrase, {
       forceProvider: voiceProvider,
       referenceId: fishVoiceId,
       voiceURI: selectedVoiceUri,
@@ -119,6 +140,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const updated = await api.updateConfig({
         theme,
         deletedNotesRetention,
+        locale,
+        language,
+        country,
+        enforceStrictLanguage,
         voiceSettings: {
           provider: voiceProvider,
           fishAudioVoiceId: fishVoiceId,
@@ -230,6 +255,107 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <option value="1_year">1 ano</option>
               <option value="never">Sempre (Nunca excluir definitivamente)</option>
             </select>
+          </div>
+
+          {/* Regional Localization & Strict Language Setting */}
+          <div className="space-y-3 p-3.5 rounded-xl bg-panel border border-card-border">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <Globe className="w-4 h-4 text-emerald-400" />
+                <span>Localização & Idioma da IA</span>
+              </label>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-mono">
+                {locale} • {language}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Define o país e idioma de resposta para todas as IAs (chat, geração de notas e voz). Evita contaminações linguísticas indesejadas (como espanhol ou portunhol).
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  País / Região
+                </label>
+                <select
+                  value={country}
+                  onChange={(e) => {
+                    const c = e.target.value;
+                    setCountry(c);
+                    if (c === 'Brasil') {
+                      setLocale('pt-BR');
+                      setLanguage('Português (Brasil)');
+                    } else if (c === 'Portugal') {
+                      setLocale('pt-PT');
+                      setLanguage('Português (Portugal)');
+                    } else if (c === 'Estados Unidos') {
+                      setLocale('en-US');
+                      setLanguage('English (US)');
+                    } else if (c === 'Espanha') {
+                      setLocale('es-ES');
+                      setLanguage('Español');
+                    } else if (c === 'Japão') {
+                      setLocale('ja-JP');
+                      setLanguage('日本語');
+                    } else if (c === 'Alemanha') {
+                      setLocale('de-DE');
+                      setLanguage('Deutsch');
+                    } else if (c === 'França') {
+                      setLocale('fr-FR');
+                      setLanguage('Français');
+                    }
+                  }}
+                  className="w-full bg-background border border-card-border rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent cursor-pointer"
+                >
+                  <option value="Brasil">Brasil 🇧🇷</option>
+                  <option value="Portugal">Portugal 🇵🇹</option>
+                  <option value="Estados Unidos">Estados Unidos 🇺🇸</option>
+                  <option value="Espanha">Espanha 🇪🇸</option>
+                  <option value="Japão">Japão 🇯🇵</option>
+                  <option value="Alemanha">Alemanha 🇩🇪</option>
+                  <option value="França">França 🇫🇷</option>
+                  <option value="Outro">Outro</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Idioma de Resposta
+                </label>
+                <input
+                  type="text"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  placeholder="Português (Brasil)"
+                  className="w-full bg-background border border-card-border rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Código Locale
+                </label>
+                <input
+                  type="text"
+                  value={locale}
+                  onChange={(e) => setLocale(e.target.value)}
+                  placeholder="pt-BR"
+                  className="w-full bg-background border border-card-border rounded-xl px-2.5 py-1.5 text-xs font-mono text-emerald-400 focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center space-x-2 pt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enforceStrictLanguage}
+                onChange={(e) => setEnforceStrictLanguage(e.target.checked)}
+                className="rounded border-card-border text-accent focus:ring-accent bg-background"
+              />
+              <span className="text-[11px] text-slate-300">
+                <strong>Harness Rigorosa de Idioma:</strong> Forçar estritamente o modelo a nunca desviar para espanhol ou portunhol em títulos, pastas ou respostas.
+              </span>
+            </label>
           </div>
 
           {/* Voice & Speech Synthesis Settings */}
@@ -555,14 +681,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Footer Buttons */}
-          <div className="pt-2 flex items-center justify-end space-x-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 transition-colors"
-            >
-              Cancelar
-            </button>
+          <div className="pt-2 flex items-center justify-between border-t border-card-border/50">
+            {onOpenCredits ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenCredits();
+                }}
+                className="text-[11px] text-slate-400 hover:text-accent-light flex items-center space-x-1.5 transition-colors p-1"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-accent-light" />
+                <span>Créditos & Arquitetura</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-card hover:bg-card-border border border-card-border text-xs text-slate-300 transition-colors"
+              >
+                Cancelar
+              </button>
             <button
               type="submit"
               disabled={isSaving}
@@ -581,7 +722,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </button>
           </div>
-        </form>
+        </div>
+      </form>
       </div>
     </div>
   );

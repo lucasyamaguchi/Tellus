@@ -37,7 +37,8 @@ import {
   MicOff,
   Volume2,
   VolumeX,
-  Radio
+  Radio,
+  Plus
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -66,6 +67,15 @@ interface ChatAreaProps {
   tokenEfficiency?: boolean;
   onToggleTokenEfficiency?: () => void;
   onOpenLiveVoice?: () => void;
+  activeSessionId?: string | null;
+  activeSessionTitle?: string;
+  onQuoteSnippet?: (quoted: QuotedMessage) => void;
+  isLiveVoiceActive?: boolean;
+  liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
+  onToggleLiveVoice?: () => void;
+  onChangeLiveVoiceMode?: (mode: 'voice_only' | 'mixed' | 'voice_output_only') => void;
+  onOpenLiveVoiceOrb?: () => void;
+  onNewChat?: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -88,19 +98,42 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onRegenerateResponse,
   tokenEfficiency,
   onToggleTokenEfficiency,
-  onOpenLiveVoice
+  onOpenLiveVoice,
+  activeSessionId,
+  activeSessionTitle,
+  onQuoteSnippet,
+  isLiveVoiceActive = false,
+  liveVoiceMode = 'mixed',
+  onToggleLiveVoice,
+  onChangeLiveVoiceMode,
+  onOpenLiveVoiceOrb,
+  onNewChat
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [expandedToolGroups, setExpandedToolGroups] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Floating Snippet Selection State for quoting or copying partial message content
+  const [selectedSnippet, setSelectedSnippet] = useState<{
+    text: string;
+    msgId: string;
+    role: 'user' | 'assistant';
+    rect: { top: number; left: number };
+  } | null>(null);
+  const [copiedSnippet, setCopiedSnippet] = useState<boolean>(false);
   
   // Voice & Speech States
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isDictating, setIsDictating] = useState<boolean>(false);
+  const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
+  const isDictatingRef = useRef<boolean>(false);
   const dictationRecognizerRef = useRef<any>(null);
+  const dictationSilenceTimeoutRef = useRef<any>(null);
+  const [micPermissionError, setMicPermissionError] = useState<string | null>(null);
 
   // Message In-Place Editing State
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -115,6 +148,27 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const [isExpandedEditor, setIsExpandedEditor] = useState<boolean>(false);
 
+  const stopDictation = (hardCancel = false) => {
+    isDictatingRef.current = false;
+    setIsDictating(false);
+    if (dictationSilenceTimeoutRef.current) {
+      clearTimeout(dictationSilenceTimeoutRef.current);
+      dictationSilenceTimeoutRef.current = null;
+    }
+    if (dictationRecognizerRef.current) {
+      const rec = dictationRecognizerRef.current;
+      dictationRecognizerRef.current = null;
+      try {
+        if (hardCancel) {
+          rec.abort();
+        } else {
+          rec.stop();
+        }
+      } catch {}
+    }
+    voiceService.releaseMicrophone();
+  };
+
   const handleToggleSpeakMessage = (msgId: string, content: string) => {
     if (speakingMessageId === msgId) {
       voiceService.stop();
@@ -128,40 +182,160 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
-  const handleToggleDictation = () => {
-    if (isDictating) {
-      if (dictationRecognizerRef.current) {
-        try { dictationRecognizerRef.current.stop(); } catch {}
+  // Auto-speak assistant responses when Live Voice is active in this session
+  const prevIsStreamingRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (prevIsStreamingRef.current && !isStreaming) {
+      // Streaming just finished
+      if (isLiveVoiceActive && messages.length > 0) {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg.role === 'assistant' && lastMsg.content) {
+          voiceService.speak(lastMsg.content, {
+            onStart: () => setSpeakingMessageId(lastMsg.id),
+            onEnd: () => setSpeakingMessageId(null),
+            onError: () => setSpeakingMessageId(null)
+          });
+        }
       }
-      setIsDictating(false);
+    }
+    prevIsStreamingRef.current = isStreaming;
+  }, [isStreaming, isLiveVoiceActive, messages]);
+
+  // Reset dictation whenever session changes
+  useEffect(() => {
+    stopDictation();
+    setMicPermissionError(null);
+  }, [activeSessionId]);
+
+  const handleToggleDictation = async () => {
+    if (isDictatingRef.current) {
+      if (isLiveVoiceActive && input.trim()) {
+        const speechText = input.trim();
+        setInput('');
+        stopDictation(false);
+        onSendMessage(speechText, undefined, quotedMessage || undefined);
+        if (quotedMessage) onClearQuotedMessage();
+        return;
+      }
+      stopDictation(false);
       return;
     }
 
     if (!voiceService.isSpeechRecognitionAvailable()) {
-      alert('Reconhecimento de voz não suportado neste navegador. Verifique permissões de microfone.');
+      setMicPermissionError('Reconhecimento de fala nativo não suportado neste ambiente.');
       return;
     }
+
+    setMicPermissionError(null);
+
+    // 1. Explicitly prompt and verify microphone access via getUserMedia
+    const micCheck = await voiceService.requestMicrophoneAccess();
+    if (!micCheck.granted) {
+      setMicPermissionError(micCheck.error || 'Permissão de microfone negada ou bloqueada.');
+      stopDictation();
+      return;
+    }
+
+    stopDictation();
+    isDictatingRef.current = true;
+    setIsDictating(true);
 
     try {
       const rec = voiceService.createSpeechRecognizer({
         lang: 'pt-BR',
-        onStart: () => setIsDictating(true),
+        onStart: () => {
+          isDictatingRef.current = true;
+          setIsDictating(true);
+          setMicPermissionError(null);
+        },
+        onProcessing: (proc) => {
+          setIsTranscribing(proc);
+        },
         onResult: (transcript, isFinal) => {
-          setInput(prev => {
-            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-            return prev + separator + transcript;
-          });
-          if (isFinal) {
-            setIsDictating(false);
+          if (!transcript || !transcript.trim()) return;
+
+          if (isLiveVoiceActive) {
+            setInput(transcript);
+            if (isFinal && transcript.trim().length > 1) {
+              const textToSend = transcript.trim();
+              setInput('');
+              stopDictation(false);
+              onSendMessage(textToSend, undefined, quotedMessage || undefined);
+              if (quotedMessage) onClearQuotedMessage();
+              return;
+            }
+          } else {
+            setInput(prev => {
+              const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+              return prev + separator + transcript;
+            });
+          }
+
+          // Reset silence timer on every chunk of speech detected
+          if (dictationSilenceTimeoutRef.current) {
+            clearTimeout(dictationSilenceTimeoutRef.current);
+          }
+
+          if (isLiveVoiceActive) {
+            // Em modo Live Voice, 1.6s de silêncio após fala envia automaticamente a mensagem ao modelo
+            dictationSilenceTimeoutRef.current = setTimeout(() => {
+              if (isDictatingRef.current) {
+                const textToSend = (transcript || '').trim();
+                stopDictation(false);
+                if (textToSend) {
+                  setInput('');
+                  onSendMessage(textToSend, undefined, quotedMessage || undefined);
+                  if (quotedMessage) onClearQuotedMessage();
+                }
+              }
+            }, 1600);
+          } else {
+            // Ditado normal: pausa após 4s de silêncio
+            dictationSilenceTimeoutRef.current = setTimeout(() => {
+              if (isDictatingRef.current) {
+                stopDictation(false);
+              }
+            }, 4000);
           }
         },
-        onError: () => setIsDictating(false),
-        onEnd: () => setIsDictating(false)
+        onError: (err) => {
+          console.warn('[Dictation] Recognition error:', err);
+          if (err === 'not-allowed') {
+            setMicPermissionError(voiceService.isElectron() 
+              ? 'Microfone não autorizado no Windows. Verifique Configurações > Privacidade e Segurança > Microfone.' 
+              : 'Microfone bloqueado: Permita o acesso ao microfone no navegador.');
+            stopDictation(true);
+          } else if (err === 'network') {
+            // DirectMic já assume sem erro
+            return;
+          } else if (err !== 'no-speech' && err !== 'aborted') {
+            stopDictation(true);
+          }
+        },
+        onEnd: () => {
+          // If dictation is still actively turned on, smoothly restart if not in live voice final
+          if (isDictatingRef.current && !isLiveVoiceActive) {
+            setTimeout(() => {
+              if (isDictatingRef.current) {
+                try {
+                  rec.start();
+                } catch {
+                  // Harmless if already active
+                }
+              }
+            }, 200);
+          } else if (isDictatingRef.current && isLiveVoiceActive) {
+            stopDictation(false);
+          }
+        }
       });
+
       dictationRecognizerRef.current = rec;
       rec.start();
-    } catch {
-      setIsDictating(false);
+    } catch (err: any) {
+      console.error('[Dictation] Start error:', err);
+      setMicPermissionError(err.message || 'Erro ao inicializar o microfone.');
+      stopDictation();
     }
   };
 
@@ -169,15 +343,98 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming, attachments]);
 
-  // Auto-focus textarea on empty/new chat or when done streaming
+  // Auto-focus textarea on empty/new chat, active session change, or when done streaming
   useEffect(() => {
     if (!isStreaming) {
-      const timer = setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 50);
-      return () => clearTimeout(timer);
+      const t1 = setTimeout(() => textareaRef.current?.focus(), 15);
+      const t2 = setTimeout(() => textareaRef.current?.focus(), 80);
+      const t3 = setTimeout(() => textareaRef.current?.focus(), 250);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+      };
     }
-  }, [messages.length, isStreaming]);
+  }, [activeSessionId, messages.length, isStreaming]);
+
+  // Robust chat area click handler: focuses textarea when clicking anywhere in chat or messages,
+  // bringing up the active blinking cursor, while cleanly preserving text selections and interactive buttons.
+  const handleChatContainerClick = (e: React.MouseEvent) => {
+    // 1. If text is being selected or is highlighted, do NOT steal focus or clear selection!
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      return;
+    }
+
+    const target = e.target as HTMLElement;
+
+    // 2. Do not hijack if user clicked an interactive control
+    if (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('a') ||
+      target.closest('audio') ||
+      target.closest('video') ||
+      target.closest('select') ||
+      target.closest('textarea') ||
+      target.closest('pre')
+    ) {
+      return;
+    }
+
+    // 3. Focus the input textarea and bring up the blinking cursor immediately
+    textareaRef.current?.focus();
+  };
+
+  // Inspect selection on mouseup to show quick actions (Copy / Quote snippet)
+  const handleMouseUpOnChat = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+      setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || !sel.toString().trim()) {
+          setSelectedSnippet(null);
+        }
+      }, 150);
+      return;
+    }
+
+    const text = selection.toString().trim();
+    if (text.length < 2) {
+      setSelectedSnippet(null);
+      return;
+    }
+
+    try {
+      const range = selection.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      const element = container.nodeType === Node.ELEMENT_NODE 
+        ? (container as HTMLElement) 
+        : container.parentElement;
+
+      const messageBubble = element?.closest('[data-message-id]') as HTMLElement | null;
+      if (!messageBubble) {
+        setSelectedSnippet(null);
+        return;
+      }
+
+      const msgId = messageBubble.getAttribute('data-message-id') || '';
+      const role = (messageBubble.getAttribute('data-message-role') || 'assistant') as 'user' | 'assistant';
+      const rect = range.getBoundingClientRect();
+
+      setSelectedSnippet({
+        text,
+        msgId,
+        role,
+        rect: {
+          top: Math.max(12, rect.top - 46),
+          left: Math.max(16, Math.min(window.innerWidth - 320, rect.left + rect.width / 2 - 140))
+        }
+      });
+    } catch {
+      setSelectedSnippet(null);
+    }
+  };
 
   // Auto-resize textarea height to fit content smoothly without covering text
   useEffect(() => {
@@ -233,6 +490,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       return;
     }
 
+    stopDictation();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
     onSendMessage(trimmed, attachments.length > 0 ? attachments : undefined, quotedMessage || undefined);
     setInput('');
@@ -295,6 +553,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     setExpandedTools(prev => ({ ...prev, [toolId]: !prev[toolId] }));
   };
 
+  const toggleToolGroup = (msgId: string) => {
+    setExpandedToolGroups(prev => ({ ...prev, [msgId]: !prev[msgId] }));
+  };
+
   const getToolIcon = (name: string) => {
     switch (name) {
       case 'read_file':
@@ -311,6 +573,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         return <Database className="w-4 h-4 text-accent-light" />;
       case 'memory_create_handoff':
         return <ArrowRightLeft className="w-4 h-4 text-brand-emerald" />;
+      case 'note_save':
+      case 'frank_note_save':
+      case 'note_search':
+      case 'frank_note_search':
+      case 'note_list':
+      case 'frank_note_list':
+        return <FileText className="w-4 h-4 text-amber-400" />;
       default:
         return <Layers className="w-4 h-4 text-slate-400" />;
     }
@@ -335,9 +604,196 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)] bg-background relative overflow-hidden">
+    <div 
+      onClick={handleChatContainerClick}
+      className="flex-1 flex flex-col h-full min-h-0 bg-background relative overflow-hidden chat-selectable select-text"
+    >
+      {/* Top Header / Live Voice Bar */}
+      {isLiveVoiceActive ? (
+        <div className="bg-gradient-to-r from-red-950/50 via-slate-900/90 to-purple-950/40 border-b border-red-500/30 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 select-none backdrop-blur-md animate-in fade-in z-10">
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-red-500/20 border border-red-500/50 text-red-300 text-xs shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="font-semibold text-[11px] tracking-wide">LIVE VOICE</span>
+            </div>
+
+            {/* 3 Modes Switcher */}
+            <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10 text-xs">
+              <button
+                type="button"
+                onClick={() => onChangeLiveVoiceMode?.('voice_only')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all flex items-center space-x-1 cursor-pointer ${
+                  liveVoiceMode === 'voice_only'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Somente Voz: conversa 100% por áudio sem necessidade de digitar"
+              >
+                <Mic className="w-3 h-3" />
+                <span className="hidden sm:inline">Somente Voz</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeLiveVoiceMode?.('mixed')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all flex items-center space-x-1 cursor-pointer ${
+                  liveVoiceMode === 'mixed'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Misto: livre para falar pelo microfone ou digitar texto. A IA responde em texto e voz."
+              >
+                <Radio className="w-3 h-3" />
+                <span>Misto</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeLiveVoiceMode?.('voice_output_only')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all flex items-center space-x-1 cursor-pointer ${
+                  liveVoiceMode === 'voice_output_only'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Retorno em Voz: digite suas perguntas e o Tellus SEMPRE responde falando em voz alta"
+              >
+                <Volume2 className="w-3 h-3" />
+                <span className="hidden sm:inline">Retorno em Voz</span>
+              </button>
+            </div>
+
+            {/* Live Talk Button (Microphone only turns on when clicked!) */}
+            <button
+              type="button"
+              onClick={handleToggleDictation}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer ${
+                isTranscribing
+                  ? 'bg-amber-600 text-white animate-pulse ring-2 ring-amber-400'
+                  : isDictating
+                  ? 'bg-red-600 text-white animate-pulse ring-2 ring-red-400'
+                  : 'bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40'
+              }`}
+              title={isTranscribing ? "Processando transcrição de áudio..." : isDictating ? "Clique para concluir e enviar sua fala" : "Clique para falar com o assistente por voz"}
+            >
+              {isTranscribing ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-spin" />
+                  <span>Transcrevendo...</span>
+                </>
+              ) : isDictating ? (
+                <>
+                  <MicOff className="w-3.5 h-3.5" />
+                  <span>Ouvindo... Clique p/ Enviar</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-red-400" />
+                  <span>Falar Agora</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="flex items-center space-x-1.5">
+            {onNewChat && (
+              <button
+                type="button"
+                onClick={onNewChat}
+                className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white text-xs flex items-center space-x-1 transition-all cursor-pointer"
+                title="Criar um novo chat e focar na digitação imediatamente"
+              >
+                <Plus className="w-3 h-3" />
+                <span className="text-[11px] hidden sm:inline">Novo Chat</span>
+              </button>
+            )}
+
+            {onOpenLiveVoiceOrb && (
+              <button
+                type="button"
+                onClick={onOpenLiveVoiceOrb}
+                className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white text-xs flex items-center space-x-1 transition-all cursor-pointer"
+                title="Abrir modal com Orbe 3D e visualizador de ondas"
+              >
+                <Sparkles className="w-3 h-3 text-red-400" />
+                <span className="text-[11px] hidden md:inline">Orbe Visual</span>
+              </button>
+            )}
+
+            {onToggleLiveVoice && (
+              <button
+                type="button"
+                onClick={onToggleLiveVoice}
+                className="p-1 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-300 transition-colors cursor-pointer"
+                title="Desativar Live Voice nesta conversa"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="border-b border-card-border/50 px-3.5 py-1 flex items-center justify-between text-xs text-slate-400 bg-sidebar/30 shrink-0">
+          <div className="flex items-center space-x-2 text-[11px] text-slate-400">
+            {activeSessionTitle && (
+              <span className="font-semibold text-slate-300 truncate max-w-[280px]">
+                {activeSessionTitle}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center space-x-2">
+            {onNewChat && (
+              <button
+                type="button"
+                onClick={onNewChat}
+                className="px-2 py-0.5 rounded-md hover:bg-accent/20 border border-transparent hover:border-accent/40 text-[11px] text-slate-300 hover:text-accent-light flex items-center space-x-1 transition-all cursor-pointer"
+                title="Criar um novo chat e focar na digitação imediatamente"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Novo Chat</span>
+              </button>
+            )}
+            {onToggleLiveVoice && (
+              <button
+                type="button"
+                onClick={onToggleLiveVoice}
+                className="px-2 py-0.5 rounded-md hover:bg-card-border/60 text-[11px] text-slate-400 hover:text-red-400 flex items-center space-x-1 transition-colors cursor-pointer"
+                title="Ativar Live Voice nesta conversa (para respostas faladas por voz em tempo real)"
+              >
+                <Mic className="w-3 h-3" />
+                <span>Ativar Live Voice</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Streaming / Background Processing Safety Banner */}
+      {isStreaming && (
+        <div className="bg-amber-500/10 border-b border-amber-500/25 px-4 py-1.5 flex items-center justify-between text-xs text-amber-300 shrink-0 select-none animate-in fade-in">
+          <div className="flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            <span className="text-[11px] font-medium text-amber-200">
+              Assistente respondendo ou executando tarefas...
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onStopStreaming}
+            className="px-2.5 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white text-[11px] font-semibold transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer"
+            title="Interromper geração e desbloquear o chat para digitação imediata"
+          >
+            <Square className="w-2.5 h-2.5 fill-current" />
+            <span>Interromper & Desbloquear</span>
+          </button>
+        </div>
+      )}
+
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin scrollbar-thumb-card-border">
+      <div 
+        onClick={handleChatContainerClick}
+        onMouseUp={handleMouseUpOnChat}
+        className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-thin scrollbar-thumb-card-border cursor-text"
+      >
         {messages.length === 0 ? (
           <div 
             onClick={(e) => {
@@ -346,7 +802,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 textareaRef.current?.focus();
               }
             }}
-            className="min-h-[380px] h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-8 space-y-5"
+            className="min-h-[380px] h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-8 space-y-5 cursor-text"
           >
             <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-card-border/80 shadow-xl shadow-accent/5 flex items-center justify-center shrink-0 animate-in fade-in zoom-in-95 cursor-pointer" onClick={() => textareaRef.current?.focus()}>
               <img src="/logo.png" alt="Tellus Logo" className="w-full h-full object-contain" />
@@ -467,10 +923,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
               {/* Message Bubble Container */}
               <div
-                className={`max-w-[85%] rounded-2xl p-4 transition-all ${
+                data-message-id={msg.id}
+                data-message-role={msg.role}
+                className={`message-bubble max-w-[85%] rounded-2xl p-4 transition-all chat-selectable select-text cursor-text ${
                   msg.role === 'user'
-                    ? 'bg-gradient-to-tr from-accent/90 to-accent text-white shadow-lg shadow-accent/15'
-                    : 'bg-card border border-card-border text-slate-100 shadow-md w-full'
+                    ? 'bg-gradient-to-tr from-accent/90 to-accent text-white shadow-lg shadow-accent/15 selection:bg-white/30 selection:text-white'
+                    : 'bg-card border border-card-border text-slate-100 shadow-md w-full selection:bg-accent/40 selection:text-white'
                 }`}
               >
                 {/* Quoted Message Card */}
@@ -554,79 +1012,143 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
                 )}
 
-                {/* Tool Execution Cards */}
-                {msg.toolCalls && msg.toolCalls.length > 0 && (
-                  <div className="mb-3 space-y-2">
-                    {msg.toolCalls.map((tc) => {
-                      const isExpanded = expandedTools[tc.id];
-                      return (
-                        <div
-                          key={tc.id}
-                          className="rounded-xl border border-card-border bg-panel overflow-hidden"
-                        >
-                          <button
-                            onClick={() => toggleTool(tc.id)}
-                            className="w-full px-3 py-2 flex items-center justify-between text-xs hover:bg-card transition-colors text-left"
-                          >
-                            <div className="flex items-center space-x-2">
-                              {getToolIcon(tc.name)}
-                              <span className="font-mono font-semibold text-slate-200">
-                                {tc.name}
-                              </span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              {tc.status === 'running' && (
-                                <span className="flex items-center text-[10px] text-amber-400">
-                                  <Clock className="w-3 h-3 mr-1 animate-spin" /> Executando...
-                                </span>
-                              )}
-                              {tc.status === 'completed' && (
-                                <span className="flex items-center text-[10px] text-emerald-400">
-                                  <CheckCircle2 className="w-3 h-3 mr-1" /> Concluído
-                                </span>
-                              )}
-                              {tc.status === 'error' && (
-                                <span className="flex items-center text-[10px] text-rose-400">
-                                  <AlertCircle className="w-3 h-3 mr-1" /> Erro
-                                </span>
-                              )}
-                              {isExpanded ? (
-                                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                              ) : (
-                                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                              )}
-                            </div>
-                          </button>
+                {/* Tool Execution Accordion Group (Processing / Actions) */}
+                {msg.toolCalls && msg.toolCalls.length > 0 && (() => {
+                  const totalCount = msg.toolCalls.length;
+                  const runningCount = msg.toolCalls.filter(tc => tc.status === 'running').length;
+                  const errorCount = msg.toolCalls.filter(tc => tc.status === 'error').length;
+                  const completedCount = msg.toolCalls.filter(tc => tc.status === 'completed').length;
+                  const isRunning = runningCount > 0;
+                  const isGroupExpanded = expandedToolGroups[msg.id] ?? isRunning;
 
-                          {isExpanded && (
-                            <div className="p-3 border-t border-card-border text-[11px] font-mono space-y-2 bg-background/50">
-                              <div>
-                                <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
-                                  Argumentos:
+                  return (
+                    <div className="mb-3 rounded-xl border border-card-border/80 bg-panel/60 overflow-hidden shadow-xs backdrop-blur-xs">
+                      <button
+                        type="button"
+                        onClick={() => toggleToolGroup(msg.id)}
+                        className="w-full px-3 py-2 flex items-center justify-between text-xs hover:bg-card/70 transition-colors text-left group"
+                      >
+                        <div className="flex items-center space-x-2.5 min-w-0">
+                          <div className="flex items-center justify-center w-5 h-5 rounded-md bg-accent/10 border border-accent/20 text-accent shrink-0">
+                            {isRunning ? (
+                              <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                            ) : errorCount > 0 ? (
+                              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                            ) : (
+                              <Zap className="w-3.5 h-3.5 text-accent-light" />
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-2 truncate">
+                            <span className="font-semibold text-slate-200">
+                              {isRunning ? 'Processando Ações do Sistema...' : 'Ações do Sistema'}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/40 text-slate-400 border border-white/5 font-mono">
+                              {completedCount}/{totalCount}
+                            </span>
+                            <div className="hidden sm:flex items-center space-x-1">
+                              {Array.from(new Set(msg.toolCalls.map(tc => tc.name.replace(/^frank_/, '')))).slice(0, 3).map(name => (
+                                <span key={name} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-slate-300 border border-white/5">
+                                  {name}
                                 </span>
-                                <pre className="text-slate-300 p-2 rounded bg-panel overflow-x-auto">
-                                  {tc.arguments}
-                                </pre>
-                              </div>
-                              {tc.result && (
-                                <div>
-                                  <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
-                                    Resultado:
-                                  </span>
-                                  <pre className="text-emerald-300 p-2 rounded bg-panel overflow-x-auto max-h-48 overflow-y-auto">
-                                    {typeof tc.result === 'string'
-                                      ? tc.result
-                                      : JSON.stringify(tc.result, null, 2)}
-                                  </pre>
-                                </div>
+                              ))}
+                              {new Set(msg.toolCalls.map(tc => tc.name)).size > 3 && (
+                                <span className="text-[9px] text-slate-500">...</span>
                               )}
                             </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 shrink-0">
+                          {isRunning && (
+                            <span className="text-[10px] text-amber-400 flex items-center">
+                              Em andamento
+                            </span>
+                          )}
+                          {isGroupExpanded ? (
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors" />
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
+                      </button>
+
+                      {isGroupExpanded && (
+                        <div className="p-2 space-y-2 border-t border-card-border/60 bg-background/40">
+                          {msg.toolCalls.map((tc) => {
+                            const isItemExpanded = expandedTools[tc.id];
+                            const cleanName = tc.name.replace(/^frank_/, '');
+                            return (
+                              <div
+                                key={tc.id}
+                                className="rounded-lg border border-card-border/60 bg-panel/80 overflow-hidden text-xs"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => toggleTool(tc.id)}
+                                  className="w-full px-2.5 py-1.5 flex items-center justify-between hover:bg-card/60 transition-colors text-left"
+                                >
+                                  <div className="flex items-center space-x-2 truncate">
+                                    {getToolIcon(tc.name)}
+                                    <span className="font-mono font-medium text-slate-300 truncate">
+                                      {cleanName}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 shrink-0">
+                                    {tc.status === 'running' && (
+                                      <span className="flex items-center text-[10px] text-amber-400">
+                                        <Clock className="w-2.5 h-2.5 mr-1 animate-spin" /> Executando
+                                      </span>
+                                    )}
+                                    {tc.status === 'completed' && (
+                                      <span className="flex items-center text-[10px] text-emerald-400">
+                                        <CheckCircle2 className="w-2.5 h-2.5 mr-1" /> Concluído
+                                      </span>
+                                    )}
+                                    {tc.status === 'error' && (
+                                      <span className="flex items-center text-[10px] text-rose-400">
+                                        <AlertCircle className="w-2.5 h-2.5 mr-1" /> Erro
+                                      </span>
+                                    )}
+                                    {isItemExpanded ? (
+                                      <ChevronDown className="w-3 h-3 text-slate-500" />
+                                    ) : (
+                                      <ChevronRight className="w-3 h-3 text-slate-500" />
+                                    )}
+                                  </div>
+                                </button>
+
+                                {isItemExpanded && (
+                                  <div className="p-2.5 border-t border-card-border/50 text-[11px] font-mono space-y-2 bg-background/60">
+                                    <div>
+                                      <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
+                                        Argumentos:
+                                      </span>
+                                      <pre className="text-slate-300 p-2 rounded bg-panel/90 overflow-x-auto text-[10px]">
+                                        {tc.arguments}
+                                      </pre>
+                                    </div>
+                                    {tc.result && (
+                                      <div>
+                                        <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
+                                          Resultado:
+                                        </span>
+                                        <pre className="text-emerald-300 p-2 rounded bg-panel/90 overflow-x-auto max-h-48 overflow-y-auto text-[10px]">
+                                          {typeof tc.result === 'string'
+                                            ? tc.result
+                                            : JSON.stringify(tc.result, null, 2)}
+                                        </pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Text Content & Edit Mode */}
                 {msg.role === 'user' && editingMessageId === msg.id ? (
@@ -662,7 +1184,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
                 ) : (
                   msg.content && (
-                    <div className={`prose prose-invert max-w-none text-xs leading-relaxed break-words ${msg.role === 'user' ? 'text-white' : 'text-slate-100'}`}>
+                    <div className={`prose prose-invert max-w-none text-xs leading-relaxed break-words chat-selectable select-text cursor-text ${msg.role === 'user' ? 'text-white' : 'text-slate-100'}`}>
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
@@ -686,7 +1208,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     onOpenNoteOrFile(cleanTarget);
                                   }}
                                   className="inline-flex items-center space-x-1 font-mono text-[11px] font-semibold text-amber-300 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 hover:border-amber-400 px-1.5 py-0.5 rounded-md cursor-pointer transition-all mx-0.5 shadow-xs group"
-                                  title={`Abrir "${cleanTarget}" no FrankMD Vault`}
+                                  title={`Abrir "${cleanTarget}" no Notes Module (Vault)`}
                                 >
                                   <FileText className="w-3 h-3 text-amber-400 group-hover:scale-110 transition-transform" />
                                   <span className="underline decoration-amber-500/50 underline-offset-2">{codeText}</span>
@@ -810,7 +1332,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
 
       {/* Input & Action Footer */}
-      <div className="p-4 border-t border-card-border bg-sidebar shrink-0 space-y-2.5">
+      <div 
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (!target.closest('button') && !target.closest('input') && !target.closest('a') && !target.closest('textarea')) {
+            textareaRef.current?.focus();
+          }
+        }}
+        className="p-4 border-t border-card-border bg-sidebar shrink-0 space-y-2.5 cursor-text"
+      >
         {/* Active Quoted Message Preview Bar */}
         {quotedMessage && (
           <div className="p-2.5 rounded-xl bg-card border border-brand-cyan/40 flex items-center justify-between animate-in fade-in">
@@ -840,7 +1370,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             <div className="flex items-center space-x-2 text-xs">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="text-slate-200">
-                Anotação <strong>"{createdNoteInfo.title}"</strong> criada no FrankMD Vault!
+                Anotação <strong>"{createdNoteInfo.title}"</strong> criada no Notes Module (Vault)!
               </span>
             </div>
             <div className="flex items-center space-x-2">
@@ -921,7 +1451,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setInput('Anote isso: faça o reconhecimento desta anotação do meu caderno e salve como nota no FrankMD Vault.');
+                    setInput('Anote isso: faça o reconhecimento desta anotação do meu caderno e salve como nota no Notes Module (Vault).');
                     textareaRef.current?.focus();
                   }}
                   className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
@@ -951,11 +1481,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           {attachments.some(att => att.isImage) && (
             <button
               onClick={() => {
-                setInput('Anote isso: faça o reconhecimento desta anotação do meu caderno e salve como nota no FrankMD Vault.');
+                setInput('Anote isso: faça o reconhecimento desta anotação do meu caderno e salve como nota no Notes Module (Vault).');
                 textareaRef.current?.focus();
               }}
               className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 transition-colors whitespace-nowrap flex items-center space-x-1 font-semibold animate-pulse"
-              title="Digitalizar caligrafia da foto e salvar no FrankMD Vault"
+              title="Digitalizar caligrafia da foto e salvar no Notes Module (Vault)"
             >
               <Camera className="w-3.5 h-3.5 text-emerald-400" />
               <span>📷 Anote isso (OCR Caderno)</span>
@@ -1024,6 +1554,42 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           )}
         </div>
 
+        {/* Microphone Permission / Diagnostic Help Banner */}
+        {micPermissionError && (
+          <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/50 flex items-start justify-between gap-2.5 text-xs text-amber-200 animate-in fade-in">
+            <div className="flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-bold text-amber-300 block">Diagnóstico de Microfone / Live Voice:</span>
+                <p className="text-[11px] leading-relaxed text-amber-100/90">{micPermissionError}</p>
+                <div className="text-[10px] text-amber-300/80 font-mono space-y-0.5 pt-0.5">
+                  {voiceService.isElectron() ? (
+                    <>
+                      <p>1. No Windows: <strong>Configurações &gt; Privacidade e Segurança &gt; Microfone</strong> &gt; Ativar acesso.</p>
+                      <p>2. Certifique-se de que o microfone do computador está conectado e não silenciado (Mute).</p>
+                      <p>3. A captura de áudio direto via hardware (WASAPI) está ativada automaticamente no aplicativo.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p>1. Clique no ícone de 🔒 (cadeado ou permissões) na barra de endereço do navegador.</p>
+                      <p>2. Altere <strong>Microfone</strong> para <strong>Permitir</strong>.</p>
+                      <p>3. No Windows: <strong>Configurações &gt; Privacidade &gt; Microfone</strong> &gt; Ativar acesso.</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMicPermissionError(null)}
+              className="p-1 rounded-lg hover:bg-amber-500/20 text-amber-400 hover:text-amber-200 transition-colors"
+              title="Fechar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Auto-Expanding Input Bar Card (Flexbox - Buttons NEVER overlap text!) */}
         <div 
           onClick={(e) => {
@@ -1074,6 +1640,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           <textarea
             ref={textareaRef}
             value={input}
+            onClick={(e) => {
+              e.stopPropagation();
+              textareaRef.current?.focus();
+            }}
+            onFocus={() => {
+              const sel = window.getSelection();
+              if (sel && sel.type === 'Range') {
+                sel.collapseToEnd();
+              }
+            }}
             onChange={(e) => {
               setInput(e.target.value);
               // Trigger mention modal if user typed @
@@ -1131,7 +1707,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 onClick={handleGenerateNote}
                 disabled={isGeneratingNote || messages.length === 0}
                 className="p-1.5 rounded-lg bg-panel hover:bg-emerald-500/20 border border-card-border hover:border-emerald-500/40 text-emerald-400 transition-all flex items-center space-x-1"
-                title="Criar nota estruturada no FrankMD Vault com os pontos chave e resumo da conversa (/nota)"
+                title="Criar nota estruturada no Notes Module (Vault) com os pontos chave e resumo da conversa (/nota)"
               >
                 <FileText className="w-3.5 h-3.5" />
                 <span className="text-[11px] font-sans font-medium">
@@ -1148,11 +1724,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             {isStreaming ? (
               <button
+                type="button"
                 onClick={onStopStreaming}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-rose-600/30 transition-all"
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-rose-600/30 transition-all cursor-pointer"
+                title="Interromper processamento e desbloquear o chat"
               >
-                <Square className="w-3 h-3" />
-                <span>Interromper</span>
+                <Square className="w-3 h-3 fill-current" />
+                <span>Interromper & Desbloquear</span>
               </button>
             ) : (
               <div className="flex items-center space-x-1.5">
@@ -1161,13 +1739,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   type="button"
                   onClick={handleToggleDictation}
                   className={`p-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
-                    isDictating
+                    isTranscribing
+                      ? 'bg-amber-600 text-white border-amber-500 ring-2 ring-amber-500/50 shadow-md shadow-amber-600/30 animate-pulse'
+                      : isDictating
                       ? 'bg-purple-600 text-white border-purple-500 ring-2 ring-purple-500/50 shadow-md shadow-purple-600/30 animate-pulse'
                       : 'bg-panel hover:bg-card-border border-card-border text-slate-300 hover:text-white'
                   }`}
-                  title={isDictating ? "Parar ditado por voz" : "Ditar mensagem por voz (Reconhecimento de fala em pt-BR)"}
+                  title={isTranscribing ? "Processando transcrição..." : isDictating ? "Parar ditado e transcrever fala" : "Ditar mensagem por voz (Reconhecimento de fala em pt-BR)"}
                 >
-                  {isDictating ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4 text-purple-400" />}
+                  {isTranscribing ? (
+                    <Sparkles className="w-4 h-4 text-amber-200 animate-spin" />
+                  ) : isDictating ? (
+                    <MicOff className="w-4 h-4 text-white" />
+                  ) : (
+                    <Mic className="w-4 h-4 text-purple-400" />
+                  )}
                 </button>
 
                 <button
@@ -1187,6 +1773,96 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         </div>
       </div>
+      {/* Floating Selection Micro-Toolbar (Copy / Ask in chat / Quote in another chat) */}
+      {selectedSnippet && (
+        <div
+          style={{ top: `${selectedSnippet.rect.top}px`, left: `${selectedSnippet.rect.left}px` }}
+          className="fixed z-50 flex items-center space-x-1.5 p-1 rounded-xl bg-[#1a1c22]/95 border border-accent/40 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 text-xs select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Copy snippet button */}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(selectedSnippet.text);
+              setCopiedSnippet(true);
+              setTimeout(() => {
+                setCopiedSnippet(false);
+                setSelectedSnippet(null);
+              }, 1200);
+            }}
+            className="px-2 py-1 rounded-lg bg-panel hover:bg-card-border text-slate-200 hover:text-white flex items-center space-x-1 transition-all cursor-pointer"
+            title="Copiar trecho selecionado para a área de transferência"
+          >
+            {copiedSnippet ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-[11px] text-emerald-400 font-medium">Copiado!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-[11px]">Copiar</span>
+              </>
+            )}
+          </button>
+
+          <div className="w-[1px] h-3.5 bg-card-border" />
+
+          {/* Ask / Quote in current chat */}
+          <button
+            type="button"
+            onClick={() => {
+              setInput(prev => {
+                const quoteText = `> "${selectedSnippet.text}"\n\n`;
+                return prev ? `${prev}\n${quoteText}` : quoteText;
+              });
+              setSelectedSnippet(null);
+              textareaRef.current?.focus();
+            }}
+            className="px-2 py-1 rounded-lg bg-accent/20 hover:bg-accent text-accent-light hover:text-white flex items-center space-x-1 transition-all cursor-pointer font-medium"
+            title="Inserir citação do trecho selecionado na mensagem para perguntar neste chat"
+          >
+            <MessageSquareQuote className="w-3.5 h-3.5" />
+            <span className="text-[11px]">Perguntar no Chat</span>
+          </button>
+
+          {/* Quote snippet in another chat */}
+          {onQuoteSnippet && (
+            <>
+              <div className="w-[1px] h-3.5 bg-card-border" />
+              <button
+                type="button"
+                onClick={() => {
+                  onQuoteSnippet({
+                    sessionId: activeSessionId || 'atual',
+                    sessionTitle: activeSessionTitle || 'Conversa Atual',
+                    messageId: selectedSnippet.msgId,
+                    role: selectedSnippet.role,
+                    content: selectedSnippet.text,
+                    timestamp: Date.now()
+                  });
+                  setSelectedSnippet(null);
+                }}
+                className="px-2 py-1 rounded-lg bg-brand-cyan/20 hover:bg-brand-cyan text-brand-cyan hover:text-slate-900 flex items-center space-x-1 transition-all cursor-pointer font-medium"
+                title="Fixar este trecho selecionado para perguntar ou citar em outro chat"
+              >
+                <Quote className="w-3.5 h-3.5" />
+                <span className="text-[11px]">Citar em Outro Chat</span>
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setSelectedSnippet(null)}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 transition-colors ml-0.5"
+            title="Fechar"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
