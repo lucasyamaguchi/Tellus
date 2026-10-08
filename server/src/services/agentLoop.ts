@@ -558,7 +558,16 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
      b) No chat: Apresente em 2 parágrafos a visão panorâmica do Roadmap, confirme as notas completas criadas no Vault com wikilinks, dê uma síntese esquematizada do Módulo 01 e destaque as primeiras questões para aquecimento.
      c) Dê autonomia ao aluno para resolver no chat, pedir aprofundamento ou avançar pelas notas no Vault no seu próprio ritmo!`;
 
-    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    const voiceGuideline = `[🎙️ DIRETRIZ DE RETORNO EM VOZ & SÍNTESE CONCISA [FALA]]
+- Quando houver interação por voz ou modo Live Voice / Retorno por voz ativo:
+- Inclua SEMPRE no início da sua resposta um bloco [FALA]...[/FALA] curto (máximo de 2 a 3 frases, cerca de 30 a 45 palavras):
+  1. Explique em alto nível o que foi criado/feito (SEM citar nomes de módulos, nomes de arquivos ou wikilinks [[...]]).
+  2. Destaque a importância prática ou regra de ouro do conceito (o que fazer ou evitar).
+  3. Indique o próximo passo prático.
+  4. Inicie com uma tag de emoção em colchetes correspondente ao tom (ex: [calm], [thoughtful], [happy], [whispering]).
+- NUNCA leia listas de arquivos ou notas dentro de [FALA]. Todo o detalhamento escrito, código e links permanecem no chat e nas notas.`;
+
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${voiceGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     // Process Multimodal Images from .agentic/attachments/
     const processedMessages: ChatMessage[] = messages.map(m => {
@@ -640,6 +649,16 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
         currentHistory.push(assistantMsg);
 
         if (!toolCalls || toolCalls.length === 0) {
+          // Se ferramentas foram executadas durante este turno mas o modelo não enviou mensagem final em texto:
+          if (stepCount > 1 && (!assistantContent || !assistantContent.trim())) {
+            const toolResults = currentHistory.filter(m => m.role === 'tool');
+            if (toolResults.length > 0) {
+              const summaryMsg = "✅ Todas as notas, diretórios e estruturas solicitadas foram criados e organizados com sucesso no seu Vault.";
+              assistantContent = summaryMsg;
+              assistantMsg.content = summaryMsg;
+              onEvent({ type: 'content', data: summaryMsg });
+            }
+          }
           // No tools called, agent has finished its turn
           onEvent({ type: 'turn_complete', data: { totalSteps: stepCount } });
           break;

@@ -3,30 +3,33 @@ import {
   Mic, 
   MicOff, 
   Volume2, 
-  VolumeX, 
   Square, 
   X, 
-  BookOpen, 
   Sparkles, 
-  RotateCcw, 
   Save, 
   MessageSquare, 
   Radio, 
   Sliders, 
   GraduationCap,
-  ChevronDown,
-  FileText,
   BookMarked,
   ExternalLink,
   CheckCircle2,
   Eye,
-  PenTool,
   Play,
-  AlertCircle
+  AlertCircle,
+  Columns
 } from 'lucide-react';
-import { voiceService, VoiceOption, FISH_VOICE_PRESETS, VoiceProvider } from '../services/voiceService';
+import { 
+  voiceService, 
+  VoiceOption, 
+  FISH_VOICE_PRESETS, 
+  VoiceProvider,
+  generateThinkingAcknowledgement,
+  extractConciseSpokenSummary
+} from '../services/voiceService';
 import { voiceToneAnalyzer, ToneAnalysisResult } from '../services/voiceToneAnalyzer';
 import { api } from '../api';
+import { Message } from '../types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -40,7 +43,7 @@ export interface ParsedLiveResponse {
   detailsText?: string;
 }
 
-export function parseLiveResponse(rawText: string): ParsedLiveResponse {
+export function parseLiveResponse(rawText: string, tone?: ToneAnalysisResult | null): ParsedLiveResponse {
   let spokenText = '';
   let noteData: ParsedLiveResponse['noteData'] | undefined;
   let detailsText: string | undefined;
@@ -50,9 +53,8 @@ export function parseLiveResponse(rawText: string): ParsedLiveResponse {
   if (falaMatch && falaMatch[1].trim()) {
     spokenText = falaMatch[1].trim();
   } else {
-    // If model didn't wrap in [FALA], take text prior to [NOTA or [DETALHES
-    const beforeAction = rawText.split(/\[NOTA|\[DETALHES/i)[0].trim();
-    spokenText = beforeAction || rawText.trim();
+    // If model didn't wrap in [FALA], extract concise spoken summary
+    spokenText = extractConciseSpokenSummary(rawText, tone);
   }
 
   // 2. Extract [NOTA: Title | Folder] ... [/NOTA]
@@ -75,6 +77,13 @@ export function parseLiveResponse(rawText: string): ParsedLiveResponse {
     detailsText = detailsMatch[1].replace(/\[\/DETALHES\]/gi, '').trim();
   }
 
+  // Se o modelo criou uma nota e não gerou texto falado prévio:
+  if ((!spokenText || spokenText.startsWith('[NOTA') || spokenText.startsWith('#')) && noteData) {
+    spokenText = `Criei a anotação "${noteData.title}" na pasta "${noteData.folder}" no seu cofre.`;
+  } else if (!spokenText) {
+    spokenText = extractConciseSpokenSummary(rawText, tone);
+  }
+
   // Clean up any markdown syntax that degrades TTS speech quality
   spokenText = spokenText
     .replace(/^\[FALA\]/i, '')
@@ -90,6 +99,10 @@ interface LiveVoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
   activeModel: string;
+  messages?: Message[];
+  isStreaming?: boolean;
+  onSendMessage?: (content: string) => void;
+  onStopStreaming?: () => void;
   onTransferToChat?: (messages: Array<{ role: 'user' | 'assistant'; content: string }>) => void;
   initialTopic?: string;
   onOpenNote?: (noteTitle: string) => void;
@@ -101,22 +114,31 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
   isOpen,
   onClose,
   activeModel,
-  onTransferToChat,
+  messages = [],
+  isStreaming = false,
+  onSendMessage,
+  onStopStreaming,
   initialTopic = 'Estudos e Revisão Geral',
   onOpenNote
 }) => {
+  const [layoutMode, setLayoutMode] = useState<'split' | 'orb_only'>('split');
   const [voiceState, setVoiceState] = useState<LiveVoiceState>('idle');
   const voiceStateRef = useRef<LiveVoiceState>('idle');
   const [topic, setTopic] = useState<string>(initialTopic);
-  const [isHandsFree, setIsHandsFree] = useState<boolean>(false);
-  const isHandsFreeRef = useRef<boolean>(false);
+  const [isHandsFree, setIsHandsFree] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('tellus_live_voice_hands_free');
+      return stored !== null ? stored === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const isHandsFreeRef = useRef<boolean>(true);
   const [currentTranscript, setCurrentTranscript] = useState<string>('');
   const [latestAiResponse, setLatestAiResponse] = useState<string>('');
   const [latestAiSpoken, setLatestAiSpoken] = useState<string>('');
   const [latestCreatedNote, setLatestCreatedNote] = useState<{ title: string; folder: string; content: string } | null>(null);
-  const [sessionNotes, setSessionNotes] = useState<Array<{ title: string; folder: string; content: string }>>([]);
   const [viewingNoteContent, setViewingNoteContent] = useState<{ title: string; folder: string; content: string } | null>(null);
-  const [conversationHistory, setConversationHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   
   // Voice & Settings
   const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>(voiceService.getVoiceProvider());
@@ -130,12 +152,16 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
   const isTestingAudioRef = useRef<boolean>(false);
   const [detectedUserTone, setDetectedUserTone] = useState<ToneAnalysisResult | null>(null);
   const [micErrorMsg, setMicErrorMsg] = useState<string | null>(null);
+  const [micVolume, setMicVolume] = useState<number>(0);
+  const [isUserSpeaking, setIsUserSpeaking] = useState<boolean>(false);
+  const [isTranscribingAudio, setIsTranscribingAudio] = useState<boolean>(false);
 
   // References
   const recognizerRef = useRef<any>(null);
   const silenceTimeoutRef = useRef<any>(null);
-  const abortControllerRef = useRef<(() => void) | null>(null);
   const isComponentMounted = useRef<boolean>(true);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const prevIsStreamingRef = useRef<boolean>(false);
 
   // Helper to ensure voiceState and voiceStateRef are always in lockstep
   const updateVoiceState = (state: LiveVoiceState) => {
@@ -154,6 +180,69 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
       stopAll();
     };
   }, []);
+
+  // Auto-scroll chat view when new messages or chunks arrive
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, isStreaming]);
+
+  // Listen for agent streaming completion to speak concise response without duplication
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (prevIsStreamingRef.current && !isStreaming) {
+      // Stream just completed!
+      if (messages && messages.length > 0) {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg.role === 'assistant') {
+          const parsed = parseLiveResponse(lastMsg.content, detectedUserTone);
+          setLatestAiResponse(lastMsg.content);
+          setLatestAiSpoken(parsed.spokenText);
+          if (parsed.noteData) {
+            setLatestCreatedNote(parsed.noteData);
+          }
+
+          updateVoiceState('speaking');
+          voiceService.speakMessageSummary(lastMsg.id, lastMsg.content, detectedUserTone, {
+            forceProvider: voiceProvider,
+            referenceId: fishVoiceId,
+            voiceURI: selectedVoiceUri,
+            rate: speechRate,
+            onStart: () => {
+              if (isComponentMounted.current) {
+                updateVoiceState('speaking');
+              }
+            },
+            onEnd: () => {
+              if (!isComponentMounted.current) return;
+              updateVoiceState('idle');
+              // Se modo Mãos-Livres ativo, retoma a escuta para continuar o diálogo
+              if (isHandsFreeRef.current) {
+                setTimeout(() => {
+                  if (isComponentMounted.current && !isTestingAudioRef.current) {
+                    startListening();
+                  }
+                }, 600);
+              }
+            },
+            onError: () => {
+              if (isComponentMounted.current) updateVoiceState('idle');
+            }
+          });
+        } else {
+          updateVoiceState('idle');
+        }
+      } else {
+        updateVoiceState('idle');
+      }
+    } else if (!prevIsStreamingRef.current && isStreaming) {
+      // Agent is actively working and streaming
+      updateVoiceState('thinking');
+    }
+    prevIsStreamingRef.current = isStreaming;
+  }, [isStreaming, messages, isOpen, detectedUserTone, voiceProvider, fishVoiceId, selectedVoiceUri, speechRate]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -174,6 +263,20 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
 
     loadVoices();
     voiceService.onVoicesReady(loadVoices);
+
+    // No modo Mãos-Livres, inicia a escuta automaticamente ao abrir o modal
+    let autoStartTimer: any = null;
+    if (isHandsFreeRef.current) {
+      autoStartTimer = setTimeout(() => {
+        if (isComponentMounted.current && !isTestingAudioRef.current) {
+          startListening();
+        }
+      }, 400);
+    }
+
+    return () => {
+      if (autoStartTimer) clearTimeout(autoStartTimer);
+    };
   }, [isOpen]);
 
   const stopAll = () => {
@@ -189,10 +292,6 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
     if (silenceTimeoutRef.current) {
       clearTimeout(silenceTimeoutRef.current);
       silenceTimeoutRef.current = null;
-    }
-    if (abortControllerRef.current) {
-      abortControllerRef.current();
-      abortControllerRef.current = null;
     }
     updateVoiceState('idle');
   };
@@ -248,11 +347,32 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
           if (isComponentMounted.current) {
             updateVoiceState('listening');
             setMicErrorMsg(null);
+            setIsUserSpeaking(false);
+            setIsTranscribingAudio(false);
+          }
+        },
+        onVolume: (vol) => {
+          if (isComponentMounted.current) {
+            setMicVolume(vol);
+          }
+        },
+        onSpeakingChange: (speaking) => {
+          if (isComponentMounted.current) {
+            setIsUserSpeaking(speaking);
+          }
+        },
+        onProcessing: (proc) => {
+          if (isComponentMounted.current) {
+            setIsTranscribingAudio(proc);
+            if (proc) {
+              updateVoiceState('thinking');
+            }
           }
         },
         onResult: (transcript, isFinal) => {
           if (!isComponentMounted.current) return;
           setCurrentTranscript(transcript);
+          setIsTranscribingAudio(false);
 
           if (silenceTimeoutRef.current) {
             clearTimeout(silenceTimeoutRef.current);
@@ -260,28 +380,28 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
 
           if (isFinal) {
             handleUserSpeechCompleted(transcript);
-          } else if (isHandsFreeRef.current && transcript.trim().length > 3) {
-            // If hands free, wait for 1.6s of silence after interim text to submit
+          } else if (isHandsFreeRef.current && transcript.trim().length > 2) {
+            // Em modo Mãos-Livres, 1.2s de silêncio após falar conclui e envia IMEDIATAMENTE ao chat
             silenceTimeoutRef.current = setTimeout(() => {
-              if (isComponentMounted.current && voiceStateRef.current === 'listening') {
+              if (isComponentMounted.current && (voiceStateRef.current === 'listening' || voiceStateRef.current === 'idle')) {
                 handleUserSpeechCompleted(transcript);
               }
-            }, 1600);
+            }, 1200);
           }
         },
         onError: (err) => {
           console.warn('[LiveVoice] Recognition error:', err);
+          setIsTranscribingAudio(false);
+          setIsUserSpeaking(false);
           if (err === 'not-allowed') {
             setMicErrorMsg(voiceService.isElectron() 
               ? 'Microfone não autorizado no Windows. Verifique Configurações > Privacidade e Segurança > Microfone.' 
               : 'Microfone bloqueado: Permita o acesso ao microfone no navegador.');
           } else if (err === 'network') {
-            // Se Web Speech der erro de rede, o DirectMic já entra em ação e não precisa assustar o usuário
             return;
           } else if (err !== 'no-speech' && err !== 'aborted') {
             setMicErrorMsg(`Aviso de captura de áudio: ${err}`);
           }
-          // 'no-speech' is expected during pauses and shouldn't kill the session
           if (err !== 'no-speech' && err !== 'aborted') {
             if (isComponentMounted.current) {
               updateVoiceState('idle');
@@ -289,7 +409,8 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
           }
         },
         onEnd: () => {
-          // If still marked as listening and hands-free, seamlessly restart the recognizer
+          setIsUserSpeaking(false);
+          setMicVolume(0);
           if (
             isComponentMounted.current &&
             voiceStateRef.current === 'listening' &&
@@ -305,9 +426,7 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
               ) {
                 try {
                   recognizerRef.current?.start();
-                } catch {
-                  // Ignore harmless restarts
-                }
+                } catch {}
               }
             }, 250);
           } else if (voiceStateRef.current === 'listening' && !isHandsFreeRef.current) {
@@ -339,7 +458,6 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
       return;
     }
 
-    // Temporarily pause listening while testing audio to avoid microphone hearing the speakers
     if (recognizerRef.current) {
       try { recognizerRef.current.abort(); } catch {}
     }
@@ -373,7 +491,6 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
         if (!isComponentMounted.current) return;
         isTestingAudioRef.current = false;
         setIsTestingAudio(false);
-        // Resume listening automatically if hands-free is enabled
         if (isHandsFreeRef.current) {
           setTimeout(() => {
             if (isComponentMounted.current && !isTestingAudioRef.current) {
@@ -406,191 +523,40 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
     const toneResult = voiceToneAnalyzer.stopAndAnalyze(text);
     setDetectedUserTone(toneResult);
 
+    // Immediate contextual vocal acknowledgement (instant vocal feedback showing Tellus is thinking)
+    const ackPhrase = generateThinkingAcknowledgement(text, toneResult);
     updateVoiceState('thinking');
-    const updatedHistory = [...conversationHistory, { role: 'user' as const, content: text }];
-    setConversationHistory(updatedHistory);
+    setLatestAiSpoken(ackPhrase);
 
-    // Call LLM with strict oral speech vs written action separation + acoustic tone mirroring
-    const liveSystemPrompt = `[🎙️ MODO LIVE VOICE & ASSISTENTE INTELIGENTE]
-- Você é a assistente pessoal do usuário em uma conversa ao vivo por VOZ sobre o tema: "${topic}".
-- Responda OBRIGATORIAMENTE em PORTUGUÊS DO BRASIL (pt-BR).
-- Seu tom deve ser natural, inteligente, amigável, acolhedor e ágil, como uma pessoa real conversando.
-
-[🎭 SINTONIA & ESPELHAMENTO DE TOM DE VOZ (FISH AUDIO S2.1 EMOTIONS)]
-- Tom detectado na fala do usuário agora: ${toneResult.emoji} ${toneResult.label} (Confiança: ${Math.round(toneResult.confidence * 100)}%).
-- Diagnóstico acústico: ${toneResult.description}
-- REGRA OBRIGATÓRIA DE ESPELHAMENTO EMOCIONAL (EMPATHIC MIRRORING):
-  * SE O USUÁRIO ESTIVER SUSSURRANDO (whispering): Você DEVE sussurrar de volta! Abra a sua fala dentro de [FALA] obrigatoriamente com a tag "[whispering]" e use vocabulário íntimo, suave, cúmplice e em voz baixa (ex: "[FALA] [whispering] psst... compreendi. Vou te explicar baixinho... [/FALA]").
-  * SE O USUÁRIO ESTIVER ALEGRE / ENTUSIASMADO (excited): Seja vibrante, alegre e transmita energia positiva! Use tags como "[excited]" ou "[happy]" com tom motivador e caloroso.
-  * SE O USUÁRIO ESTIVER CALMO / TRANQUILO (calm): Responda em tom suave, calmo e relaxado com a tag "[calm]" ou "[softly]".
-  * SE O USUÁRIO ESTIVER NEUTRO / OBJETIVO (neutral): Mantenha tom claro, equilibrado e direto ao ponto com a tag "[calm]" ou "[thoughtful]".
-- IMPORTANTE: No Fish Audio, a tag de emoção em colchetes DEVE vir logo no início da sua resposta falada dentro de [FALA].
-Exemplo de formato:
-[FALA]
-${toneResult.tag} [sua resposta falada curta e natural de 1 a 3 frases]
-[/FALA]
-
-[REGRA DE OURO: SEPARAÇÃO ENTRE FALA ORAL E ESCRITA NO VAULT]
-Para manter a conversa natural e fluida SEM gastar voz e tokens à toa lendo textos longos:
-Sua resposta DEVE ser estruturada estritamente nas seguintes tags:
-
-[FALA]
-Aqui você coloca EXATAMENTE o que vai dizer em voz alta para o usuário.
-- Limite: NO MÁXIMO 1 a 3 frases curtas, naturais e diretas (cerca de 20 a 45 palavras).
-- Soe como uma companheira de estudo real falando: simpática, objetiva e empática.
-- Responda à pergunta central imediatamente em tom oral.
-- Se o usuário pediu uma anotação, pesquisa ou desenvolvimento (ex: "faça uma anotação, página X, frase Y, o que ela significaria hoje?"):
-  Responda resumindo o significado em uma ou duas frases faladas e avise com naturalidade: "Fiz a anotação aqui! A frase significa principalmente que... vou colocar mais alguns detalhes e fontes nas suas notas agora mesmo."
-- NUNCA use markdown complexo, listas longas, blocos de código ou tabelas dentro de [FALA].
-[/FALA]
-
-[NOTA: Título Claro da Nota | Pasta Sugerida no Vault]
-(Gere esta tag SEMPRE que o usuário disser "anote isso", "faça uma anotação", citar livros/páginas, ou quando a reflexão merecer um registro permanente no cofre).
-Escreva a nota completa em Markdown:
-# Título da Nota
-> Trecho ou citação com referência (Livro, página, autor).
-
-## 📌 Contexto & Significado Central
-Explicação detalhada e fundamentada do conceito.
-
-## 🌍 O Que Ela Significa Hoje? (Aplicação Contemporânea)
-Como esse conceito se aplica na sociedade atual, relações humanas, política, tecnologia, etc.
-
-## 🤖 Reflexões e Comentários da Assistente
-Seus comentários críticos, conexões e insights pessoais para enriquecer o pensamento do usuário.
-
-## 📚 Fontes Pesquisadas & Leituras Complementares
-Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]].
-[/NOTA]
-
-[DETALHES]
-(Opcional, use apenas se NÃO gerou uma [NOTA], mas quiser deixar 2 ou 3 tópicos complementares para o usuário ler silenciosamente na tela sem você precisar ler em voz alta).
-[/DETALHES]`;
-
-    let accumulatedText = '';
-
-    try {
-      const messagesPayload = [
-        { role: 'system', content: liveSystemPrompt },
-        ...updatedHistory.slice(-6).map(m => ({ role: m.role, content: m.content }))
-      ];
-
-      // Stream response from agent
-      const cancelFn = api.streamChat(
-        messagesPayload,
-        activeModel,
-        'openrouter',
-        undefined,
-        true,
-        undefined,
-        (event: { type: string; data: any }) => {
-          if (event.type === 'content') {
-            accumulatedText += event.data || '';
-            setLatestAiResponse(accumulatedText);
-            
-            // Live update spoken text preview if available
-            const partialParsed = parseLiveResponse(accumulatedText);
-            if (partialParsed.spokenText) {
-              setLatestAiSpoken(partialParsed.spokenText);
-            }
-          }
-        },
-        () => {
-          // Streaming done
-          handleAiSpeechReady(accumulatedText, updatedHistory);
-        },
-        (err: any) => {
-          console.error('[LiveVoice] Chat error:', err);
-          setVoiceState('idle');
-        }
-      );
-      abortControllerRef.current = cancelFn;
-    } catch (err) {
-      console.error('[LiveVoice] Failed to request LLM:', err);
-      setVoiceState('idle');
-    }
-  };
-
-  const handleAiSpeechReady = async (aiText: string, updatedHistory: Array<{ role: 'user' | 'assistant'; content: string }>) => {
-    if (!aiText.trim()) {
-      updateVoiceState('idle');
-      return;
-    }
-
-    const parsed = parseLiveResponse(aiText);
-    const textToSpeak = parsed.spokenText || aiText.split(/\[NOTA|\[DETALHES/i)[0].trim();
-    setLatestAiSpoken(textToSpeak);
-
-    // Auto-save rich note to Vault if generated
-    if (parsed.noteData && parsed.noteData.title && parsed.noteData.content) {
-      try {
-        await api.saveNote({
-          title: parsed.noteData.title,
-          folder: parsed.noteData.folder,
-          subject: topic,
-          content: parsed.noteData.content,
-          isProjectSpecific: false
-        });
-        setLatestCreatedNote(parsed.noteData);
-        setSessionNotes(prev => [...prev, parsed.noteData!]);
-      } catch (err) {
-        console.error('[LiveVoice] Failed to auto-save note to Vault:', err);
-      }
-    }
-
-    // Build rich history content for export / vault sessions
-    let historyEntry = textToSpeak;
-    if (parsed.noteData) {
-      historyEntry += `\n\n> 📝 **Nota salva no Vault:** \`[[${parsed.noteData.title}]]\` na pasta *${parsed.noteData.folder}*\n\n${parsed.noteData.content}`;
-    } else if (parsed.detailsText) {
-      historyEntry += `\n\n> ℹ️ **Detalhes Complementares:**\n${parsed.detailsText}`;
-    }
-
-    setConversationHistory([...updatedHistory, { role: 'assistant', content: historyEntry }]);
-    updateVoiceState('speaking');
-
-    // Speak ONLY the concise oral portion (avoids wasting tokens, prevents long monotone speeches)
-    voiceService.speak(textToSpeak, {
+    // Speak immediate acknowledgement with emotion mirroring
+    voiceService.speak(ackPhrase, {
       forceProvider: voiceProvider,
       referenceId: fishVoiceId,
       voiceURI: selectedVoiceUri,
-      rate: speechRate,
-      onStart: () => {
-        if (isComponentMounted.current) {
-          updateVoiceState('speaking');
-        }
-      },
-      onEnd: () => {
-        if (!isComponentMounted.current) return;
-        updateVoiceState('idle');
-        // If hands-free, automatically resume listening
-        if (isHandsFreeRef.current) {
-          setTimeout(() => {
-            if (isComponentMounted.current && !isTestingAudioRef.current) {
-              startListening();
-            }
-          }, 600);
-        }
-      },
-      onError: () => {
-        if (isComponentMounted.current) {
-          updateVoiceState('idle');
-        }
-      }
+      rate: speechRate
     });
+
+    // Envia IMEDIATAMENTE para o chat e aciona o agent loop sem exigir confirmação manual!
+    if (onSendMessage) {
+      onSendMessage(text);
+    }
   };
 
   const handleInterrupt = () => {
-    stopAll();
+    voiceService.stop();
+    if (isStreaming && onStopStreaming) {
+      onStopStreaming();
+    }
+    updateVoiceState('idle');
   };
 
   const handleSaveToVault = async () => {
-    if (conversationHistory.length === 0) return;
+    if (messages.length === 0) return;
     try {
       const now = new Date();
       const title = `Sessão de Voz - ${topic.slice(0, 30)} - ${now.toLocaleDateString('pt-BR').replace(/\//g, '-')}`;
       const content = `# 🎙️ ${title}\n\n**Data:** ${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR')}\n**Tema de Estudo:** ${topic}\n**Modelo:** ${activeModel}\n\n---\n\n## Diálogo da Sessão\n\n` +
-        conversationHistory.map(m => `**${m.role === 'user' ? '👤 Você' : '🤖 Assistente'}:**\n${m.content}\n`).join('\n---\n\n');
+        messages.map(m => `**${m.role === 'user' ? '👤 Você' : '🤖 Assistente'}:**\n${m.content}\n`).join('\n---\n\n');
 
       await api.saveNote({
         title,
@@ -607,17 +573,204 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
     }
   };
 
-  const handleExportToChat = () => {
-    if (conversationHistory.length === 0) return;
-    onTransferToChat?.(conversationHistory);
-    onClose();
-  };
-
   if (!isOpen) return null;
 
+  const renderOrbStage = () => (
+    <div className="flex flex-col items-center justify-center flex-1 my-auto">
+      {/* Animated Interactive Orb */}
+      <div className="relative flex items-center justify-center my-4">
+        {/* Outer Ripple Wave 1 */}
+        <div className={`absolute rounded-full border transition-all duration-1000 ${
+          voiceState === 'listening' ? 'w-56 h-56 border-purple-500/30 scale-110 animate-ping' :
+          voiceState === 'thinking' ? 'w-56 h-56 border-cyan-500/20 rotate-180 animate-spin' :
+          voiceState === 'speaking' ? 'w-56 h-56 border-emerald-500/30 scale-125 animate-pulse' :
+          'w-40 h-40 border-slate-700/20 scale-100'
+        }`} style={{ animationDuration: voiceState === 'thinking' ? '6s' : '2s' }} />
+
+        {/* Outer Ripple Wave 2 */}
+        <div className={`absolute rounded-full border transition-all duration-700 ${
+          voiceState === 'listening' ? 'w-44 h-44 border-purple-400/40 scale-105 animate-pulse' :
+          voiceState === 'thinking' ? 'w-44 h-44 border-cyan-400/30 -rotate-90 animate-spin' :
+          voiceState === 'speaking' ? 'w-44 h-44 border-emerald-400/40 scale-110 animate-ping' :
+          'w-32 h-32 border-slate-700/20'
+        }`} style={{ animationDuration: '3s' }} />
+
+        {/* Glowing Core Sphere */}
+        <div 
+          onClick={() => {
+            if (voiceState === 'speaking') {
+              handleInterrupt();
+            } else if (voiceState === 'listening') {
+              if (recognizerRef.current) {
+                recognizerRef.current.stop();
+              } else {
+                stopAll();
+              }
+            } else {
+              startListening();
+            }
+          }}
+          style={{
+            transform: voiceState === 'listening' ? `scale(${1 + micVolume * 0.22})` : undefined
+          }}
+          className={`w-28 h-28 rounded-full flex flex-col items-center justify-center shadow-2xl cursor-pointer transition-all duration-300 relative z-10 select-none ${
+            voiceState === 'listening'
+              ? isUserSpeaking
+                ? 'bg-gradient-to-tr from-purple-500 to-indigo-500 ring-4 ring-purple-400 shadow-purple-500/80 scale-110'
+                : 'bg-gradient-to-tr from-purple-600 to-indigo-500 ring-4 ring-purple-500/40 shadow-purple-500/50'
+              : voiceState === 'thinking'
+              ? 'bg-gradient-to-tr from-cyan-600 to-blue-500 ring-4 ring-cyan-500/40 shadow-cyan-500/50 animate-pulse'
+              : voiceState === 'speaking'
+              ? 'bg-gradient-to-tr from-emerald-600 to-teal-500 ring-4 ring-emerald-500/40 shadow-emerald-500/50 scale-105'
+              : 'bg-gradient-to-tr from-panel to-card ring-2 ring-card-border shadow-black/60 hover:scale-105 hover:ring-accent/50'
+          }`}
+        >
+          {voiceState === 'listening' ? (
+            <Mic className={`w-10 h-10 text-white ${isUserSpeaking ? 'animate-bounce' : ''}`} />
+          ) : voiceState === 'thinking' ? (
+            <Sparkles className="w-10 h-10 text-white animate-spin" style={{ animationDuration: '3s' }} />
+          ) : voiceState === 'speaking' ? (
+            <Volume2 className="w-10 h-10 text-white animate-pulse" />
+          ) : (
+            <Mic className="w-10 h-10 text-slate-400" />
+          )}
+        </div>
+      </div>
+
+      {/* Status Text under Orb */}
+      <div className="text-center space-y-1 relative z-10 mt-2">
+        <span className="font-bold text-sm text-slate-100 block">
+          {isTranscribingAudio ? '⚡ Transcrevendo áudio com IA...' :
+           isUserSpeaking ? '🎙️ Ouvindo você falar...' :
+           voiceState === 'listening' ? 'Estou ouvindo... Fale sua pergunta ou comentário' :
+           voiceState === 'thinking' ? 'Raciocinando resposta...' :
+           voiceState === 'speaking' ? 'Reproduzindo áudio (clique no orbe para pausar)' :
+           'Clique no orbe ou no botão abaixo para começar a falar'}
+        </span>
+        <span className="text-[11px] text-slate-400 block font-mono">
+          {isHandsFree ? 'Modo Mãos-Livres Ativo (envio automático ao pausar fala)' : 'Modo Manual / Push-to-Talk'}
+        </span>
+      </div>
+
+      {/* Microphone Diagnostic Alert Banner */}
+      {micErrorMsg && (
+        <div className="w-full max-w-md mt-4 p-3 rounded-2xl bg-amber-950/70 border border-amber-500/60 shadow-xl space-y-1 text-xs text-amber-200 relative z-20 animate-in fade-in">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-amber-300 block">Diagnóstico de Microfone:</span>
+                <p className="text-[11px] text-amber-100">{micErrorMsg}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMicErrorMsg(null)}
+              className="p-1 rounded-lg hover:bg-amber-500/20 text-amber-400"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Real-time Subtitles / Live Transcript Floating Card */}
+      {(currentTranscript || latestAiSpoken || latestAiResponse || latestCreatedNote || detectedUserTone) && (
+        <div className="w-full max-w-md mt-5 p-3.5 rounded-2xl bg-card/90 border border-card-border/80 shadow-2xl backdrop-blur-md space-y-2 text-xs relative z-10 animate-in fade-in">
+          {/* Detected User Tone Badge */}
+          {detectedUserTone && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-card-border/50 text-[11px]">
+              <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-panel border border-card-border/80 text-slate-300 font-mono">
+                <span>{detectedUserTone.emoji}</span>
+                <span className="text-slate-400">Tom:</span>
+                <span className="font-semibold text-accent-light">{detectedUserTone.label}</span>
+              </div>
+              {detectedUserTone.type === 'whispering' && (
+                <span className="text-[10px] text-amber-300 font-medium italic animate-pulse">
+                  🤫 Sussurrando de volta...
+                </span>
+              )}
+              {detectedUserTone.type === 'excited' && (
+                <span className="text-[10px] text-emerald-300 font-medium italic animate-pulse">
+                  ⚡ Respondendo com energia!
+                </span>
+              )}
+              {detectedUserTone.type === 'calm' && (
+                <span className="text-[10px] text-cyan-300 font-medium italic">
+                  🌿 Tom sereno e tranquilo
+                </span>
+              )}
+            </div>
+          )}
+
+          {currentTranscript && (
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold uppercase text-purple-300 font-mono flex items-center space-x-1">
+                <Mic className="w-3 h-3 text-purple-400" />
+                <span>Você disse:</span>
+              </span>
+              <p className="text-slate-100 italic text-xs leading-relaxed">"{currentTranscript}"</p>
+            </div>
+          )}
+
+          {(latestAiSpoken || latestAiResponse) && (
+            <div className="space-y-0.5 pt-1.5 border-t border-card-border/50">
+              <span className="text-[10px] font-bold uppercase text-emerald-300 font-mono flex items-center space-x-1">
+                <Volume2 className="w-3 h-3 text-emerald-400" />
+                <span>Tellus (Fala):</span>
+              </span>
+              <p className="text-slate-100 text-xs font-medium leading-relaxed">
+                {(latestAiSpoken || parseLiveResponse(latestAiResponse).spokenText).replace(/^\[[a-zA-Z\s_-]+\]\s*/, '')}
+              </p>
+            </div>
+          )}
+
+          {/* Automatic Vault Note Created Badge Card */}
+          {latestCreatedNote && (
+            <div className="mt-2 p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/40 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center space-x-2 min-w-0">
+                <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 shrink-0">
+                  <BookMarked className="w-3.5 h-3.5" />
+                </div>
+                <div className="truncate">
+                  <span className="font-bold text-amber-200 truncate block">{latestCreatedNote.title}</span>
+                  <span className="text-[10px] text-slate-400 font-mono truncate block">📂 {latestCreatedNote.folder}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setViewingNoteContent(latestCreatedNote)}
+                  className="px-2 py-1 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-[10px] font-semibold flex items-center space-x-1"
+                >
+                  <Eye className="w-3 h-3" />
+                  <span>Ver</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const title = latestCreatedNote.title;
+                    onOpenNote?.(title);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-200 hover:text-white text-[10px] font-semibold flex items-center space-x-1"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Vault</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xl p-4 animate-in fade-in select-none">
-      <div className="bg-[#0b0e14] border border-card-border/80 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xl p-3 sm:p-5 animate-in fade-in select-none">
+      <div className={`bg-[#0b0e14] border border-card-border/80 rounded-3xl w-full shadow-2xl overflow-hidden flex flex-col relative transition-all duration-300 ${
+        layoutMode === 'split' ? 'max-w-6xl h-[88vh]' : 'max-w-2xl min-h-[580px]'
+      }`}>
         
         {/* Glow Background Elements */}
         <div className={`absolute -top-24 -left-24 w-72 h-72 rounded-full blur-3xl pointer-events-none transition-all duration-700 ${
@@ -632,7 +785,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
         }`} />
 
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-card-border/70 flex items-center justify-between relative z-10 bg-card/40">
+        <div className="p-3.5 sm:p-4 border-b border-card-border/70 flex items-center justify-between relative z-10 bg-card/40 shrink-0">
           <div className="flex items-center space-x-3">
             <div className={`w-9 h-9 rounded-2xl flex items-center justify-center border shadow-md transition-colors ${
               voiceState === 'listening' ? 'bg-purple-950/60 border-purple-500 text-purple-300' :
@@ -651,7 +804,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                   voiceState === 'speaking' ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' :
                   'bg-panel border-card-border text-slate-500'
                 }`}>
-                  {voiceState === 'listening' ? 'Ouvindo você...' :
+                  {voiceState === 'listening' ? 'Ouvindo...' :
                    voiceState === 'thinking' ? 'Pensando...' :
                    voiceState === 'speaking' ? 'Falando...' : 'Pronto'}
                 </span>
@@ -660,8 +813,8 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                 <button 
                   type="button"
                   onClick={() => setShowSettings(prev => !prev)}
-                  className="hidden sm:flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-brand-cyan/10 border border-brand-cyan/30 text-[10px] text-brand-cyan hover:bg-brand-cyan/20 transition-all shadow-sm"
-                  title="Clique para alternar voz"
+                  className="hidden sm:flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-brand-cyan/10 border border-brand-cyan/30 text-[10px] text-brand-cyan hover:bg-brand-cyan/20 transition-all shadow-sm cursor-pointer"
+                  title="Configurar voz e áudio"
                 >
                   <Sparkles className="w-3 h-3 text-brand-cyan" />
                   <span className="font-semibold">
@@ -671,14 +824,27 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                   </span>
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400">Conversação e estudo contínuo em tempo real por voz</p>
+              <p className="text-[11px] text-slate-400">Conversação fluida com Tellus em tempo real</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
+            {/* Split / Orb Only Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setLayoutMode(prev => prev === 'split' ? 'orb_only' : 'split')}
+              className={`p-2 rounded-xl border transition-all text-xs flex items-center space-x-1.5 cursor-pointer ${
+                layoutMode === 'split' ? 'bg-accent/20 border-accent text-accent-light' : 'bg-panel border-card-border text-slate-400 hover:text-white'
+              }`}
+              title={layoutMode === 'split' ? 'Alternar para Modo Somente Orbe' : 'Alternar para Modo Dividido (Chat à esquerda e Orbe à direita)'}
+            >
+              <Columns className="w-4 h-4" />
+              <span className="hidden sm:inline font-medium text-[11px]">{layoutMode === 'split' ? 'Chat + Orbe' : 'Só Orbe'}</span>
+            </button>
+
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className={`p-2 rounded-xl border transition-all text-xs flex items-center space-x-1 ${
+              className={`p-2 rounded-xl border transition-all text-xs flex items-center space-x-1 cursor-pointer ${
                 showSettings ? 'bg-accent/20 border-accent text-accent-light' : 'bg-panel border-card-border text-slate-400 hover:text-white'
               }`}
               title="Configurações de Voz"
@@ -687,7 +853,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl bg-panel hover:bg-card-border text-slate-400 hover:text-white border border-card-border transition-colors"
+              className="p-2 rounded-xl bg-panel hover:bg-card-border text-slate-400 hover:text-white border border-card-border transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -695,24 +861,24 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
         </div>
 
         {/* Study Topic Input & Presets Bar */}
-        <div className="p-3.5 bg-panel/40 border-b border-card-border/60 relative z-10 space-y-2">
+        <div className="p-3 bg-panel/40 border-b border-card-border/60 relative z-10 space-y-2 shrink-0">
           <div className="flex items-center space-x-2">
             <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
             <input
               type="text"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="Tema de Estudo (ex: Sabotagem SPREGULA, Docker, Treino de Entrevista)..."
+              placeholder="Tema de Estudo (ex: Segurança de Web App, Arquitetura de Dados, Revisão de Código)..."
               className="flex-1 bg-card border border-card-border/80 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent font-medium"
             />
           </div>
           <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none text-[10px]">
             <span className="text-slate-500 shrink-0 font-mono">Sugestões:</span>
-            {['Concurso SPREGULA', 'Treino de Entrevista', 'Perguntas e Respostas', 'Arquitetura de Dados', 'Revisão Rápida'].map(p => (
+            {['Segurança de Web App', 'Arquitetura de Dados', 'Treino de Entrevista', 'Revisão de Código', 'Concurso SPREGULA'].map(p => (
               <button
                 key={p}
                 onClick={() => setTopic(p)}
-                className={`px-2 py-0.5 rounded-lg border transition-all whitespace-nowrap ${
+                className={`px-2 py-0.5 rounded-lg border transition-all whitespace-nowrap cursor-pointer ${
                   topic === p ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-semibold' : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -724,8 +890,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
 
         {/* Settings Flyout Bar */}
         {showSettings && (
-          <div className="p-3.5 bg-card/90 border-b border-card-border relative z-10 space-y-3 text-xs animate-in slide-in-from-top-2">
-            {/* Mechanism Toggle */}
+          <div className="p-3.5 bg-card/95 border-b border-card-border relative z-20 space-y-3 text-xs animate-in slide-in-from-top-2 shrink-0">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center space-x-2">
                 <span className="text-[10px] font-bold uppercase text-slate-400 font-mono">Mecanismo de Voz:</span>
@@ -736,7 +901,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                       setVoiceProvider('fish-audio');
                       voiceService.setVoiceProvider('fish-audio');
                     }}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-all ${
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer ${
                       voiceProvider === 'fish-audio'
                         ? 'bg-brand-cyan text-slate-950 font-bold shadow'
                         : 'text-slate-400 hover:text-white'
@@ -751,7 +916,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                       setVoiceProvider('system');
                       voiceService.setVoiceProvider('system');
                     }}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-all ${
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer ${
                       voiceProvider === 'system'
                         ? 'bg-accent text-white font-bold shadow'
                         : 'text-slate-400 hover:text-white'
@@ -803,7 +968,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                           setFishVoiceId(preset.id);
                           voiceService.setFishVoiceId(preset.id);
                         }}
-                        className={`text-left p-2.5 rounded-xl border transition-all ${
+                        className={`text-left p-2 rounded-xl border transition-all cursor-pointer ${
                           isSelected
                             ? 'bg-brand-cyan/15 border-brand-cyan text-slate-100 shadow-sm'
                             : 'bg-panel border-card-border text-slate-400 hover:border-slate-600 hover:text-slate-200'
@@ -852,7 +1017,7 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                           setSpeechRate(r);
                           voiceService.setSpeechRate(r);
                         }}
-                        className={`flex-1 py-1 rounded-lg border text-[10px] font-mono transition-all ${
+                        className={`flex-1 py-1 rounded-lg border text-[10px] font-mono transition-all cursor-pointer ${
                           speechRate === r ? 'bg-accent text-white border-accent font-bold' : 'bg-panel border-card-border text-slate-400 hover:text-white'
                         }`}
                       >
@@ -866,209 +1031,86 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
           </div>
         )}
 
-        {/* Central Stage: Futuristic Glowing Soundwave Orb */}
-        <div className="p-8 sm:p-12 flex flex-col items-center justify-center relative min-h-[300px]">
-          {/* Animated Interactive Orb */}
-          <div className="relative flex items-center justify-center my-4">
-            {/* Outer Ripple Wave 1 */}
-            <div className={`absolute rounded-full border transition-all duration-1000 ${
-              voiceState === 'listening' ? 'w-56 h-56 border-purple-500/30 scale-110 animate-ping' :
-              voiceState === 'thinking' ? 'w-56 h-56 border-cyan-500/20 rotate-180 animate-spin' :
-              voiceState === 'speaking' ? 'w-56 h-56 border-emerald-500/30 scale-125 animate-pulse' :
-              'w-40 h-40 border-slate-700/20 scale-100'
-            }`} style={{ animationDuration: voiceState === 'thinking' ? '6s' : '2s' }} />
-
-            {/* Outer Ripple Wave 2 */}
-            <div className={`absolute rounded-full border transition-all duration-700 ${
-              voiceState === 'listening' ? 'w-44 h-44 border-purple-400/40 scale-105 animate-pulse' :
-              voiceState === 'thinking' ? 'w-44 h-44 border-cyan-400/30 -rotate-90 animate-spin' :
-              voiceState === 'speaking' ? 'w-44 h-44 border-emerald-400/40 scale-110 animate-ping' :
-              'w-32 h-32 border-slate-700/20'
-            }`} style={{ animationDuration: '3s' }} />
-
-            {/* Glowing Core Sphere */}
-            <div 
-              onClick={() => {
-                if (voiceState === 'speaking') {
-                  handleInterrupt();
-                } else if (voiceState === 'listening') {
-                  stopAll();
-                } else {
-                  startListening();
-                }
-              }}
-              className={`w-28 h-28 rounded-full flex flex-col items-center justify-center shadow-2xl cursor-pointer transition-all duration-500 relative z-10 select-none ${
-                voiceState === 'listening'
-                  ? 'bg-gradient-to-tr from-purple-600 to-indigo-500 ring-4 ring-purple-500/40 shadow-purple-500/50 scale-105'
-                  : voiceState === 'thinking'
-                  ? 'bg-gradient-to-tr from-cyan-600 to-blue-500 ring-4 ring-cyan-500/40 shadow-cyan-500/50 animate-pulse'
-                  : voiceState === 'speaking'
-                  ? 'bg-gradient-to-tr from-emerald-600 to-teal-500 ring-4 ring-emerald-500/40 shadow-emerald-500/50 scale-105'
-                  : 'bg-gradient-to-tr from-panel to-card ring-2 ring-card-border shadow-black/60 hover:scale-105 hover:ring-accent/50'
-              }`}
-            >
-              {voiceState === 'listening' ? (
-                <Mic className="w-10 h-10 text-white animate-bounce" />
-              ) : voiceState === 'thinking' ? (
-                <Sparkles className="w-10 h-10 text-white animate-spin" style={{ animationDuration: '3s' }} />
-              ) : voiceState === 'speaking' ? (
-                <Volume2 className="w-10 h-10 text-white animate-pulse" />
-              ) : (
-                <Mic className="w-10 h-10 text-slate-400" />
-              )}
-            </div>
-          </div>
-
-          {/* Status Text under Orb */}
-          <div className="text-center space-y-1 relative z-10 mt-2">
-            <span className="font-bold text-sm text-slate-100 block">
-              {voiceState === 'listening' ? 'Estou ouvindo... Fale sua pergunta ou comentário' :
-               voiceState === 'thinking' ? 'Raciocinando resposta...' :
-               voiceState === 'speaking' ? 'Reproduzindo áudio (clique no orbe para pausar)' :
-               'Clique no orbe ou no botão abaixo para começar a falar'}
-            </span>
-            <span className="text-[11px] text-slate-400 block font-mono">
-              {isHandsFree ? 'Modo Mãos-Livres Ativo (detecção automática)' : 'Modo Manual / Push-to-Talk'}
-            </span>
-          </div>
-
-          {/* Microphone Diagnostic Alert Banner */}
-          {micErrorMsg && (
-            <div className="w-full max-w-xl mt-4 p-3.5 rounded-2xl bg-amber-950/70 border border-amber-500/60 shadow-xl space-y-1.5 text-xs text-amber-200 relative z-20 animate-in fade-in">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-start space-x-2">
-                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <span className="font-bold text-amber-300 block">Diagnóstico de Microfone do Live Voice:</span>
-                    <p className="text-[11px] leading-relaxed text-amber-100">{micErrorMsg}</p>
-                    <div className="text-[10px] text-amber-300/90 font-mono space-y-0.5 pt-1">
-                      {voiceService.isElectron() ? (
-                        <>
-                          <p>• No Windows: <strong>Configurações &gt; Privacidade e Segurança &gt; Microfone</strong> &gt; Ativar acesso.</p>
-                          <p>• Verifique se o microfone padrão está ativo no Painel de Controle de Som.</p>
-                          <p>• Captura direta por hardware (WASAPI) habilitada no aplicativo desktop.</p>
-                        </>
-                      ) : (
-                        <>
-                          <p>• Clique no ícone de 🔒 (cadeado/permissões) na barra de endereço do navegador.</p>
-                          <p>• Altere <strong>Microfone</strong> para <strong>Permitir</strong>.</p>
-                          <p>• No Windows: <strong>Configurações &gt; Privacidade e Segurança &gt; Microfone</strong> &gt; Ativar acesso.</p>
-                        </>
-                      )}
-                    </div>
-                  </div>
+        {/* Central Stage: Split View (Chat on left, Orb on right) OR Focused Orb Only */}
+        <div className="flex-1 flex min-h-0 overflow-hidden relative z-10">
+          {layoutMode === 'split' ? (
+            <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden w-full">
+              {/* Left Column: Live Chat Stream */}
+              <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]/70 border-b md:border-b-0 md:border-r border-card-border/70 overflow-hidden">
+                <div className="px-4 py-2 border-b border-card-border/60 bg-panel/30 flex items-center justify-between text-xs text-slate-400 shrink-0">
+                  <span className="font-semibold text-slate-200 flex items-center space-x-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                    <span>Histórico do Chat ao Vivo</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {messages.length} {messages.length === 1 ? 'mensagem' : 'mensagens'}
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setMicErrorMsg(null)}
-                  className="p-1 rounded-lg hover:bg-amber-500/20 text-amber-400 hover:text-amber-200 transition-colors"
+
+                {/* Messages stream */}
+                <div 
+                  ref={chatScrollRef}
+                  className="flex-1 overflow-y-auto p-4 space-y-3 text-xs select-text scrollbar-thin scrollbar-thumb-card-border"
                 >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                  {messages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-2">
+                      <Radio className="w-8 h-8 text-slate-600 animate-pulse" />
+                      <p className="font-medium text-slate-300">Nenhuma mensagem no chat ainda.</p>
+                      <p className="text-[11px] text-slate-500 max-w-xs">
+                        Fale pelo microfone ou pelo Orbe. O Tellus responderá por voz e registrará tudo aqui.
+                      </p>
+                    </div>
+                  ) : (
+                    messages.map((msg) => (
+                      <div 
+                        key={msg.id}
+                        className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} space-y-1`}
+                      >
+                        <div className="text-[10px] font-mono text-slate-400 px-1">
+                          {msg.role === 'user' ? '👤 Você' : '🤖 Tellus'}
+                        </div>
+                        <div className={`p-3 rounded-2xl max-w-[90%] text-xs leading-relaxed ${
+                          msg.role === 'user'
+                            ? 'bg-purple-950/40 border border-purple-500/30 text-purple-100 rounded-tr-sm'
+                            : 'bg-card/90 border border-card-border text-slate-200 rounded-tl-sm select-text'
+                        }`}>
+                          {msg.role === 'assistant' ? (
+                            <div className="prose prose-invert prose-xs max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content.replace(/\[FALA\][\s\S]*?\[\/FALA\]/gi, '').trim() || msg.content}
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap">{msg.content}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {isStreaming && (
+                    <div className="flex items-center space-x-2 p-3 rounded-2xl bg-cyan-950/30 border border-cyan-500/30 text-cyan-200 text-xs animate-pulse">
+                      <Sparkles className="w-4 h-4 text-cyan-400 animate-spin" />
+                      <span>Tellus está pensando, executando tarefas e criando notas...</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Glowing Orb & Real-Time Controls */}
+              <div className="w-full md:w-[420px] lg:w-[450px] shrink-0 flex flex-col justify-between overflow-y-auto p-4 sm:p-6 bg-card/20">
+                {renderOrbStage()}
               </div>
             </div>
-          )}
-
-          {/* Real-time Subtitles / Live Transcript Floating Card */}
-          {(currentTranscript || latestAiSpoken || latestAiResponse || latestCreatedNote || detectedUserTone) && (
-            <div className="w-full max-w-xl mt-6 p-4 rounded-2xl bg-card/90 border border-card-border/80 shadow-2xl backdrop-blur-md space-y-2.5 text-xs relative z-10 animate-in fade-in">
-              {/* Detected User Tone Badge */}
-              {detectedUserTone && (
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-card-border/50 text-[11px]">
-                  <div className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-panel border border-card-border/80 text-slate-300 font-mono shadow-xs">
-                    <span>{detectedUserTone.emoji}</span>
-                    <span className="text-slate-400">Tom de voz:</span>
-                    <span className="font-semibold text-accent-light">{detectedUserTone.label}</span>
-                  </div>
-                  {detectedUserTone.type === 'whispering' && (
-                    <span className="text-[10px] text-amber-300 font-medium italic animate-pulse">
-                      🤫 Sussurrando de volta...
-                    </span>
-                  )}
-                  {detectedUserTone.type === 'excited' && (
-                    <span className="text-[10px] text-emerald-300 font-medium italic animate-pulse">
-                      ⚡ Respondendo com energia!
-                    </span>
-                  )}
-                  {detectedUserTone.type === 'calm' && (
-                    <span className="text-[10px] text-cyan-300 font-medium italic">
-                      🌿 Tom sereno e tranquilo
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {currentTranscript && (
-                <div className="space-y-0.5">
-                  <span className="text-[10px] font-bold uppercase text-purple-300 font-mono flex items-center space-x-1">
-                    <Mic className="w-3 h-3 text-purple-400" />
-                    <span>Você disse:</span>
-                  </span>
-                  <p className="text-slate-100 italic text-sm leading-relaxed">"{currentTranscript}"</p>
-                </div>
-              )}
-
-              {(latestAiSpoken || latestAiResponse) && (
-                <div className="space-y-1 pt-2 border-t border-card-border/50">
-                  <span className="text-[10px] font-bold uppercase text-emerald-300 font-mono flex items-center space-x-1">
-                    <Volume2 className="w-3 h-3 text-emerald-400" />
-                    <span>Assistente (Fala):</span>
-                  </span>
-                  <p className="text-slate-100 text-sm font-medium leading-relaxed">
-                    {(latestAiSpoken || parseLiveResponse(latestAiResponse).spokenText).replace(/^\[[a-zA-Z\s_-]+\]\s*/, '')}
-                  </p>
-                </div>
-              )}
-
-              {/* Automatic Vault Note Created Badge Card */}
-              {latestCreatedNote && (
-                <div className="mt-2.5 p-3 rounded-xl bg-amber-950/20 border border-amber-500/40 flex items-center justify-between gap-3 text-xs animate-in zoom-in-95">
-                  <div className="flex items-center space-x-2.5 min-w-0">
-                    <div className="p-2 rounded-lg bg-amber-500/20 text-amber-300 shrink-0">
-                      <BookMarked className="w-4 h-4" />
-                    </div>
-                    <div className="truncate">
-                      <div className="flex items-center space-x-1.5">
-                        <span className="font-bold text-amber-200 truncate">{latestCreatedNote.title}</span>
-                        <span className="text-[9px] bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-1.5 py-0.2 rounded-full font-mono shrink-0">
-                          Salva no Vault
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 font-mono truncate">📂 {latestCreatedNote.folder} • Anotação estruturada & fontes</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setViewingNoteContent(latestCreatedNote)}
-                      className="px-2.5 py-1.5 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
-                      title="Pré-visualizar nota completa na janela"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Ver</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const title = latestCreatedNote.title;
-                        onOpenNote?.(title);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-200 hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all shadow-xs cursor-pointer"
-                      title="Abrir nota no editor do Notes Module (Vault)"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Abrir no Vault</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+          ) : (
+            <div className="flex-1 flex flex-col justify-center overflow-y-auto p-6 sm:p-10 w-full">
+              {renderOrbStage()}
             </div>
           )}
         </div>
 
         {/* Bottom Control Bar */}
-        <div className="p-4 border-t border-card-border/80 bg-card/60 relative z-10 flex flex-wrap items-center justify-between gap-3">
+        <div className="p-3.5 sm:p-4 border-t border-card-border/80 bg-card/60 relative z-10 flex flex-wrap items-center justify-between gap-3 shrink-0">
           {/* Hands Free Toggle */}
           <button
             type="button"
@@ -1076,10 +1118,13 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
               const next = !isHandsFree;
               setIsHandsFree(next);
               isHandsFreeRef.current = next;
+              try {
+                localStorage.setItem('tellus_live_voice_hands_free', String(next));
+              } catch {}
               if (!next) stopAll();
               else startListening();
             }}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center space-x-2 transition-all ${
+            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer ${
               isHandsFree 
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 shadow-xs' 
                 : 'bg-panel border-card-border text-slate-400 hover:text-white'
@@ -1104,8 +1149,8 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
               <button
                 type="button"
                 onClick={() => {
-                  if (currentTranscript.trim()) {
-                    handleUserSpeechCompleted(currentTranscript);
+                  if (recognizerRef.current) {
+                    recognizerRef.current.stop();
                   } else {
                     stopAll();
                   }
@@ -1113,7 +1158,16 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
                 className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center space-x-1.5 shadow-md shadow-purple-600/30 transition-all cursor-pointer"
               >
                 <Square className="w-3.5 h-3.5 fill-current" />
-                <span>Concluir Fala</span>
+                <span>{isTranscribingAudio ? 'Transcrevendo...' : 'Concluir Fala'}</span>
+              </button>
+            ) : voiceState === 'thinking' ? (
+              <button
+                type="button"
+                onClick={handleInterrupt}
+                className="px-4 py-2 rounded-xl bg-cyan-600/60 text-white font-semibold text-xs flex items-center space-x-1.5 shadow-md cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>Pensando...</span>
               </button>
             ) : (
               <button
@@ -1127,12 +1181,12 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
             )}
           </div>
 
-          {/* Export & Save Buttons */}
+          {/* Save to Vault & Close */}
           <div className="flex items-center space-x-2">
             <button
               type="button"
               onClick={handleSaveToVault}
-              disabled={conversationHistory.length === 0}
+              disabled={messages.length === 0}
               className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center space-x-1.5 transition-all ${
                 isSavedToVault
                   ? 'bg-emerald-600 border-emerald-500 text-white'
@@ -1146,10 +1200,9 @@ Autores relacionados, obras de referência e conexões conceituais [[Wikilinks]]
 
             <button
               type="button"
-              onClick={handleExportToChat}
-              disabled={conversationHistory.length === 0}
-              className="px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent border border-accent/40 text-accent-light hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all disabled:opacity-40 cursor-pointer"
-              title="Inserir histórico de voz no chat principal"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent border border-accent/40 text-accent-light hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="Ir para o chat principal"
             >
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Ir p/ Chat</span>

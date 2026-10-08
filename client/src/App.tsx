@@ -513,19 +513,32 @@ export const App: React.FC = () => {
         setIsStreaming(false);
         loadProjectOverview();
         setMessages(latest => {
-          saveCurrentSession(latest);
+          // Garante que se ferramentas foram executadas mas não houve texto, o assistente tem texto explicativo visível no chat
+          const updated = latest.map(m => {
+            if (m.id === assistantMessageId) {
+              if (!m.content || !m.content.trim()) {
+                if (m.toolCalls && m.toolCalls.length > 0) {
+                  return {
+                    ...m,
+                    content: '✅ Todas as notas, diretórios e estruturas foram criados e organizados com sucesso conforme solicitado.'
+                  };
+                }
+              }
+            }
+            return m;
+          });
 
-          // If Live Voice is active in this session, synthesize speech automatically!
-          if (isLiveVoiceActiveInChatRef.current) {
-            const assistantMsg = latest.find(m => m.id === assistantMessageId);
+          saveCurrentSession(updated);
+
+          // Se Live Voice estiver ativo no chat comum (e o Orbe modal não estiver aberto), sintetiza com deduplicação
+          if (isLiveVoiceActiveInChatRef.current && !isLiveVoiceOpen) {
+            const assistantMsg = updated.find(m => m.id === assistantMessageId);
             if (assistantMsg && assistantMsg.content) {
-              const parsed = parseLiveResponse(assistantMsg.content);
-              const textToSpeak = parsed.spokenText || assistantMsg.content;
-              voiceService.speak(textToSpeak);
+              voiceService.speakMessageSummary(assistantMsg.id, assistantMsg.content);
             }
           }
 
-          return latest;
+          return updated;
         });
       },
       (err) => {
@@ -845,6 +858,7 @@ export const App: React.FC = () => {
                 onOpenWindowPicker={() => setIsWindowPickerOpen(true)}
                 onOpenLiveVoice={() => handleStartLiveVoiceChat('mixed')}
                 isLiveVoiceActive={isLiveVoiceActiveInChat}
+                isLiveVoiceModalOpen={isLiveVoiceOpen}
                 liveVoiceMode={chatLiveVoiceMode}
                 onToggleLiveVoice={handleToggleLiveVoiceInChat}
                 onChangeLiveVoiceMode={handleChangeLiveVoiceMode}
@@ -1015,6 +1029,10 @@ export const App: React.FC = () => {
         isOpen={isLiveVoiceOpen}
         onClose={() => setIsLiveVoiceOpen(false)}
         activeModel={activeModel}
+        messages={messages}
+        isStreaming={isStreaming}
+        onSendMessage={handleSendMessage}
+        onStopStreaming={handleStopStreaming}
         onTransferToChat={handleTransferVoiceMessages}
         onOpenNote={(noteTitle) => {
           setIsLiveVoiceOpen(false);

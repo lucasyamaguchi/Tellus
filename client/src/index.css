@@ -205,3 +205,12 @@
 .prose tbody tr:hover td {
   background-color: rgba(255, 255, 255, 0.03) !important;
 }
+
+/* Previne que tags <mark> sem background explícito exibam o amarelo neon nativo do navegador */
+mark:not([style*="background"]),
+.prose mark:not([style*="background"]) {
+  background-color: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
