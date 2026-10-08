@@ -521,7 +521,13 @@ export function markdownToEditorHtml(markdown: string): string {
   html = html.replace(/^- (.*$)/gim, '<li class="ml-5 list-disc my-1">$1</li>');
   html = html.replace(/^(\d+)\. (.*$)/gim, '<li class="ml-5 list-decimal my-1">$2</li>');
 
-  // 11. Formatação inline: Negrito, Itálico, Tachado, Código
+  // 11. Destaques (Highlights):
+  // a) Desenrolar marcas sem background para evitar o amarelo nativo do browser
+  html = html.replace(/<mark(?:\s+style="(?![^"]*background)[^"]*")?>([\s\S]*?)<\/mark>/gi, '$1');
+  // b) Obsidian ==destaque== -> <mark> formatado
+  html = html.replace(/==([^=\r\n]+)==/g, '<mark style="background: rgba(234, 179, 8, 0.25); color: #fef08a; padding: 2px 6px; border-radius: 4px;">$1</mark>');
+
+  // 12. Formatação inline: Negrito, Itálico, Tachado, Código
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
@@ -659,6 +665,9 @@ export function editorHtmlToMarkdown(html: string): string {
   md = md.replace(/<pre[^>]*><code[^>]*class="language-([^"]*)"[^>]*>([\s\S]*?)<\/code><\/pre>/gi, '```$1\n$2\n```\n\n');
   md = md.replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, '```\n$1\n```\n\n');
   md = md.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`');
+
+  // Desempacotar marcas sem background (marcas que foram limpas)
+  md = md.replace(/<mark(?:\s+style="(?![^"]*background)[^"]*")?>([\s\S]*?)<\/mark>/gi, '$1');
 
   // Formatação rica básica: Negrito, Itálico, Tachado
   md = md.replace(/<(?:strong|b)[^>]*>([\s\S]*?)<\/(?:strong|b)>/gi, '**$1**');

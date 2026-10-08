@@ -56,6 +56,9 @@ class VoiceService {
   private onVoicesLoadedCallbacks: Array<() => void> = [];
   private currentAudio: HTMLAudioElement | null = null;
   private currentAudioUrl: string | null = null;
+  private currentPlayId = 0;
+  private currentAbortController: AbortController | null = null;
+  private lastSpokenMessageId: string | null = null;
 
   constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -219,6 +222,38 @@ class VoiceService {
     localStorage.setItem(STORAGE_FISH_MODEL_KEY, model.trim());
   }
 
+  public stop() {
+    this.currentPlayId++;
+    if (this.currentAbortController) {
+      try {
+        this.currentAbortController.abort();
+      } catch {}
+      this.currentAbortController = null;
+    }
+    if (this.currentAudio) {
+      try {
+        this.currentAudio.pause();
+        this.currentAudio.currentTime = 0;
+        this.currentAudio.src = '';
+        this.currentAudio.onplay = null;
+        this.currentAudio.onended = null;
+        this.currentAudio.onerror = null;
+      } catch {}
+      this.currentAudio = null;
+    }
+    if (this.currentAudioUrl) {
+      try {
+        URL.revokeObjectURL(this.currentAudioUrl);
+      } catch {}
+      this.currentAudioUrl = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+  }
+
   public async speak(
     text: string,
     options?: {
@@ -239,6 +274,10 @@ class VoiceService {
       return;
     }
 
+    const playId = ++this.currentPlayId;
+    const abortController = new AbortController();
+    this.currentAbortController = abortController;
+
     const provider = options?.forceProvider || this.getVoiceProvider();
 
     // 1. Fish Audio AI High-Fidelity Synthesis
@@ -254,8 +293,11 @@ class VoiceService {
             text: clean,
             reference_id: voiceId,
             model
-          })
+          }),
+          signal: abortController.signal
         });
+
+        if (this.currentPlayId !== playId) return;
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -263,6 +305,8 @@ class VoiceService {
         }
 
         const blob = await res.blob();
+        if (this.currentPlayId !== playId) return;
+
         const audioUrl = URL.createObjectURL(blob);
         this.currentAudioUrl = audioUrl;
         const audio = new Audio(audioUrl);
@@ -270,7 +314,9 @@ class VoiceService {
         audio.playbackRate = options?.rate || this.getSpeechRate();
 
         audio.onplay = () => {
-          options?.onStart?.();
+          if (this.currentPlayId === playId) {
+            options?.onStart?.();
+          }
         };
 
         audio.onended = () => {
@@ -279,7 +325,9 @@ class VoiceService {
             this.currentAudioUrl = null;
           }
           this.currentAudio = null;
-          options?.onEnd?.();
+          if (this.currentPlayId === playId) {
+            options?.onEnd?.();
+          }
         };
 
         audio.onerror = (e) => {
@@ -289,12 +337,18 @@ class VoiceService {
             this.currentAudioUrl = null;
           }
           this.currentAudio = null;
-          this.speakWithSystem(clean, options);
+          if (this.currentPlayId === playId) {
+            this.speakWithSystem(clean, options);
+          }
         };
 
+        if (this.currentPlayId !== playId) return;
         await audio.play();
         return;
       } catch (err: any) {
+        if (err.name === 'AbortError' || this.currentPlayId !== playId) {
+          return;
+        }
         console.warn('[Fish Audio Error — Revertendo para voz nativa do sistema]:', err.message);
         this.speakWithSystem(clean, options);
         return;
@@ -303,6 +357,29 @@ class VoiceService {
 
     // 2. Default System Web Speech
     this.speakWithSystem(clean, options);
+  }
+
+  public speakMessageSummary(
+    messageId: string,
+    rawContent: string,
+    tone?: { type?: string; tag?: string; emoji?: string } | null,
+    options?: {
+      onStart?: () => void;
+      onEnd?: () => void;
+      onError?: (err: any) => void;
+      forceProvider?: VoiceProvider;
+      referenceId?: string;
+      voiceURI?: string;
+      rate?: number;
+    }
+  ): boolean {
+    if (this.lastSpokenMessageId === messageId) {
+      return false; // Prevent playing the same message twice
+    }
+    this.lastSpokenMessageId = messageId;
+    const summary = extractConciseSpokenSummary(rawContent, tone);
+    this.speak(summary, options);
+    return true;
   }
 
   private speakWithSystem(
@@ -366,25 +443,6 @@ class VoiceService {
     };
 
     window.speechSynthesis.speak(utterance);
-  }
-
-  public stop() {
-    if (this.currentAudio) {
-      try {
-        this.currentAudio.pause();
-        this.currentAudio.currentTime = 0;
-      } catch {}
-      this.currentAudio = null;
-    }
-    if (this.currentAudioUrl) {
-      try {
-        URL.revokeObjectURL(this.currentAudioUrl);
-      } catch {}
-      this.currentAudioUrl = null;
-    }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
   }
 
   public isSpeaking(): boolean {
@@ -491,12 +549,36 @@ class VoiceService {
     onEnd?: () => void;
     onStart?: () => void;
     onProcessing?: (isProcessing: boolean) => void;
+    onVolume?: (volume: number) => void;
+    onSpeakingChange?: (isSpeaking: boolean) => void;
     lang?: string;
   }) {
+    // No Electron, o Web Speech API nativo é bloqueado pela falta das Google Cloud Keys do Chromium.
+    // Portanto, no Electron Desktop, SEMPRE usamos o DirectMicRecognizer com captura direta de hardware e transcrição via backend!
+    if (this.isElectron()) {
+      console.log('[VoiceService] Ambiente Electron detectado: Utilizando DirectMicRecognizer via Web Audio / Hardware');
+      const directRec = new DirectMicRecognizer(callbacks);
+      this.activeRecognizer = directRec;
+      return directRec;
+    }
+
     const hasNative = typeof window !== 'undefined' && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
     if (hasNative) {
-      console.log('[VoiceService] Utilizando motor nativo de reconhecimento de fala (Web Speech API pt-BR)');
-      const nativeRec = new NativeWebSpeechRecognizer(callbacks);
+      console.log('[VoiceService] Navegador Web: Utilizando motor nativo de fala com fallback automático');
+      const nativeRec = new NativeWebSpeechRecognizer({
+        ...callbacks,
+        onError: (err: any) => {
+          if (err === 'network' || err === 'service-not-allowed') {
+            console.warn('[VoiceService] Web Speech nativo falhou com:', err, '-> ativando DirectMicRecognizer como fallback');
+            try { nativeRec.abort(); } catch {}
+            const fallback = new DirectMicRecognizer(callbacks);
+            this.activeRecognizer = fallback;
+            fallback.start();
+            return;
+          }
+          callbacks.onError?.(err);
+        }
+      });
       this.activeRecognizer = nativeRec;
       return nativeRec;
     }
@@ -617,7 +699,7 @@ class NativeWebSpeechRecognizer {
 /**
  * Direct Microphone Recognizer
  * Captura o microfone do PC diretamente via hardware (WASAPI/CoreAudio),
- * detecta fala e silêncio (VAD) e transcreve via backend em formato WAV 16kHz.
+ * detecta fala e silêncio (VAD adaptativo) com ring-buffer pré-fala e transcreve via backend em formato WAV 16kHz.
  */
 class DirectMicRecognizer {
   private mediaStream: MediaStream | null = null;
@@ -626,6 +708,7 @@ class DirectMicRecognizer {
   private processorNode: ScriptProcessorNode | null = null;
   private isListening = false;
   private pcmChunks: Float32Array[] = [];
+  private preRollBuffer: Float32Array[] = [];
   private silenceTimer: any = null;
   private isSpeaking = false;
   private callbacks: any;
@@ -639,6 +722,7 @@ class DirectMicRecognizer {
     if (this.isListening) return;
     this.isListening = true;
     this.pcmChunks = [];
+    this.preRollBuffer = [];
     this.isSpeaking = false;
 
     try {
@@ -664,7 +748,6 @@ class DirectMicRecognizer {
         const inputData = e.inputBuffer.getChannelData(0);
         const chunk = new Float32Array(inputData.length);
         chunk.set(inputData);
-        this.pcmChunks.push(chunk);
 
         // Calculate RMS volume
         let sum = 0;
@@ -673,20 +756,44 @@ class DirectMicRecognizer {
         }
         const rms = Math.sqrt(sum / inputData.length);
 
-        // Sensibilidade aprimorada para vozes calmas, sussurros e microfones de PC (rms > 0.002)
-        if (rms > 0.002) {
-          this.isSpeaking = true;
+        // Emit real-time volume callback for visual feedback (scaled 0.0 to 1.0)
+        const normalizedVolume = Math.min(1.0, rms * 15);
+        this.callbacks.onVolume?.(normalizedVolume);
+
+        // Limiar de detecção de voz adaptativo para microfones de PC / Windows
+        const speechThreshold = 0.0018;
+
+        if (rms > speechThreshold) {
+          if (!this.isSpeaking) {
+            this.isSpeaking = true;
+            console.log('[DirectMicRecognizer] 🎙️ Início de fala detectado!');
+            this.callbacks.onSpeakingChange?.(true);
+            // Inclui o buffer de pré-fala (últimos 350ms) para não cortar a primeira sílaba
+            this.pcmChunks = [...this.preRollBuffer];
+            this.preRollBuffer = [];
+          }
+          this.pcmChunks.push(chunk);
+
           if (this.silenceTimer) {
             clearTimeout(this.silenceTimer);
             this.silenceTimer = null;
           }
         } else if (this.isSpeaking) {
+          // Usuário estava falando e entrou em silêncio momentâneo
+          this.pcmChunks.push(chunk);
           if (!this.silenceTimer) {
             this.silenceTimer = setTimeout(() => {
               if (this.isListening && this.isSpeaking) {
+                console.log('[DirectMicRecognizer] Silêncio detectado após fala. Processando áudio...');
                 this.commitSpeech();
               }
-            }, 1400); // 1.4s de silêncio conclui a fala
+            }, 1300); // 1.3s de silêncio conclui a fala no modo hands-free
+          }
+        } else {
+          // Silêncio enquanto aguarda fala: mantém apenas até 4 chunks (~370ms) no pre-roll
+          this.preRollBuffer.push(chunk);
+          if (this.preRollBuffer.length > 4) {
+            this.preRollBuffer.shift();
           }
         }
       };
@@ -710,7 +817,10 @@ class DirectMicRecognizer {
     const chunks = forcedChunks || this.pcmChunks;
     if (!chunks || chunks.length === 0) return;
     this.pcmChunks = [];
+    this.preRollBuffer = [];
     this.isSpeaking = false;
+    this.callbacks.onSpeakingChange?.(false);
+
     if (this.silenceTimer) {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
@@ -718,8 +828,8 @@ class DirectMicRecognizer {
 
     const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
     const sampleRate = forcedSampleRate || this.audioContext?.sampleRate || 44100;
-    if (totalLength < sampleRate * 0.2) {
-      // Menos de 200ms, ignorar estalo momentâneo
+    if (totalLength < sampleRate * 0.25) {
+      // Menos de 250ms, ruído momentâneo ou estalo
       return;
     }
 
@@ -742,7 +852,7 @@ class DirectMicRecognizer {
       }
 
       try {
-        console.log(`[DirectMicRecognizer] Enviando áudio gravado (${wavBlob.size} bytes) para /api/voice/transcribe...`);
+        console.log(`[DirectMicRecognizer] Enviando áudio gravado (${wavBlob.size} bytes) para transcrição...`);
         const res = await fetch('/api/voice/transcribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -755,9 +865,11 @@ class DirectMicRecognizer {
         if (res.ok) {
           const data = await res.json();
           const text = (data.text || '').trim();
-          console.log(`[DirectMicRecognizer] Resposta transcrição (${data.provider}): "${text}"`);
           if (text) {
+            console.log(`[DirectMicRecognizer] ✅ Transcrição recebida (${data.provider}): "${text}"`);
             this.callbacks.onResult(text, true);
+          } else if (data.isSilent) {
+            console.log('[DirectMicRecognizer] Áudio com silêncio ou sem fala detectada.');
           }
         } else {
           const errData = await res.json().catch(() => ({}));
@@ -794,6 +906,7 @@ class DirectMicRecognizer {
   public abort() {
     this.isListening = false;
     this.pcmChunks = [];
+    this.preRollBuffer = [];
     this.isSpeaking = false;
     if (this.silenceTimer) {
       clearTimeout(this.silenceTimer);
@@ -882,3 +995,138 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
 }
 
 export const voiceService = new VoiceService();
+
+/**
+ * Gera um feedback falado ultra-rápido e contextual indicando que o Tellus está pensando
+ * Ex: "Certo, vou criar alguns roteiros aqui para o seu estudo, só um minuto."
+ */
+export function generateThinkingAcknowledgement(
+  userPrompt: string, 
+  tone?: { type?: string; tag?: string; emoji?: string } | null
+): string {
+  const p = (userPrompt || '').toLowerCase();
+  const emotionTag = tone?.tag || '[thoughtful]';
+  const isWhispering = tone?.type === 'whispering' || /\[whisper/i.test(emotionTag);
+  const isExcited = tone?.type === 'excited' || /\[excited/i.test(emotionTag);
+
+  let ack = '';
+  if (isWhispering) {
+    if (p.includes('estud') || p.includes('nota') || p.includes('seguranç') || p.includes('web app') || p.includes('roteir')) {
+      ack = 'psst... certo, vou criar o roteiro de estudo aqui no cofre, só um minutinho...';
+    } else if (p.includes('código') || p.includes('bug') || p.includes('erro') || p.includes('função')) {
+      ack = 'psst... compreendi, já estou analisando o código para você, só um instante...';
+    } else {
+      ack = 'psst... entendido, estou pensando nisso aqui para você, só um instante...';
+    }
+  } else if (isExcited) {
+    if (p.includes('estud') || p.includes('aprend') || p.includes('seguranç') || p.includes('web app') || p.includes('roteir')) {
+      ack = 'Excelente! Já estou estruturando todo o material e os roteiros de estudo para você, só um minuto!';
+    } else if (p.includes('código') || p.includes('projet') || p.includes('cri')) {
+      ack = 'Demais! Vou implementar e preparar tudo para você agora mesmo, só um instante!';
+    } else {
+      ack = 'Maravilha! Já estou organizando tudo isso para você, só um segundo!';
+    }
+  } else {
+    // Normal / Calmo / Reflexivo
+    if (p.includes('estud') || p.includes('aprend') || p.includes('seguranç') || p.includes('web app') || p.includes('roteir') || p.includes('anota')) {
+      ack = 'Certo, vou criar alguns roteiros aqui para o seu estudo, só um minuto.';
+    } else if (p.includes('código') || p.includes('bug') || p.includes('erro') || p.includes('terminal') || p.includes('consert') || p.includes('test')) {
+      ack = 'Entendido, estou analisando o código e a arquitetura para resolver isso, só um momento.';
+    } else if (p.includes('nota') || p.includes('anot') || p.includes('caderno') || p.includes('vault') || p.includes('salvar')) {
+      ack = 'Certo, estou organizando os registros e preparando as notas no cofre, um instante.';
+    } else if (p.includes('pesquis') || p.includes('busc') || p.includes('o que é') || p.includes('como funciona')) {
+      ack = 'Compreendido, estou levantando os pontos principais para te explicar, só um minuto.';
+    } else {
+      ack = 'Entendido, já estou processando seu pedido, só um instante.';
+    }
+  }
+
+  return `${emotionTag} ${ack}`.trim();
+}
+
+/**
+ * Extrai um resumo falado conciso, direto e econômico (2 a 3 frases, ~30-45 palavras)
+ * sem citar nomes de módulos, arquivos ou wikilinks [[...]].
+ */
+export function extractConciseSpokenSummary(
+  rawText: string, 
+  tone?: { type?: string; tag?: string; emoji?: string } | null
+): string {
+  if (!rawText || !rawText.trim()) return '';
+
+  const emotionTag = tone?.tag || '[calm]';
+
+  // 1. Prioriza bloco explícito [FALA]...[/FALA] se emitido pelo modelo
+  const falaMatch = rawText.match(/\[FALA\]([\s\S]*?)(?:\[\/FALA\]|(?=\[NOTA|\[DETALHES)|$)/i);
+  if (falaMatch && falaMatch[1].trim()) {
+    let spoken = falaMatch[1]
+      .replace(/\[\/?FALA\]/gi, '')
+      .replace(/\[\[.*?\]\]/g, '') // remove [[wikilinks]]
+      .replace(/\*\*|__|\*|_/g, '')
+      .replace(/`[^`]+`/g, '')
+      .trim();
+    if (!spoken.startsWith('[')) {
+      spoken = `${emotionTag} ${spoken}`;
+    }
+    return spoken;
+  }
+
+  // 2. Extração concisa a partir do texto completo
+  let text = rawText.split(/\[NOTA|\[DETALHES/i)[0];
+  text = text.replace(/\[\[(.*?)\]\]/g, '');
+  text = text.replace(/```[\s\S]*?```/g, '');
+
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(p => p.length > 0 && !p.startsWith('#') && !p.startsWith('-') && !p.startsWith('*') && !p.startsWith('>'));
+
+  let creationSentence = '';
+  let synthesisSentence = '';
+  let nextStepSentence = '';
+
+  for (const p of paragraphs) {
+    const cleanP = p.replace(/\*\*|__/g, '').replace(/\[.*?\]\(.*?\)/g, '$1').trim();
+    if (!creationSentence && /(criei|preparei|estruturei|trilha|caderno|módulos|anotações|roteiro)/i.test(cleanP)) {
+      const firstSentence = cleanP.split(/(?<=[.!?])\s+/)[0] || cleanP;
+      creationSentence = firstSentence.replace(/:\s*$/, '').trim();
+      if (!creationSentence.endsWith('.')) creationSentence += '.';
+    } else if (!synthesisSentence && /(síntese|pense na|conceito|importante|ativo|vulnerabilidade|segurança|o ponto|regra|fundamental|cuidado|evite)/i.test(cleanP)) {
+      const sentences = cleanP.split(/(?<=[.!?])\s+/);
+      const goodSentence = sentences.find(s => s.length > 20 && !s.includes('?') && !s.includes('caderno') && !s.includes('módulo')) || sentences[0];
+      if (goodSentence) {
+        synthesisSentence = goodSentence.trim();
+        if (!synthesisSentence.endsWith('.')) synthesisSentence += '.';
+      }
+    } else if (!nextStepSentence && /(próximo passo|para começar|quando quiser|podemos|deixei pronto|caderno de atividades|exercício)/i.test(cleanP)) {
+      const sentences = cleanP.split(/(?<=[.!?])\s+/);
+      const goodSentence = sentences.find(s => !s.includes('?')) || sentences[0];
+      if (goodSentence) {
+        nextStepSentence = goodSentence.trim();
+        if (!nextStepSentence.endsWith('.')) nextStepSentence += '.';
+      }
+    }
+  }
+
+  if (!creationSentence && paragraphs.length > 0) {
+    const firstP = paragraphs[0].replace(/\*\*|__/g, '').split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
+    creationSentence = firstP;
+  }
+
+  if (!synthesisSentence) {
+    synthesisSentence = 'Estruturei todas as boas práticas e pontos essenciais para o seu aprendizado.';
+  }
+  if (!nextStepSentence) {
+    nextStepSentence = 'Quando você quiser, podemos avançar para o próximo exercício.';
+  }
+
+  let result = `${creationSentence} ${synthesisSentence} ${nextStepSentence}`.trim();
+  result = result
+    .replace(/\s+/g, ' ')
+    .replace(/\[\[.*?\]\]/g, '')
+    .replace(/[\[\]]/g, '')
+    .trim();
+
+  return `${emotionTag} ${result}`;
+}
+

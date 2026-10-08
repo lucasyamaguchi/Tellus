@@ -44,7 +44,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message, ToolCallItem, Routine, Attachment, QuotedMessage } from '../types';
 import { api } from '../api';
-import { voiceService } from '../services/voiceService';
+import { voiceService, generateThinkingAcknowledgement } from '../services/voiceService';
+import { voiceToneAnalyzer } from '../services/voiceToneAnalyzer';
+import { parseLiveResponse } from './LiveVoiceModal';
 
 interface ChatAreaProps {
   messages: Message[];
@@ -71,6 +73,7 @@ interface ChatAreaProps {
   activeSessionTitle?: string;
   onQuoteSnippet?: (quoted: QuotedMessage) => void;
   isLiveVoiceActive?: boolean;
+  isLiveVoiceModalOpen?: boolean;
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
   onToggleLiveVoice?: () => void;
   onChangeLiveVoiceMode?: (mode: 'voice_only' | 'mixed' | 'voice_output_only') => void;
@@ -103,6 +106,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   activeSessionTitle,
   onQuoteSnippet,
   isLiveVoiceActive = false,
+  isLiveVoiceModalOpen = false,
   liveVoiceMode = 'mixed',
   onToggleLiveVoice,
   onChangeLiveVoiceMode,
@@ -167,6 +171,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       } catch {}
     }
     voiceService.releaseMicrophone();
+    voiceToneAnalyzer.cleanup();
   };
 
   const handleToggleSpeakMessage = (msgId: string, content: string) => {
@@ -187,19 +192,31 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   useEffect(() => {
     if (prevIsStreamingRef.current && !isStreaming) {
       // Streaming just finished
-      if (isLiveVoiceActive && messages.length > 0) {
+      if (isLiveVoiceActive && !isLiveVoiceModalOpen && messages.length > 0) {
         const lastMsg = messages[messages.length - 1];
-        if (lastMsg.role === 'assistant' && lastMsg.content) {
-          voiceService.speak(lastMsg.content, {
+        if (lastMsg.role === 'assistant') {
+          const contentToSpeak = lastMsg.content || 'Notas e estruturas criadas com sucesso no seu Vault.';
+
+          voiceService.speakMessageSummary(lastMsg.id, contentToSpeak, null, {
             onStart: () => setSpeakingMessageId(lastMsg.id),
-            onEnd: () => setSpeakingMessageId(null),
+            onEnd: () => {
+              setSpeakingMessageId(null);
+              // No modo Hands-Off contínuo (somente voz ou misto), reabre a escuta automaticamente!
+              if (isLiveVoiceActive && liveVoiceMode !== 'voice_output_only') {
+                setTimeout(() => {
+                  if (!isDictatingRef.current) {
+                    handleToggleDictation();
+                  }
+                }, 500);
+              }
+            },
             onError: () => setSpeakingMessageId(null)
           });
         }
       }
     }
     prevIsStreamingRef.current = isStreaming;
-  }, [isStreaming, isLiveVoiceActive, messages]);
+  }, [isStreaming, isLiveVoiceActive, isLiveVoiceModalOpen, liveVoiceMode, messages]);
 
   // Reset dictation whenever session changes
   useEffect(() => {
@@ -236,11 +253,32 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       return;
     }
 
+    try {
+      voiceToneAnalyzer.start(micCheck.stream).catch(() => {});
+    } catch {}
+
     stopDictation();
     isDictatingRef.current = true;
     setIsDictating(true);
 
     try {
+      const sendSpeechDirectly = (transcriptText: string) => {
+        const textToSend = transcriptText.trim();
+        if (!textToSend || textToSend.length < 2) return;
+        setInput('');
+        stopDictation(false);
+        let tone = null;
+        try {
+          tone = voiceToneAnalyzer.stopAndAnalyze(textToSend);
+        } catch {}
+        if (isLiveVoiceActive) {
+          const thinkingAck = generateThinkingAcknowledgement(textToSend, tone);
+          voiceService.speak(thinkingAck);
+        }
+        onSendMessage(textToSend, undefined, quotedMessage || undefined);
+        if (quotedMessage) onClearQuotedMessage();
+      };
+
       const rec = voiceService.createSpeechRecognizer({
         lang: 'pt-BR',
         onStart: () => {
@@ -257,11 +295,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           if (isLiveVoiceActive) {
             setInput(transcript);
             if (isFinal && transcript.trim().length > 1) {
-              const textToSend = transcript.trim();
-              setInput('');
-              stopDictation(false);
-              onSendMessage(textToSend, undefined, quotedMessage || undefined);
-              if (quotedMessage) onClearQuotedMessage();
+              sendSpeechDirectly(transcript);
               return;
             }
           } else {
@@ -277,25 +311,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           }
 
           if (isLiveVoiceActive) {
-            // Em modo Live Voice, 1.6s de silêncio após fala envia automaticamente a mensagem ao modelo
+            // Em modo Live Voice, 900ms de silêncio após fala envia imediatamente sem confirmação manual
             dictationSilenceTimeoutRef.current = setTimeout(() => {
               if (isDictatingRef.current) {
-                const textToSend = (transcript || '').trim();
-                stopDictation(false);
-                if (textToSend) {
-                  setInput('');
-                  onSendMessage(textToSend, undefined, quotedMessage || undefined);
-                  if (quotedMessage) onClearQuotedMessage();
-                }
+                sendSpeechDirectly(transcript || '');
               }
-            }, 1600);
+            }, 900);
           } else {
-            // Ditado normal: pausa após 4s de silêncio
+            // Ditado normal: pausa após 3.5s de silêncio
             dictationSilenceTimeoutRef.current = setTimeout(() => {
               if (isDictatingRef.current) {
                 stopDictation(false);
               }
-            }, 4000);
+            }, 3500);
           }
         },
         onError: (err) => {
@@ -673,7 +701,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   ? 'bg-red-600 text-white animate-pulse ring-2 ring-red-400'
                   : 'bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40'
               }`}
-              title={isTranscribing ? "Processando transcrição de áudio..." : isDictating ? "Clique para concluir e enviar sua fala" : "Clique para falar com o assistente por voz"}
+              title={
+                isTranscribing 
+                  ? "Processando transcrição de áudio..." 
+                  : isDictating 
+                  ? "Modo Mãos-Livres ativo: Fale naturalmente. Ao pausar, seu prompt será enviado automaticamente." 
+                  : "Clique para falar com o assistente por voz (Modo Mãos-Livres)"
+              }
             >
               {isTranscribing ? (
                 <>
@@ -683,7 +717,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               ) : isDictating ? (
                 <>
                   <MicOff className="w-3.5 h-3.5" />
-                  <span>Ouvindo... Clique p/ Enviar</span>
+                  <span>Ouvindo... (Envia ao pausar)</span>
                 </>
               ) : (
                 <>

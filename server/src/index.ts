@@ -1044,6 +1044,12 @@ app.post('/api/chat/stream', async (req, res) => {
   3. Resumo objetivo da correção/implementação realizada (máx 2-3 linhas).`;
   }
 
+  // Regra fundamental de retorno textual para conversa e voz (Live Voice Hands-off)
+  systemPrompt += `\n\n[REGRA OBRIGATÓRIA DE RETORNO TEXTUAL E LIVE VOICE]
+- Sempre que você executar ferramentas (como criar/editar notas, diretórios, arquivos ou executar tarefas), você DEVE OBRIGATORIAMENTE fornecer uma resposta final em texto claro em português confirmando o que realizou.
+- Diga ao usuário de forma objetiva e acolhedora: quais diretórios e notas foram criados, onde estão organizados e o status final.
+- NUNCA termine um turno com resposta textual vazia: o usuário acompanha por texto e áudio e precisa desse retorno para ter a confirmação imediata sem ter que inspecionar pastas manualmente.`;
+
   // Model selection with pipeline override support
   const selectedModel = model || pipeline?.primaryModel || config.defaultModel || 'deepseek/deepseek-r1';
   const selectedProvider = provider || config.defaultProvider || 'openrouter';
@@ -1164,9 +1170,14 @@ app.post('/api/voice/transcribe', async (req, res) => {
       }
     }
 
-    // 3. OpenRouter com Gemini 2.5 Flash / 2.0 Flash
+    // 3. OpenRouter com Gemini 2.5 Flash / Flash Lite / GPT Audio
     if (openrouterKey) {
-      const modelsToTry = ['google/gemini-2.5-flash', 'google/gemini-2.0-flash-001'];
+      const modelsToTry = [
+        'google/gemini-2.5-flash',
+        'google/gemini-2.5-flash-lite',
+        'google/gemini-3.5-flash',
+        'openai/gpt-audio-mini'
+      ];
       for (const modelName of modelsToTry) {
         try {
           const orResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -1203,7 +1214,8 @@ app.post('/api/voice/transcribe', async (req, res) => {
             let transcription = (orData.choices?.[0]?.message?.content || '').trim();
             transcription = transcription.replace(/^["']|["']$/g, '').trim();
             if (/^sil[eê]ncio\.?$/i.test(transcription)) {
-              transcription = '';
+              console.log(`[Voice Transcribe] OpenRouter (${modelName}) detectou silêncio.`);
+              return res.json({ text: '', provider: `openrouter:${modelName}`, isSilent: true });
             }
             console.log(`[Voice Transcribe] OpenRouter (${modelName}) sucesso: "${transcription}"`);
             return res.json({ text: transcription, provider: `openrouter:${modelName}` });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   FileText, 
   Plus, 
@@ -78,7 +78,11 @@ import {
   ArrowUpDown,
   Mic,
   Radio,
-  Loader2
+  Loader2,
+  Undo2,
+  Redo2,
+  Paintbrush,
+  RemoveFormatting
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -89,6 +93,12 @@ import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
 import { SmartDropzoneModal } from './SmartDropzoneModal';
 import { CreditsModal } from './CreditsModal';
 import { downloadNoteInFormat, downloadFormattedNotebook, ExportFormat, markdownToEditorHtml, editorHtmlToMarkdown } from '../utils/noteFormatter';
+import { 
+  extractHighlightsFromContent, 
+  HIGHLIGHT_PALETTE, 
+  HighlightColorId, 
+  ExtractedHighlight 
+} from '../utils/noteHighlights';
 
 const TEXT_COLORS = [
   { name: 'Padrão', hex: '#f8fafc', bg: 'bg-slate-200' },
@@ -157,8 +167,12 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const currentLoadedNoteIdRef = useRef<string | null>(null);
   const saveDebounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sidebar Tab: 'folders' (Active Notes) vs 'trash' (Deleted Notes)
-  const [sidebarTab, setSidebarTab] = useState<'folders' | 'trash'>('folders');
+  // Sidebar Tab: 'folders' (Active Notes) vs 'highlights' (Vault Highlights) vs 'trash' (Deleted Notes)
+  const [sidebarTab, setSidebarTab] = useState<'folders' | 'highlights' | 'trash'>('folders');
+  const [highlightColorFilter, setHighlightColorFilter] = useState<HighlightColorId>('all');
+  const [highlightScopeFilter, setHighlightScopeFilter] = useState<'all' | 'current'>('all');
+  const [highlightSearchQuery, setHighlightSearchQuery] = useState<string>('');
+  const [copiedHighlightId, setCopiedHighlightId] = useState<string | null>(null);
   const [deletedNotes, setDeletedNotes] = useState<DeletedNoteItem[]>([]);
   const [retentionPolicy, setRetentionPolicy] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
   const [selectedDeletedNote, setSelectedDeletedNote] = useState<DeletedNoteItem | null>(null);
@@ -202,6 +216,19 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [noteEmoji, setNoteEmoji] = useState<string>('📝');
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState<boolean>(false);
   const [notebookSortOrder, setNotebookSortOrder] = useState<'name' | 'recent' | 'count'>('name');
+
+  // Format Painter (Pincel de Formatação) State
+  const [formatPainterState, setFormatPainterState] = useState<{
+    bold: boolean;
+    italic: boolean;
+    underline: boolean;
+    strikethrough: boolean;
+    color?: string | null;
+    highlightBg?: string | null;
+    highlightColor?: string | null;
+    isCode?: boolean;
+  } | null>(null);
+  const [painterToast, setPainterToast] = useState<string | null>(null);
 
   // Fechar caixas suspensas e paletas ao clicar fora ou no texto da nota
   useEffect(() => {
@@ -274,6 +301,96 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
   }, [activeNote, editTitle, editFolder]);
 
+  // Undo & Redo History para o Editor Formatado
+  const undoStackRef = useRef<string[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+  const lastRecordedHtmlRef = useRef<string>('');
+  const typingSnapshotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const pushUndoSnapshot = useCallback(() => {
+    if (!editableContainerRef.current) return;
+    const currentHtml = editableContainerRef.current.innerHTML;
+    if (!currentHtml) return;
+
+    const baseHtml = lastRecordedHtmlRef.current || currentHtml;
+    undoStackRef.current.push(baseHtml);
+    if (undoStackRef.current.length > 50) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
+    lastRecordedHtmlRef.current = currentHtml;
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (!editableContainerRef.current || undoStackRef.current.length === 0) return;
+    const currentHtml = editableContainerRef.current.innerHTML;
+    const previousHtml = undoStackRef.current.pop()!;
+    redoStackRef.current.push(currentHtml);
+    if (redoStackRef.current.length > 50) {
+      redoStackRef.current.shift();
+    }
+
+    editableContainerRef.current.innerHTML = previousHtml;
+    lastRecordedHtmlRef.current = previousHtml;
+    const md = editorHtmlToMarkdown(previousHtml);
+    setEditContent(md);
+    syncEditorToMarkdownAndSave(md);
+  }, [syncEditorToMarkdownAndSave]);
+
+  const handleRedo = useCallback(() => {
+    if (!editableContainerRef.current || redoStackRef.current.length === 0) return;
+    const currentHtml = editableContainerRef.current.innerHTML;
+    const nextHtml = redoStackRef.current.pop()!;
+    undoStackRef.current.push(currentHtml);
+    if (undoStackRef.current.length > 50) {
+      undoStackRef.current.shift();
+    }
+
+    editableContainerRef.current.innerHTML = nextHtml;
+    lastRecordedHtmlRef.current = nextHtml;
+    const md = editorHtmlToMarkdown(nextHtml);
+    setEditContent(md);
+    syncEditorToMarkdownAndSave(md);
+  }, [syncEditorToMarkdownAndSave]);
+
+  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      handleRedo();
+    }
+  }, [handleUndo, handleRedo]);
+
+  // Global Escape key listener para fechar qualquer modal ou menu suspenso
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsReorderModalOpen(false);
+        setIsWikilinkModalOpen(false);
+        setMoveModalNote(null);
+        setIsNotionModalOpen(false);
+        setIsGitSafeModalOpen(false);
+        setIsDropzoneOpen(false);
+        setIsColorPickerOpen(false);
+        setIsHighlightPickerOpen(false);
+        setIsFloatingColorPickerOpen(false);
+        setIsFloatingHighlightPickerOpen(false);
+        setShowFloatingAction(false);
+        setContextMenuPos(null);
+        setFormatPainterState(null);
+        setPainterToast(null);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   const insertImageAtCursor = useCallback((url: string, alt: string) => {
     if (editableContainerRef.current) {
       const imgHtml = `<img src="${url}" alt="${alt}" class="rounded-2xl max-h-[460px] w-auto max-w-full my-4 border border-card-border/80 shadow-2xl object-contain" style="max-width: 100%; border-radius: 12px; margin: 12px 0; display: block;" /><p><br></p>`;
@@ -333,6 +450,17 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       const md = editorHtmlToMarkdown(html);
       setEditContent(md);
       syncEditorToMarkdownAndSave(md);
+
+      // Grava snapshot de digitação com debounce para que Ctrl+Z desfaça blocos de digitação
+      if (typingSnapshotTimeoutRef.current) clearTimeout(typingSnapshotTimeoutRef.current);
+      typingSnapshotTimeoutRef.current = setTimeout(() => {
+        if (editableContainerRef.current && editableContainerRef.current.innerHTML !== lastRecordedHtmlRef.current) {
+          undoStackRef.current.push(lastRecordedHtmlRef.current || html);
+          if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+          redoStackRef.current = [];
+          lastRecordedHtmlRef.current = editableContainerRef.current.innerHTML;
+        }
+      }, 700);
     }
   }, [syncEditorToMarkdownAndSave]);
 
@@ -341,6 +469,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
 
     // Checkbox toggle (- [ ] <-> - [x])
     if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
+      pushUndoSnapshot();
       const checkbox = target as HTMLInputElement;
       const taskRow = checkbox.closest('.note-task-row') || checkbox.closest('li') || checkbox.parentElement;
       const span = taskRow?.querySelector('span');
@@ -610,6 +739,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
 
   // Formatting Action Handlers (Aplica diretamente no editor visual rico)
   const applyFormatting = useCallback((prefix: string, suffix: string = prefix) => {
+    pushUndoSnapshot();
     if (editableContainerRef.current) {
       if (prefix === '**') {
         document.execCommand('bold', false);
@@ -647,9 +777,10 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     if (selectedText && activeNote) {
       formatSelectionInNote(prefix, suffix);
     }
-  }, [syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
 
   const applyLinePrefix = useCallback((prefix: string) => {
+    pushUndoSnapshot();
     if (editableContainerRef.current) {
       if (prefix === '# ') {
         document.execCommand('formatBlock', false, '<h1>');
@@ -689,9 +820,10 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
         return;
       }
     }
-  }, [syncEditorToMarkdownAndSave]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave]);
 
   const applyTextColor = useCallback((hex: string) => {
+    pushUndoSnapshot();
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
       const range = sel.getRangeAt(0);
@@ -705,9 +837,10 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
     setIsColorPickerOpen(false);
     setIsFloatingColorPickerOpen(false);
-  }, [syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
 
   const applyHighlight = useCallback((bg: string, color: string) => {
+    pushUndoSnapshot();
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
       const range = sel.getRangeAt(0);
@@ -725,27 +858,271 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     setIsHighlightPickerOpen(false);
     setIsFloatingHighlightPickerOpen(false);
     setIsColorPickerOpen(false);
-  }, [syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave, selectedText, activeNote, formatSelectionInNote]);
+
+  // Limpar Formatação de Destaque e Cores (Remove marcador e cor personalizada, restaurando ao padrão do tema, mantendo negrito, itálico, código e estruturas)
+  const clearFormatting = useCallback(() => {
+    pushUndoSnapshot();
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editableContainerRef.current) {
+      const range = sel.getRangeAt(0);
+      const container = editableContainerRef.current;
+
+      const unwrapNode = (el: Node) => {
+        const parent = el.parentNode;
+        if (!parent) return;
+        while (el.firstChild) {
+          parent.insertBefore(el.firstChild, el);
+        }
+        parent.removeChild(el);
+      };
+
+      // 1. Extrai o conteúdo selecionado
+      const fragment = range.extractContents();
+
+      // 2. Remove todos os <mark> contidos dentro do fragmento extraído (desenrola para manter negrito, itálico, etc.)
+      fragment.querySelectorAll('mark').forEach(unwrapNode);
+
+      // 3. Limpa cor e fundo de tags de estilo (spans, font) no fragmento, mantendo strong/b/em/i/u/s/code
+      fragment.querySelectorAll('*').forEach((node) => {
+        const el = node as HTMLElement;
+        if (el.tagName.toLowerCase() === 'font') {
+          el.removeAttribute('color');
+        }
+        if (el.style) {
+          el.style.color = '';
+          el.style.backgroundColor = '';
+          el.style.background = '';
+          // Se for span genérico que ficou sem style e sem classe, desenrola
+          if (el.tagName.toLowerCase() === 'span' && (!el.getAttribute('style') || el.style.length === 0) && !el.className) {
+            unwrapNode(el);
+          }
+        }
+      });
+
+      // 4. Se o ponto de corte do range começou ou terminou dentro de um <mark> que ficou no container:
+      // Inspecionamos se o nó pai onde o cursor ficou é um <mark> vazio ou parcialmente vazio
+      const startMark = (range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as HTMLElement)
+        : range.startContainer.parentElement)?.closest('mark');
+
+      if (startMark) {
+        if (!startMark.textContent || startMark.textContent.trim().length === 0) {
+          startMark.parentNode?.insertBefore(fragment, startMark);
+          startMark.remove();
+        } else {
+          // O startMark tinha conteúdo antes da seleção. Inserimos o fragmento logo após o startMark
+          startMark.parentNode?.insertBefore(fragment, startMark.nextSibling);
+        }
+      } else {
+        range.insertNode(fragment);
+      }
+
+      // 5. Varredura de segurança no container do editor para eliminar qualquer resíduo:
+      // Remove marks vazios ou marks que perderam a cor de fundo (para nunca exibir o amarelo padrão do browser)
+      container.querySelectorAll('mark').forEach((m) => {
+        const htmlMark = m as HTMLElement;
+        if (!htmlMark.textContent || htmlMark.textContent.trim().length === 0) {
+          htmlMark.remove();
+        } else if (!htmlMark.style.background && !htmlMark.style.backgroundColor) {
+          unwrapNode(htmlMark);
+        }
+      });
+
+      syncEditorToMarkdownAndSave();
+    } else if (selectedText && activeNote) {
+      // Limpeza cirúrgica em Markdown / texto simples:
+      // Remove apenas tags de destaque (<mark>, ==) e cores personalizadas (<span style="color...">, <font>),
+      // mantendo intactos **negrito**, *itálico*, ~~tachado~~, `código` e títulos ##.
+      const clean = selectedText
+        .replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, '$1')
+        .replace(/==([^=\n]+)==/g, '$1')
+        .replace(/<font[^>]*>([\s\S]*?)<\/font>/gi, '$1')
+        .replace(/<span\s+style="[^"]*(?:color|background)[^"]*"[^>]*>([\s\S]*?)<\/span>/gi, '$1');
+
+      const content = activeNote.content;
+      const idx = content.indexOf(selectedText);
+      if (idx !== -1) {
+        const newContent = content.substring(0, idx) + clean + content.substring(idx + selectedText.length);
+        setEditContent(newContent);
+        setActiveNote(prev => prev ? ({ ...prev, content: newContent }) : null);
+        api.saveNote({
+          id: activeNote.id,
+          title: activeNote.title,
+          folder: activeNote.folder,
+          subject: activeNote.subject,
+          content: newContent,
+          isProjectSpecific: activeNote.isProjectSpecific
+        });
+        fetchNotesAndFolders();
+      }
+    }
+    setShowFloatingAction(false);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave, selectedText, activeNote, fetchNotesAndFolders]);
+
+  // Capturar formatação atual para o Pincel de Formatação
+  const handleToggleFormatPainter = useCallback(() => {
+    if (formatPainterState) {
+      setFormatPainterState(null);
+      setPainterToast(null);
+      return;
+    }
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+
+    let parentEl: HTMLElement | null = null;
+    if (range.startContainer.nodeType === Node.ELEMENT_NODE) {
+      parentEl = range.startContainer as HTMLElement;
+    } else {
+      parentEl = range.startContainer.parentElement;
+    }
+
+    const markEl = parentEl?.closest('mark') as HTMLElement | null;
+    const spanColorEl = parentEl?.closest('span[style*="color"]') as HTMLElement | null;
+    const codeEl = parentEl?.closest('code') as HTMLElement | null;
+
+    const isBold = document.queryCommandState('bold') || !!parentEl?.closest('b, strong');
+    const isItalic = document.queryCommandState('italic') || !!parentEl?.closest('i, em');
+    const isUnderline = document.queryCommandState('underline') || !!parentEl?.closest('u');
+    const isStrike = document.queryCommandState('strikeThrough') || !!parentEl?.closest('s, strike');
+
+    let color: string | null = null;
+    if (spanColorEl && spanColorEl.style.color) {
+      color = spanColorEl.style.color;
+    }
+
+    let highlightBg: string | null = null;
+    let highlightColor: string | null = null;
+    if (markEl) {
+      highlightBg = markEl.style.backgroundColor || 'rgba(234, 179, 8, 0.25)';
+      highlightColor = markEl.style.color || '#fef08a';
+    }
+
+    setFormatPainterState({
+      bold: isBold,
+      italic: isItalic,
+      underline: isUnderline,
+      strikethrough: isStrike,
+      color,
+      highlightBg,
+      highlightColor,
+      isCode: !!codeEl
+    });
+    setPainterToast('Pincel ativo: selecione o texto de destino para aplicar o estilo');
+    setShowFloatingAction(false);
+  }, [formatPainterState]);
+
+  // Aplicar formato copiado pelo pincel no texto selecionado
+  const applyCapturedFormat = useCallback((format: {
+    bold: boolean;
+    italic: boolean;
+    underline: boolean;
+    strikethrough: boolean;
+    color?: string | null;
+    highlightBg?: string | null;
+    highlightColor?: string | null;
+    isCode?: boolean;
+  }) => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !editableContainerRef.current) return;
+
+    pushUndoSnapshot();
+
+    // 1. Limpa formatação existente no destino
+    document.execCommand('removeFormat', false);
+
+    // 2. Aplica estilos básicos
+    if (format.bold) document.execCommand('bold', false);
+    if (format.italic) document.execCommand('italic', false);
+    if (format.underline) document.execCommand('underline', false);
+    if (format.strikethrough) document.execCommand('strikeThrough', false);
+
+    // 3. Aplica cor
+    if (format.color && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const span = document.createElement('span');
+      span.style.color = format.color;
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+
+      const newR = document.createRange();
+      newR.selectNodeContents(span);
+      sel.removeAllRanges();
+      sel.addRange(newR);
+    }
+
+    // 4. Aplica marca-texto / destaque
+    if (format.highlightBg && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const mark = document.createElement('mark');
+      mark.style.backgroundColor = format.highlightBg;
+      mark.style.color = format.highlightColor || '#fef08a';
+      mark.style.padding = '2px 6px';
+      mark.style.borderRadius = '4px';
+      mark.appendChild(range.extractContents());
+      range.insertNode(mark);
+
+      const newR = document.createRange();
+      newR.selectNodeContents(mark);
+      sel.removeAllRanges();
+      sel.addRange(newR);
+    }
+
+    // 5. Aplica código inline
+    if (format.isCode && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const code = document.createElement('code');
+      code.className = 'bg-card border border-card-border/60 text-amber-300 px-1.5 py-0.5 rounded-md font-mono text-xs';
+      code.appendChild(range.extractContents());
+      range.insertNode(code);
+    }
+
+    // 6. Varredura de segurança contra resíduos de mark sem background
+    editableContainerRef.current?.querySelectorAll('mark').forEach((m) => {
+      const htmlMark = m as HTMLElement;
+      if (!htmlMark.textContent || htmlMark.textContent.trim().length === 0) {
+        htmlMark.remove();
+      } else if (!htmlMark.style.background && !htmlMark.style.backgroundColor) {
+        const parent = htmlMark.parentNode;
+        if (parent) {
+          while (htmlMark.firstChild) {
+            parent.insertBefore(htmlMark.firstChild, htmlMark);
+          }
+          parent.removeChild(htmlMark);
+        }
+      }
+    });
+
+    syncEditorToMarkdownAndSave();
+    setFormatPainterState(null);
+    setPainterToast('Estilo pintado com sucesso!');
+    setTimeout(() => setPainterToast(null), 2000);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave]);
 
   const insertTable = useCallback(() => {
+    pushUndoSnapshot();
     const tableHtml = `<div class="my-4 overflow-x-auto rounded-xl border border-card-border/80 bg-panel/30 shadow-md"><table class="w-full border-collapse text-left text-xs leading-relaxed" style="width: 100%; border-collapse: collapse;"><thead class="bg-card/90 text-slate-200 border-b border-card-border"><tr style="border-bottom: 1px solid rgba(255,255,255,0.15);"><th class="px-3.5 py-2.5 font-bold text-accent-light border-r border-card-border/40" style="padding: 8px 12px; font-weight: 700; color: #38bdf8; border-right: 1px solid rgba(255,255,255,0.1);">Item</th><th class="px-3.5 py-2.5 font-bold text-accent-light" style="padding: 8px 12px; font-weight: 700; color: #38bdf8;">Descrição</th></tr></thead><tbody><tr class="hover:bg-card/40 border-b border-card-border/30" style="border-bottom: 1px solid rgba(255,255,255,0.06);"><td class="px-3.5 py-2.5 border-r border-card-border/30 text-slate-300" style="padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);">1</td><td class="px-3.5 py-2.5 text-slate-300" style="padding: 8px 12px;">Detalhes do item</td></tr></tbody></table></div><p><br></p>`;
     if (editableContainerRef.current) {
       editableContainerRef.current.focus();
       document.execCommand('insertHTML', false, tableHtml);
       syncEditorToMarkdownAndSave();
     }
-  }, [syncEditorToMarkdownAndSave]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave]);
 
   const insertDivider = useCallback(() => {
+    pushUndoSnapshot();
     const hrHtml = `<hr class="border-0 border-t border-card-border/80 my-6" /><p><br></p>`;
     if (editableContainerRef.current) {
       editableContainerRef.current.focus();
       document.execCommand('insertHTML', false, hrHtml);
       syncEditorToMarkdownAndSave();
     }
-  }, [syncEditorToMarkdownAndSave]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave]);
 
   const insertWikilinkDirect = useCallback((noteTitle: string) => {
+    pushUndoSnapshot();
     const badgeHtml = `<span class="wikilink-badge inline-flex items-center px-2 py-0.5 rounded-lg bg-accent/15 border border-accent/30 text-accent-light font-medium text-xs cursor-pointer select-none" data-wikilink="${noteTitle}">[[ ${noteTitle} ]]</span>&nbsp;`;
     if (editableContainerRef.current) {
       editableContainerRef.current.focus();
@@ -754,7 +1131,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
     }
     setIsWikilinkModalOpen(false);
     setWikilinkSearch('');
-  }, [syncEditorToMarkdownAndSave]);
+  }, [pushUndoSnapshot, syncEditorToMarkdownAndSave]);
 
 
 
@@ -915,11 +1292,17 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
         setEditFolder(getNoteFolder(activeNote));
         setEditContent(activeNote.content);
         if (editableContainerRef.current) {
-          editableContainerRef.current.innerHTML = markdownToEditorHtml(activeNote.content);
+          const initialHtml = markdownToEditorHtml(activeNote.content);
+          editableContainerRef.current.innerHTML = initialHtml;
+          lastRecordedHtmlRef.current = initialHtml;
+          undoStackRef.current = [];
+          redoStackRef.current = [];
         }
       }
     } else {
       currentLoadedNoteIdRef.current = null;
+      undoStackRef.current = [];
+      redoStackRef.current = [];
     }
   }, [activeNote, getNoteFolder]);
 
@@ -1872,6 +2255,13 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     setTimeout(() => {
       const selection = window.getSelection();
       const text = selection?.toString().trim() || '';
+
+      // Se o Pincel de Formatação estiver ativo e o usuário selecionou texto de destino, aplica imediatamente!
+      if (formatPainterState && text && text.length > 0) {
+        applyCapturedFormat(formatPainterState);
+        return;
+      }
+
       if (text && text.length >= 2) {
         setSelectedText(text);
         if (selection && selection.rangeCount > 0) {
@@ -1908,6 +2298,83 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     ...folders.map(normalizeFolderPath),
     ...notes.map(n => getNoteFolder(n))
   ])).filter(f => f && !f.startsWith('.')).sort();
+
+  // All highlights extracted from notes across the vault
+  const allVaultHighlights = useMemo<ExtractedHighlight[]>(() => {
+    const list: ExtractedHighlight[] = [];
+    notes.forEach(n => {
+      const contentToUse = (activeNote && n.id === activeNote.id) ? (editContent || n.content) : n.content;
+      const hls = extractHighlightsFromContent(contentToUse, n.id, n.title, getNoteFolder(n));
+      list.push(...hls);
+    });
+    return list;
+  }, [notes, activeNote, editContent, getNoteFolder]);
+
+  // Highlights for currently active note
+  const currentNoteHighlights = useMemo<ExtractedHighlight[]>(() => {
+    if (!activeNote) return [];
+    const contentToUse = editContent || activeNote.content;
+    return extractHighlightsFromContent(contentToUse, activeNote.id, activeNote.title, getNoteFolder(activeNote));
+  }, [activeNote, editContent, getNoteFolder]);
+
+  // Count by color according to scope
+  const highlightColorCounts = useMemo<Record<string, number>>(() => {
+    const source: ExtractedHighlight[] = highlightScopeFilter === 'current' ? currentNoteHighlights : allVaultHighlights;
+    const counts: Record<string, number> = { all: source.length, yellow: 0, green: 0, blue: 0, purple: 0, orange: 0, pink: 0 };
+    source.forEach((h: ExtractedHighlight) => {
+      if (counts[h.colorId] !== undefined) {
+        counts[h.colorId]++;
+      }
+    });
+    return counts;
+  }, [highlightScopeFilter, currentNoteHighlights, allVaultHighlights]);
+
+  // Filtered highlights list based on scope, color, and search
+  const filteredHighlights = useMemo<ExtractedHighlight[]>(() => {
+    const source: ExtractedHighlight[] = highlightScopeFilter === 'current' ? currentNoteHighlights : allVaultHighlights;
+    return source.filter((h: ExtractedHighlight) => {
+      if (highlightColorFilter !== 'all' && h.colorId !== highlightColorFilter) return false;
+      const effectiveSearch = (highlightSearchQuery || searchQuery).trim().toLowerCase();
+      if (effectiveSearch) {
+        const matchesText = h.text.toLowerCase().includes(effectiveSearch);
+        const matchesTitle = h.noteTitle.toLowerCase().includes(effectiveSearch);
+        const matchesFolder = h.folder.toLowerCase().includes(effectiveSearch);
+        if (!matchesText && !matchesTitle && !matchesFolder) return false;
+      }
+      return true;
+    });
+  }, [highlightScopeFilter, currentNoteHighlights, allVaultHighlights, highlightColorFilter, highlightSearchQuery, searchQuery]);
+
+  // Jump smoothly to note & highlight mark in visual editor
+  const handleJumpToHighlight = useCallback((hl: ExtractedHighlight) => {
+    if (!activeNote || activeNote.id !== hl.noteId) {
+      const targetNote = notes.find(n => n.id === hl.noteId);
+      if (targetNote) {
+        selectNote(targetNote);
+      }
+    }
+    setTimeout(() => {
+      if (!editableContainerRef.current) return;
+      const marks = Array.from(editableContainerRef.current.querySelectorAll('mark'));
+      const targetMark = marks.find(m => m.textContent?.trim().toLowerCase() === hl.text.trim().toLowerCase()) 
+        || marks.find(m => m.textContent?.toLowerCase().includes(hl.text.toLowerCase().slice(0, 20)));
+      if (targetMark) {
+        targetMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetMark.classList.add('ring-4', 'ring-accent', 'animate-pulse');
+        setTimeout(() => {
+          targetMark.classList.remove('ring-4', 'ring-accent', 'animate-pulse');
+        }, 2200);
+      }
+    }, 150);
+  }, [activeNote, notes]);
+
+  // Copy citation as markdown quote with wikilink
+  const handleCopyCitation = useCallback((hl: ExtractedHighlight) => {
+    const citation = `> "${hl.text}"\n— [[${hl.noteTitle}]]`;
+    navigator.clipboard.writeText(citation);
+    setCopiedHighlightId(hl.id);
+    setTimeout(() => setCopiedHighlightId(null), 2000);
+  }, []);
 
   const filteredNotes = notes.filter(n => {
     const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -2214,6 +2681,32 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                 </div>
               )}
             </div>
+
+            {/* Pincel de Formatação */}
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={handleToggleFormatPainter}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                formatPainterState 
+                  ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40 ring-1 ring-amber-500/30' 
+                  : 'hover:bg-card-border text-slate-300 hover:text-white'
+              }`}
+              title="Pincel de Formatação (copiar estilo e aplicar em outro texto)"
+            >
+              <Paintbrush className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Limpar Formatação */}
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={clearFormatting}
+              className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-rose-300 transition-colors cursor-pointer"
+              title="Limpar Marcação e Cores (remover marca-texto e cor personalizada, mantendo negrito e itálico)"
+            >
+              <RemoveFormatting className="w-3.5 h-3.5" />
+            </button>
           </div>
 
           {/* Action Buttons */}
@@ -2331,18 +2824,50 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                 selectNote(created);
               });
             }}
-            className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-panel text-slate-300 hover:text-white flex items-center space-x-2 transition-all"
+            className="w-full text-left px-2.5 py-2 rounded-xl hover:bg-panel text-slate-300 hover:text-white flex items-center space-x-2 transition-all cursor-pointer"
           >
             <BookOpen className="w-4 h-4 text-emerald-400" />
             <span>Criar Nota [[{selectedText.slice(0, 16)}]]</span>
+          </button>
+
+          <div className="h-px bg-card-border/60 my-1" />
+
+          <button
+            onClick={() => {
+              setContextMenuPos(null);
+              setShowFloatingAction(false);
+              handleToggleFormatPainter();
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-panel text-slate-300 hover:text-amber-300 flex items-center space-x-2 transition-all cursor-pointer"
+          >
+            <Paintbrush className="w-4 h-4 text-amber-400" />
+            <span>Pincel de Formatação</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setContextMenuPos(null);
+              setShowFloatingAction(false);
+              clearFormatting();
+            }}
+            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 flex items-center space-x-2 transition-all cursor-pointer"
+          >
+            <RemoveFormatting className="w-4 h-4 text-rose-400" />
+            <span>Limpar Marcação e Cores</span>
           </button>
         </div>
       )}
 
       {/* Notion-style Block / Section Reordering Modal */}
       {isReorderModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
-          <div className="bg-card border border-card-border rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div 
+          onClick={() => setIsReorderModalOpen(false)} 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-card border border-card-border rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] cursor-default"
+          >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-2.5">
                 <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
@@ -2444,8 +2969,14 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
       {/* Obsidian Wikilink Quick Inserter Modal */}
       {isWikilinkModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
-          <div className="bg-card border border-card-border rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+        <div 
+          onClick={() => setIsWikilinkModalOpen(false)} 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-card border border-card-border rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh] cursor-default"
+          >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-2.5">
                 <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center">
@@ -2501,8 +3032,14 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
       {/* Quick Move Note Modal */}
       {moveModalNote && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none">
-          <div className="bg-card border border-card-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
+        <div 
+          onClick={() => setMoveModalNote(null)} 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in select-none cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-card border border-card-border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col cursor-default"
+          >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-2.5">
                 <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
@@ -2573,8 +3110,14 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
       {/* Notion Import Modal */}
       {isNotionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
-          <div className="bg-card border border-card-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col">
+        <div 
+          onClick={() => setIsNotionModalOpen(false)} 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-card border border-card-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col cursor-default"
+          >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-2.5">
                 <div className="w-8 h-8 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center">
@@ -2670,8 +3213,14 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
       {/* GitSafe Security Audit & Privacy Modal */}
       {isGitSafeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
-          <div className="bg-card border border-card-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div 
+          onClick={() => setIsGitSafeModalOpen(false)} 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-card border border-card-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] cursor-default"
+          >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-3">
                 <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
@@ -2985,6 +3534,27 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </button>
             <button
               onClick={() => {
+                setViewMode('editor');
+                setSidebarTab('highlights');
+                setIsSidebarCollapsed(false);
+              }}
+              className={`px-3 py-1 rounded-md transition-all flex items-center space-x-1.5 ${
+                viewMode === 'editor' && sidebarTab === 'highlights'
+                  ? 'bg-amber-500/25 text-amber-300 font-semibold shadow-sm border border-amber-500/40'
+                  : 'text-slate-400 hover:text-amber-300'
+              }`}
+              title="Abrir painel de trechos destacados e citações"
+            >
+              <Highlighter className="w-3.5 h-3.5 text-amber-400" />
+              <span>Destaques</span>
+              {allVaultHighlights.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                  {allVaultHighlights.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => {
                 setViewMode('graph');
                 fetchGraph();
               }}
@@ -3063,6 +3633,172 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       ) : (
         /* NOTION-STYLE FULL DOCUMENT WORKSPACE WITH FOLDER TREE & DRAG-AND-DROP */
         <div className="flex-1 flex overflow-hidden relative">
+          {/* MINIMIZED ICON-RAIL SIDEBAR (Modo Limpo Focado no Conteúdo) */}
+          {!isNoteMaximized && isSidebarCollapsed && (
+            <div className="w-14 border-r border-card-border/70 bg-[#0d1017] flex flex-col items-center py-3 gap-2 shrink-0 z-20 select-none shadow-sm transition-all">
+              {/* Expand Trigger Button */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarCollapsed(false)}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-accent-light hover:bg-card-border/40 transition-all cursor-pointer"
+                  aria-label="Expandir barra lateral"
+                >
+                  <PanelLeftOpen className="w-5 h-5 transition-transform group-hover:scale-110" />
+                </button>
+                {/* Floating Tooltip */}
+                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-1.5 font-medium">
+                  <span>Expandir Barra Lateral</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Pastas & Destaques</span>
+                </div>
+              </div>
+
+              <div className="w-6 h-px bg-card-border/60 my-1" />
+
+              {/* Pastas / Cadernos */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSidebarTab('folders');
+                    setIsSidebarCollapsed(false);
+                  }}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                    sidebarTab === 'folders'
+                      ? 'bg-accent/15 text-accent-light border border-accent/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/40'
+                  }`}
+                  aria-label="Cadernos & Pastas"
+                >
+                  <Folder className="w-5 h-5 transition-transform group-hover:scale-110" />
+                </button>
+                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-2">
+                  <span className="font-semibold text-accent-light">Cadernos & Pastas</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                    {notes.length} notas
+                  </span>
+                </div>
+              </div>
+
+              {/* Destaques (Highlights) */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSidebarTab('highlights');
+                    setIsSidebarCollapsed(false);
+                  }}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all relative cursor-pointer ${
+                    sidebarTab === 'highlights'
+                      ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                      : 'text-slate-400 hover:text-amber-300 hover:bg-card-border/40'
+                  }`}
+                  aria-label="Destaques & Citações"
+                >
+                  <Highlighter className="w-5 h-5 transition-transform group-hover:scale-110" />
+                  {allVaultHighlights.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-slate-950 font-bold text-[9px] flex items-center justify-center ring-2 ring-sidebar">
+                      {allVaultHighlights.length > 99 ? '99+' : allVaultHighlights.length}
+                    </span>
+                  )}
+                </button>
+                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-2">
+                  <span className="font-semibold text-amber-300">Destaques & Citações</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                    {allVaultHighlights.length} trechos
+                  </span>
+                </div>
+              </div>
+
+              {/* Lixeira */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSidebarTab('trash');
+                    fetchDeletedNotes();
+                    setIsSidebarCollapsed(false);
+                  }}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all relative cursor-pointer ${
+                    sidebarTab === 'trash'
+                      ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                      : 'text-slate-400 hover:text-rose-300 hover:bg-card-border/40'
+                  }`}
+                  aria-label="Lixeira de Notas"
+                >
+                  <Trash2 className="w-5 h-5 transition-transform group-hover:scale-110" />
+                  {deletedNotes.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white font-bold text-[9px] flex items-center justify-center ring-2 ring-sidebar">
+                      {deletedNotes.length > 9 ? '9+' : deletedNotes.length}
+                    </span>
+                  )}
+                </button>
+                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-2">
+                  <span className="font-semibold text-rose-300">Lixeira</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                    {deletedNotes.length} itens
+                  </span>
+                </div>
+              </div>
+
+              <div className="w-6 h-px bg-card-border/60 my-1" />
+
+              {/* Nova Nota Rápida */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCreateNoteInFolder(selectedFolderFilter !== 'all' ? selectedFolderFilter : 'Geral');
+                    setIsSidebarCollapsed(false);
+                  }}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-card-border/40 hover:bg-accent/20 text-slate-300 hover:text-accent-light transition-all cursor-pointer"
+                  aria-label="Criar Nova Nota"
+                >
+                  <Plus className="w-5 h-5 transition-transform group-hover:scale-110" />
+                </button>
+                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-1.5">
+                  <span className="font-semibold">Nova Nota</span>
+                </div>
+              </div>
+
+              {/* Visão Geral / Home */}
+              <div className="relative group">
+                <button
+                  type="button"
+                  onClick={goToHome}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-card-border/40 transition-all cursor-pointer"
+                  aria-label="Ir para Visão Geral"
+                >
+                  <Home className="w-5 h-5 transition-transform group-hover:scale-110" />
+                </button>
+                <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <span className="font-semibold">Visão Geral (Home)</span>
+                </div>
+              </div>
+
+              {/* Bottom icons */}
+              <div className="mt-auto flex flex-col items-center gap-2">
+                {/* GitSafe Auditoria */}
+                <div className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsGitSafeModalOpen(true);
+                      handleRunGitSafeAudit();
+                    }}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all cursor-pointer"
+                    aria-label="GitSafe Proteção de Dados"
+                  >
+                    <ShieldCheck className="w-5 h-5 transition-transform group-hover:scale-110" />
+                  </button>
+                  <div className="absolute left-full ml-3 bottom-0 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                    <span className="font-semibold text-emerald-400">GitSafe Shield</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Notes & Folders Explorer Sidebar */}
           <div 
             style={{ width: isSidebarCollapsed || isNoteMaximized ? '0px' : `${sidebarWidth}px` }}
@@ -3070,7 +3806,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
               isSidebarCollapsed || isNoteMaximized ? 'w-0 border-r-0 invisible' : ''
             }`}
           >
-            {/* Sidebar Navigation Tabs (Pastas vs Lixeira) */}
+            {/* Sidebar Navigation Tabs (Pastas vs Destaques vs Lixeira) */}
             <div className="flex items-center p-1.5 bg-panel border-b border-card-border gap-1 shrink-0">
               <button
                 type="button"
@@ -3087,6 +3823,23 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                 <Folder className="w-3.5 h-3.5" />
                 <span>Pastas</span>
                 <span className="text-[10px] opacity-70">({allFolderNames.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarTab('highlights')}
+                className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all ${
+                  sidebarTab === 'highlights'
+                    ? 'bg-card text-amber-300 shadow-sm border border-card-border'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Highlighter className="w-3.5 h-3.5" />
+                <span>Destaques</span>
+                {allVaultHighlights.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                    {allVaultHighlights.length}
+                  </span>
+                )}
               </button>
               <button
                 type="button"
@@ -3108,6 +3861,15 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                   </span>
                 )}
               </button>
+              {/* Botão de Minimizar para Ícones */}
+              <button
+                type="button"
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-card-border/40 transition-all shrink-0 cursor-pointer"
+                title="Minimizar barra lateral para ícones"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
             </div>
 
             {/* Search & Actions Bar */}
@@ -3118,7 +3880,13 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={sidebarTab === 'trash' ? "Pesquisar notas na lixeira..." : "Pesquisar por título, conteúdo ou #tags..."}
+                  placeholder={
+                    sidebarTab === 'trash' 
+                      ? "Pesquisar notas na lixeira..." 
+                      : sidebarTab === 'highlights' 
+                      ? "Pesquisar trechos destacados e notas..." 
+                      : "Pesquisar por título, conteúdo ou #tags..."
+                  }
                   className="w-full bg-card border border-card-border rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-accent"
                 />
               </div>
@@ -3818,6 +4586,204 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                   });
                 })()}
               </div>
+            ) : sidebarTab === 'highlights' ? (
+              /* HIGHLIGHTS & CITATIONS FILTER PANEL */
+              <div className="flex-1 flex flex-col overflow-hidden bg-sidebar select-none">
+                {/* Scope selector & Color Filters Header */}
+                <div className="p-3 border-b border-card-border space-y-3 shrink-0 bg-panel/60">
+                  {/* Scope Selector: Todo o Cofre vs Nota Atual */}
+                  <div className="flex items-center gap-1.5 p-1 bg-card/80 border border-card-border rounded-xl text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setHighlightScopeFilter('all')}
+                      className={`flex-1 py-1 px-2 rounded-lg font-medium transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer ${
+                        highlightScopeFilter === 'all'
+                          ? 'bg-accent/20 text-accent-light border border-accent/30 shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <BookOpen className="w-3 h-3" />
+                      <span>Todo o Cofre</span>
+                      <span className="text-[10px] opacity-75 font-mono">({allVaultHighlights.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!activeNote}
+                      onClick={() => setHighlightScopeFilter('current')}
+                      className={`flex-1 py-1 px-2 rounded-lg font-medium transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer ${
+                        highlightScopeFilter === 'current'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-xs'
+                          : activeNote
+                          ? 'text-slate-400 hover:text-slate-200'
+                          : 'opacity-40 cursor-not-allowed text-slate-500'
+                      }`}
+                      title={activeNote ? `Ver destaques da nota "${activeNote.title}"` : 'Abra uma nota para filtrar apenas seus destaques'}
+                    >
+                      <FileText className="w-3 h-3" />
+                      <span>Nota Atual</span>
+                      {activeNote && (
+                        <span className="text-[10px] opacity-75 font-mono">({currentNoteHighlights.length})</span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Filter by Specific Color */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                      <span className="flex items-center gap-1">
+                        <Filter className="w-3 h-3 text-amber-400" />
+                        <span>Filtrar por cor:</span>
+                      </span>
+                      {highlightColorFilter !== 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => setHighlightColorFilter('all')}
+                          className="text-[10px] text-accent-light hover:underline cursor-pointer"
+                        >
+                          Limpar filtro
+                        </button>
+                      )}
+                    </div>
+                    {/* Color pills carousel/grid */}
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setHighlightColorFilter('all')}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1.5 border cursor-pointer ${
+                          highlightColorFilter === 'all'
+                            ? 'bg-card text-white border-accent shadow-xs'
+                            : 'bg-card/40 text-slate-400 border-card-border hover:bg-card hover:text-slate-200'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-slate-200" />
+                        <span>Todas</span>
+                        <span className="text-[10px] font-mono opacity-70">({highlightColorCounts.all})</span>
+                      </button>
+                      {HIGHLIGHT_PALETTE.map(col => {
+                        const count = highlightColorCounts[col.id] || 0;
+                        const isSelected = highlightColorFilter === col.id;
+                        return (
+                          <button
+                            key={col.id}
+                            type="button"
+                            onClick={() => setHighlightColorFilter(isSelected ? 'all' : col.id)}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1.5 border cursor-pointer ${
+                              isSelected
+                                ? `${col.badgeBg} ${col.border} ring-1 ring-current shadow-xs`
+                                : count > 0
+                                ? 'bg-card/40 text-slate-300 border-card-border hover:bg-card hover:text-white'
+                                : 'bg-card/20 text-slate-500 border-card-border/50 hover:bg-card/40'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${col.circleColor} shrink-0`} />
+                            <span>{col.name}</span>
+                            <span className="text-[10px] font-mono opacity-70">({count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Highlights List Body */}
+                <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin scrollbar-thumb-card-border select-text">
+                  {filteredHighlights.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-500 space-y-3">
+                      <Highlighter className="w-8 h-8 text-amber-500/40 mx-auto" />
+                      <p className="font-semibold text-slate-400">
+                        {highlightColorFilter !== 'all' || searchQuery.trim() || highlightSearchQuery.trim()
+                          ? 'Nenhum destaque encontrado com estes filtros'
+                          : highlightScopeFilter === 'current'
+                          ? 'Nenhum trecho destacado nesta nota'
+                          : 'Nenhum trecho destacado no cofre'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
+                        Para destacar um trecho, selecione qualquer texto no editor visual e escolha a cor desejada no menu de Marca-texto.
+                      </p>
+                    </div>
+                  ) : (
+                    filteredHighlights.map((hl: ExtractedHighlight) => {
+                      const isCopied = copiedHighlightId === hl.id;
+                      return (
+                        <div
+                          key={hl.id}
+                          onClick={() => handleJumpToHighlight(hl)}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col space-y-2 group/card hover:shadow-md bg-card/70 hover:bg-card border-card-border hover:border-slate-600/80 border-l-4`}
+                          style={{ borderLeftColor: hl.textColor }}
+                        >
+                          {/* Note Title & Folder Header */}
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="font-bold text-xs truncate text-slate-200 flex items-center gap-1.5 max-w-[200px]" title={hl.noteTitle}>
+                              <FileText className="w-3.5 h-3.5 text-accent-light shrink-0" />
+                              <span className="truncate">{hl.noteTitle}</span>
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono shrink-0 truncate max-w-[100px]" title={hl.folder}>
+                              📂 {hl.folder}
+                            </span>
+                          </div>
+
+                          {/* Highlight Text Quote */}
+                          <div 
+                            className="p-2 rounded-xl text-xs leading-relaxed font-sans border transition-all"
+                            style={{ 
+                              backgroundColor: hl.bg, 
+                              color: hl.textColor,
+                              borderColor: 'rgba(255,255,255,0.06)' 
+                            }}
+                          >
+                            <span className="opacity-60 text-sm font-serif">“</span>
+                            <span className="font-medium select-text">{hl.text}</span>
+                            <span className="opacity-60 text-sm font-serif">”</span>
+                          </div>
+
+                          {/* Action Footer */}
+                          <div className="flex items-center justify-between pt-1 border-t border-card-border/50 text-[11px]">
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                              <span className={`w-2 h-2 rounded-full ${hl.circleColor}`} />
+                              <span>{hl.colorName}</span>
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCopyCitation(hl);
+                                }}
+                                className="px-2 py-0.5 rounded-lg bg-card-border/40 hover:bg-card-border text-slate-300 hover:text-white flex items-center gap-1 transition-all text-[10px] font-semibold cursor-pointer"
+                                title="Copiar citação com wikilink da nota"
+                              >
+                                {isCopied ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span className="text-emerald-400">Copiado</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Copiar</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleJumpToHighlight(hl);
+                                }}
+                                className="px-2 py-0.5 rounded-lg bg-accent/20 hover:bg-accent/30 text-accent-light flex items-center gap-1 transition-all text-[10px] font-semibold cursor-pointer"
+                                title="Abrir nota e pular para o trecho destacado"
+                              >
+                                <ArrowRight className="w-3 h-3" />
+                                <span>Ver nota</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
             ) : (
               /* Trash Bin List */
               <div className="flex-1 overflow-y-auto p-2.5 space-y-2 scrollbar-thin scrollbar-thumb-card-border">
@@ -3914,8 +4880,8 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             </div>
           )}
 
-          {/* Floating Collapsed Sidebar Restore Button */}
-          {(isSidebarCollapsed || isNoteMaximized) && (
+          {/* Floating Collapsed Sidebar Restore Button (apenas quando em tela cheia maximizada) */}
+          {isNoteMaximized && (
             <button
               onClick={() => {
                 setIsSidebarCollapsed(false);
@@ -4234,6 +5200,28 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
                     {/* Sticky Rich Formatting Toolbar (Disponível diretamente no Modo Formatado!) */}
                     <div className="sticky top-0 z-30 mb-4 p-2 rounded-2xl bg-[#13151f]/95 border border-card-border/80 shadow-xl flex flex-wrap items-center gap-1 shrink-0 backdrop-blur-md">
+                      {/* Undo / Redo History */}
+                      <div className="flex items-center space-x-0.5 pr-1.5 border-r border-card-border">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={handleUndo}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Desfazer (Ctrl+Z)"
+                        >
+                          <Undo2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={handleRedo}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors"
+                          title="Refazer (Ctrl+Y)"
+                        >
+                          <Redo2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
                       {/* Text Styles */}
                       <div className="flex items-center space-x-0.5 pr-1.5 border-r border-card-border">
                         <button
@@ -4276,10 +5264,40 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                           type="button"
                           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                           onClick={() => applyFormatting('`', '`')}
-                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors font-mono"
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-white transition-colors font-mono cursor-pointer"
                           title="Código Inline (`código`)"
                         >
                           <Code className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Pincel de Formatação */}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={handleToggleFormatPainter}
+                          className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                            formatPainterState 
+                              ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 ring-1 ring-amber-500/40 shadow-sm' 
+                              : 'hover:bg-card-border text-slate-300 hover:text-white'
+                          }`}
+                          title={
+                            formatPainterState 
+                              ? "Pincel de Formatação ativo (clique para cancelar ou selecione um texto para pintar)" 
+                              : "Pincel de Formatação (copiar estilo de um texto e aplicar em outro)"
+                          }
+                        >
+                          <Paintbrush className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Limpar Formatação */}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onClick={clearFormatting}
+                          className="p-1.5 rounded-lg hover:bg-card-border text-slate-300 hover:text-rose-300 transition-colors cursor-pointer"
+                          title="Limpar Marcação e Cores (remover marca-texto e cor personalizada, mantendo negrito e itálico)"
+                        >
+                          <RemoveFormatting className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
@@ -4403,6 +5421,25 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                         )}
                       </div>
 
+                      {/* Current Note Highlights Shortcut Badge */}
+                      {currentNoteHighlights.length > 0 && (
+                        <div className="flex items-center px-1.5 border-r border-card-border">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSidebarTab('highlights');
+                              setHighlightScopeFilter('current');
+                              setIsSidebarCollapsed(false);
+                            }}
+                            className="flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[11px] font-semibold transition-all shadow-xs cursor-pointer"
+                            title="Ver todos os destaques desta nota na barra lateral"
+                          >
+                            <Highlighter className="w-3 h-3 text-amber-400" />
+                            <span>{currentNoteHighlights.length} {currentNoteHighlights.length === 1 ? 'destaque' : 'destaques'}</span>
+                          </button>
+                        </div>
+                      )}
+
                       {/* Image Upload Button */}
                       <div className="flex items-center space-x-0.5 px-1.5 border-r border-card-border">
                         <input
@@ -4470,18 +5507,52 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                       )}
                     </div>
 
+                    {/* Format Painter Active Indicator Banner */}
+                    {formatPainterState && (
+                      <div className="sticky top-2 z-30 p-2.5 rounded-2xl bg-amber-950/90 border border-amber-500/50 shadow-2xl backdrop-blur-md flex items-center justify-between text-xs text-amber-200 animate-in fade-in slide-in-from-top-2">
+                        <div className="flex items-center space-x-2">
+                          <Paintbrush className="w-4 h-4 text-amber-400 animate-bounce" />
+                          <span className="font-semibold">Pincel de Formatação Ativo:</span>
+                          <span className="text-amber-300/90">
+                            Selecione qualquer trecho de texto no editor para aplicar o estilo capturado
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormatPainterState(null);
+                            setPainterToast(null);
+                          }}
+                          className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 text-[11px] font-bold transition-colors cursor-pointer"
+                        >
+                          Cancelar (Esc)
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Format Painter Toast Feedback */}
+                    {painterToast && !formatPainterState && (
+                      <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-2xl bg-card/95 border border-emerald-500/50 shadow-2xl text-xs text-emerald-300 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md">
+                        <Check className="w-4 h-4 text-emerald-400" />
+                        <span>{painterToast}</span>
+                      </div>
+                    )}
+
                     {/* CANVAS DIGITAL FORMATADO E EDITÁVEL (WYSIWYG) */}
                     <div
                       ref={editableContainerRef}
                       contentEditable
                       suppressContentEditableWarning
+                      onKeyDown={handleEditorKeyDown}
                       onInput={handleEditorInput}
                       onClick={handleEditorClick}
                       onPaste={handleEditorPasteFormatted}
                       onDrop={handleEditorDropFormatted}
                       onMouseUp={handleTextSelection}
                       onContextMenu={handleContextMenu}
-                      className="prose prose-invert max-w-none text-sm leading-relaxed p-6 sm:p-8 bg-[#10131d]/60 rounded-3xl border border-card-border/60 shadow-2xl min-h-[500px] outline-none select-text cursor-text focus:border-accent/40 transition-colors pb-32"
+                      className={`prose prose-invert max-w-none text-sm leading-relaxed p-6 sm:p-8 bg-[#10131d]/60 rounded-3xl border border-card-border/60 shadow-2xl min-h-[500px] outline-none select-text cursor-text focus:border-accent/40 transition-colors pb-32 ${
+                        formatPainterState ? 'ring-2 ring-amber-500/40 cursor-copy' : ''
+                      }`}
                     />
 
                     {/* Backlinks Section */}
