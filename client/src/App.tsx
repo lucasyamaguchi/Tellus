@@ -16,6 +16,7 @@ import { FloatingOverlay } from './components/FloatingOverlay';
 import { PipelineMindMapModal } from './components/PipelineMindMapModal';
 import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { CreditsModal } from './components/CreditsModal';
+import { SelfHealingModal } from './components/SelfHealingModal';
 import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
@@ -85,6 +86,7 @@ export const App: React.FC = () => {
   const [isWindowPickerOpen, setIsWindowPickerOpen] = useState<boolean>(false);
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
   const [isCreditsModalOpen, setIsCreditsModalOpen] = useState<boolean>(false);
+  const [isSelfHealingModalOpen, setIsSelfHealingModalOpen] = useState<boolean>(false);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
   const [openProjects, setOpenProjects] = useState<ProjectOverview[]>([]);
 
@@ -284,6 +286,15 @@ export const App: React.FC = () => {
     } catch {
       // ignore
     }
+  };
+
+  const handleTriggerSelfHealing = async (userDescription: string, contextSnapshot: string) => {
+    setMainViewMode('agent');
+    await handleNewSession();
+    const prompt = `[PROTOCOLO DE AUTO-MANUTENÇÃO & SELF-HEALING DO TELLUS]\nO usuário acionou a rotina autônoma de auto-manutenção e correção do Tellus.\n\nDiagnóstico & Contexto do Sistema:\n${contextSnapshot}\n\nRelato do Usuário:\n"${userDescription}"\n\nDiretrizes Obrigatórias para o Agente Tellus:\n1. Inspecione os arquivos relevantes em client/src/ e server/src/ para diagnosticar a causa raiz.\n2. Execute 'npm test' no terminal para validar os testes automatizados da aplicação.\n3. Se identificar um bug de código, renderização, sincronização de estado ou tipagem, aplique a correção pontual nos arquivos.\n4. Execute novamente 'npm test' e verifique se o projeto compila sem erros ('npm run build').\n5. Apresente um resumo claro e conciso com a causa raiz encontrada e as soluções aplicadas.`;
+    setTimeout(() => {
+      handleSendMessage(prompt);
+    }, 200);
   };
 
   const handleToggleLiveVoiceInChat = () => {
@@ -732,6 +743,7 @@ export const App: React.FC = () => {
         onSelectRoutine={handleSelectRoutine}
         onSelectLanguage={handleSelectLanguage}
         onNewChat={handleNewSession}
+        onOpenSelfHealing={() => setIsSelfHealingModalOpen(true)}
       />
 
       {/* MODE 1: DEDICATED NOTION-STYLE TELLUSMD NOTES & VAULT */}
@@ -739,6 +751,7 @@ export const App: React.FC = () => {
         <div className="flex-1 flex overflow-hidden">
           <TelluNoteView
             targetNoteIdOrTitle={targetNoteIdOrTitle}
+            onOpenSelfHealing={() => setIsSelfHealingModalOpen(true)}
             onMentionInChat={async (note) => {
               setMainViewMode('agent');
               await handleNewSession();
@@ -1039,6 +1052,17 @@ export const App: React.FC = () => {
           setTargetNoteIdOrTitle(noteTitle);
           setMainViewMode('notes');
         }}
+      />
+
+      {/* Autonomous Self-Healing & Auto-Maintenance Modal */}
+      <SelfHealingModal
+        isOpen={isSelfHealingModalOpen}
+        onClose={() => setIsSelfHealingModalOpen(false)}
+        currentProject={currentProject}
+        activeModel={activeModel}
+        currentViewMode={mainViewMode}
+        activeNoteTitle={targetNoteIdOrTitle}
+        onTriggerSelfHealing={handleTriggerSelfHealing}
       />
     </div>
   );
