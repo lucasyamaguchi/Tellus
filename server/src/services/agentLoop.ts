@@ -5,7 +5,7 @@ import { TerminalRunner } from './tools/terminalRunner.js';
 import { ScreenCapture } from './tools/screenCapture.js';
 import { WebScraper } from './tools/webScraper.js';
 import { MemoryEngine } from './memory/memoryEngine.js';
-import { FrankNoteEngine } from './notes/frankNoteEngine.js';
+import { TelluNoteEngine } from './notes/telluNoteEngine.js';
 import { SkillManager } from './skills/skillManager.js';
 import { ProviderHub } from './providers/providerHub.js';
 import { ChatMessage, ToolDefinition } from './providers/openrouter.js';
@@ -383,7 +383,7 @@ export class AgentLoop {
             status: 'success',
             query: args.query,
             count: results.length,
-            results: results.slice(0, 5).map(r => ({
+            results: results.slice(0, 5).map((r: any) => ({
               category: r.page.category,
               title: r.page.title,
               filename: r.page.filename,
@@ -441,7 +441,7 @@ export class AgentLoop {
           }
           const cleanSubject = isPt ? sanitizePortugueseText(rawSubject) : rawSubject;
           const cleanContent = isPt ? sanitizePortugueseText(args.content) : args.content;
-          const note = FrankNoteEngine.saveNote({
+          const note = TelluNoteEngine.saveNote({
             title: cleanTitle,
             folder: cleanFolder,
             subject: cleanSubject,
@@ -545,7 +545,7 @@ ${isTargetPortuguese ? `- DIRETRIZ CRÍTICA PARA MODELOS DEEPSEEK (V3, V4, R1) E
 - Sempre que criar notas com 'note_save', defina o parâmetro 'folder' com a estrutura "Caderno/Subpasta" (ex: "Carreira/Vaga Nestle", "Estudos/Arquitetura de Software", "Caderno de Anotações/Manuscritos").`;
 
     // Strict Deleted Notes & Live Vault State Guidelines with Real Vault Inspection
-    const activeNotes = FrankNoteEngine.listNotes(projectPath);
+    const activeNotes = TelluNoteEngine.listNotes(projectPath);
     const activeNotesSummary = activeNotes.length > 0 
       ? activeNotes.map(n => `- "${n.title}" (Pasta: ${n.folder || 'Geral'})`).join('\n')
       : '(Nenhuma nota ativa no Vault no momento)';

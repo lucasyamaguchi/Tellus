@@ -13,7 +13,7 @@ import { ScreenCapture } from './services/tools/screenCapture.js';
 import { TerminalRunner } from './services/tools/terminalRunner.js';
 import { SessionManager } from './services/sessionManager.js';
 import { AgentLoop, sanitizePortugueseText } from './services/agentLoop.js';
-import { FrankNoteEngine } from './services/notes/frankNoteEngine.js';
+import { TelluNoteEngine } from './services/notes/telluNoteEngine.js';
 import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-app.use('/api/notes/attachments', express.static(FrankNoteEngine.ATTACHMENTS_DIR));
+app.use('/api/notes/attachments', express.static(TelluNoteEngine.ATTACHMENTS_DIR));
 
 // 1. Config Endpoints
 app.get('/api/config', (req, res) => {
@@ -415,7 +415,7 @@ app.get('/api/openrouter/credits', async (req, res) => {
 app.get('/api/notes', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const notes = FrankNoteEngine.listNotes(currentPath);
+    const notes = TelluNoteEngine.listNotes(currentPath);
     res.json(notes);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -425,7 +425,7 @@ app.get('/api/notes', (req, res) => {
 app.post('/api/notes', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const note = FrankNoteEngine.saveNote(req.body, currentPath);
+    const note = TelluNoteEngine.saveNote(req.body, currentPath);
     res.json(note);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -437,7 +437,7 @@ app.post('/api/notes/search', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
     const { query, folder, limit } = req.body;
-    const results = FrankNoteEngine.searchNotes(query || '', { folder, limit }, currentPath);
+    const results = TelluNoteEngine.searchNotes(query || '', { folder, limit }, currentPath);
     res.json(results);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -447,7 +447,7 @@ app.post('/api/notes/search', (req, res) => {
 // Folders Management Routes (Declared BEFORE :id to prevent route hijacking)
 app.get('/api/notes/folders', (req, res) => {
   try {
-    const folders = FrankNoteEngine.listFolders();
+    const folders = TelluNoteEngine.listFolders();
     res.json(folders);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -460,7 +460,7 @@ app.post('/api/notes/folders', (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
     }
-    const success = FrankNoteEngine.createFolder(name.trim());
+    const success = TelluNoteEngine.createFolder(name.trim());
     res.json({ success, name: name.trim() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -473,7 +473,7 @@ app.post('/api/notes/folders/move', (req, res) => {
     if (!sourceFolder) {
       return res.status(400).json({ error: 'sourceFolder é obrigatório' });
     }
-    const success = FrankNoteEngine.moveFolder(sourceFolder, targetParentFolder || '');
+    const success = TelluNoteEngine.moveFolder(sourceFolder, targetParentFolder || '');
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -487,7 +487,7 @@ app.delete('/api/notes/folders', (req, res) => {
       return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
     }
     const currentPath = ProjectManager.getCurrentProject();
-    const result = FrankNoteEngine.deleteFolder(folderName, currentPath);
+    const result = TelluNoteEngine.deleteFolder(folderName, currentPath);
 
     // Auto-sync Active Context: if current project's active_context.md references this deleted folder/study,
     // clear the stale reference so AI never presumes notes/modules exist.
@@ -514,7 +514,7 @@ app.post('/api/notes/upload-attachment', (req, res) => {
     }
     const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(cleanBase64, 'base64');
-    const attachment = FrankNoteEngine.saveAttachment(filename || 'imagem.png', buffer);
+    const attachment = TelluNoteEngine.saveAttachment(filename || 'imagem.png', buffer);
     res.json(attachment);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Falha ao salvar anexo da nota' });
@@ -527,7 +527,7 @@ app.post('/api/notes/import-notion', (req, res) => {
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ error: 'Lista de notas para importar é inválida' });
     }
-    const result = FrankNoteEngine.importNotionNotes(items);
+    const result = TelluNoteEngine.importNotionNotes(items);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -537,7 +537,7 @@ app.post('/api/notes/import-notion', (req, res) => {
 app.get('/api/notes/graph', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const graphData = FrankNoteEngine.getGraphData(currentPath);
+    const graphData = TelluNoteEngine.getGraphData(currentPath);
     res.json(graphData);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -590,9 +590,9 @@ app.get('/api/notes/trash', (req, res) => {
     const config = ConfigManager.getConfig();
     // Run automated background cleanup on query
     if (config.deletedNotesRetention) {
-      FrankNoteEngine.cleanupExpiredBackups(config.deletedNotesRetention);
+      TelluNoteEngine.cleanupExpiredBackups(config.deletedNotesRetention);
     }
-    const items = FrankNoteEngine.listDeletedNotes(currentPath);
+    const items = TelluNoteEngine.listDeletedNotes(currentPath);
     res.json({ items, retention: config.deletedNotesRetention || '90_days' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -606,7 +606,7 @@ app.post('/api/notes/trash/restore', (req, res) => {
       return res.status(400).json({ error: 'backupFilename é obrigatório' });
     }
     const currentPath = ProjectManager.getCurrentProject();
-    const restoredNote = FrankNoteEngine.restoreDeletedNote(backupFilename, currentPath);
+    const restoredNote = TelluNoteEngine.restoreDeletedNote(backupFilename, currentPath);
     if (!restoredNote) {
       return res.status(404).json({ error: 'Arquivo de backup não encontrado' });
     }
@@ -620,10 +620,10 @@ app.delete('/api/notes/trash', (req, res) => {
   try {
     const backupFilename = (req.query.backupFilename as string) || req.body?.backupFilename;
     if (backupFilename) {
-      const success = FrankNoteEngine.permanentlyDeleteNote(backupFilename);
+      const success = TelluNoteEngine.permanentlyDeleteNote(backupFilename);
       return res.json({ success });
     }
-    const result = FrankNoteEngine.emptyTrash();
+    const result = TelluNoteEngine.emptyTrash();
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -634,7 +634,7 @@ app.post('/api/notes/trash/cleanup', (req, res) => {
   try {
     const config = ConfigManager.getConfig();
     const retention = req.body.retention || config.deletedNotesRetention || '90_days';
-    const cleanedCount = FrankNoteEngine.cleanupExpiredBackups(retention);
+    const cleanedCount = TelluNoteEngine.cleanupExpiredBackups(retention);
     res.json({ success: true, cleanedCount, retention });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -697,7 +697,7 @@ app.post('/api/notes/:id/move', (req, res) => {
     if (!targetFolder) {
       return res.status(400).json({ error: 'targetFolder é obrigatório' });
     }
-    const updatedNote = FrankNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
+    const updatedNote = TelluNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
     if (!updatedNote) {
       return res.status(404).json({ error: 'Nota não encontrada' });
     }
@@ -711,7 +711,7 @@ app.delete('/api/notes/:id', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
     const isProjectSpecific = req.query.isProjectSpecific === 'true';
-    const success = FrankNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
+    const success = TelluNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
 
     // Auto-clean active_context if it specifically mentions this deleted note ID
     try {
@@ -809,7 +809,7 @@ Breve resumo dos objetivos, contexto e conclusões da discussão.
       subject = sanitizePortugueseText(subject);
     }
 
-    const savedNote = FrankNoteEngine.saveNote({
+    const savedNote = TelluNoteEngine.saveNote({
       title,
       subject,
       content: generatedNoteContent,
