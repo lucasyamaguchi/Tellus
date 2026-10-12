@@ -86,7 +86,8 @@ import {
   Star,
   MoreHorizontal,
   MoreVertical,
-  BookMarked
+  BookMarked,
+  Wrench
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -140,6 +141,7 @@ export interface TelluNoteViewProps {
   targetNoteIdOrTitle?: string | null;
   onStartLiveVoice?: (topic: string, initialContent?: string) => void;
   onSearchInNewChat?: (query: string) => void;
+  onOpenSelfHealing?: () => void;
 }
 
 export type FrankNoteViewProps = TelluNoteViewProps;
@@ -151,7 +153,8 @@ export const TelluNoteView: React.FC<TelluNoteViewProps> = ({
   onReturnToAgent,
   targetNoteIdOrTitle,
   onStartLiveVoice,
-  onSearchInNewChat
+  onSearchInNewChat,
+  onOpenSelfHealing
 }) => {
   const [notes, setNotes] = useState<TelluNote[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -1357,25 +1360,32 @@ export const TelluNoteView: React.FC<TelluNoteViewProps> = ({
 
   useEffect(() => {
     if (activeNote) {
-      if (currentLoadedNoteIdRef.current !== activeNote.id) {
-        currentLoadedNoteIdRef.current = activeNote.id;
-        setEditTitle(activeNote.title);
-        setEditFolder(getNoteFolder(activeNote));
-        setEditContent(activeNote.content);
+      setEditTitle(activeNote.title);
+      setEditFolder(getNoteFolder(activeNote));
+      setEditContent(activeNote.content);
+
+      const syncEditorDom = () => {
         if (editableContainerRef.current) {
-          const initialHtml = markdownToEditorHtml(activeNote.content);
-          editableContainerRef.current.innerHTML = initialHtml;
-          lastRecordedHtmlRef.current = initialHtml;
-          undoStackRef.current = [];
-          redoStackRef.current = [];
+          if (editableContainerRef.current.innerHTML.trim() === '' || currentLoadedNoteIdRef.current !== activeNote.id) {
+            const initialHtml = markdownToEditorHtml(activeNote.content);
+            editableContainerRef.current.innerHTML = initialHtml;
+            lastRecordedHtmlRef.current = initialHtml;
+            currentLoadedNoteIdRef.current = activeNote.id;
+            undoStackRef.current = [];
+            redoStackRef.current = [];
+          }
         }
-      }
+      };
+
+      syncEditorDom();
+      const timer = setTimeout(syncEditorDom, 50);
+      return () => clearTimeout(timer);
     } else {
       currentLoadedNoteIdRef.current = null;
       undoStackRef.current = [];
       redoStackRef.current = [];
     }
-  }, [activeNote, getNoteFolder]);
+  }, [activeNote?.id, activeNote?.content, getNoteFolder]);
 
 
   useEffect(() => {
@@ -1846,10 +1856,13 @@ export const TelluNoteView: React.FC<TelluNoteViewProps> = ({
     const folderPath = getNoteFolder(note);
     setEditFolder(folderPath);
     setEditContent(note.content);
-    currentLoadedNoteIdRef.current = note.id;
-
     if (editableContainerRef.current) {
-      editableContainerRef.current.innerHTML = markdownToEditorHtml(note.content);
+      const initialHtml = markdownToEditorHtml(note.content);
+      editableContainerRef.current.innerHTML = initialHtml;
+      lastRecordedHtmlRef.current = initialHtml;
+      currentLoadedNoteIdRef.current = note.id;
+    } else {
+      currentLoadedNoteIdRef.current = null;
     }
 
     // Focus the sidebar on this note's notebook and expand sidebar
@@ -5747,6 +5760,18 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                     </button>
                   )}
 
+                  {onOpenSelfHealing && (
+                    <button
+                      type="button"
+                      onClick={onOpenSelfHealing}
+                      className="px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-xs text-sky-300 hover:text-white flex items-center space-x-1.5 transition-all shadow-sm font-semibold cursor-pointer"
+                      title="Auto-Manutenção: reportar bug ou pedir ao Tellus para auto-diagnosticar e corrigir o sistema"
+                    >
+                      <Wrench className="w-3.5 h-3.5 text-sky-400" />
+                      <span className="hidden md:inline">Auto-Manutenção</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleSaveActiveNote}
@@ -6339,7 +6364,17 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
 
                     {/* CANVAS DIGITAL FORMATADO E EDITÁVEL (WYSIWYG) */}
                     <div
-                      ref={editableContainerRef}
+                      ref={(el) => {
+                        editableContainerRef.current = el;
+                        if (el && activeNote) {
+                          if (el.innerHTML.trim() === '' || currentLoadedNoteIdRef.current !== activeNote.id) {
+                            const initialHtml = markdownToEditorHtml(activeNote.content);
+                            el.innerHTML = initialHtml;
+                            lastRecordedHtmlRef.current = initialHtml;
+                            currentLoadedNoteIdRef.current = activeNote.id;
+                          }
+                        }
+                      }}
                       contentEditable
                       suppressContentEditableWarning
                       onKeyDown={handleEditorKeyDown}

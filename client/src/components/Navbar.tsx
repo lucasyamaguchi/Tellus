@@ -25,7 +25,8 @@ import {
   Radio,
   Globe,
   Check,
-  Plus
+  Plus,
+  Wrench
 } from 'lucide-react';
 import { AppConfig, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
@@ -74,6 +75,7 @@ interface NavbarProps {
   onSelectRoutine: (routine: Routine) => void;
   onSelectLanguage?: (lang: LanguageOption) => void;
   onNewChat?: () => void;
+  onOpenSelfHealing?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -102,6 +104,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectRoutine,
   onSelectLanguage,
   onNewChat,
+  onOpenSelfHealing,
 }) => {
   const [isMenuDropdownOpen, setIsMenuDropdownOpen] = useState(false);
   const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
@@ -299,6 +302,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden md:inline text-[11px]">Novo Chat</span>
+          </button>
+        )}
+
+        {/* Auto-Manutenção / Self-Healing Button */}
+        {onOpenSelfHealing && (
+          <button
+            onClick={onOpenSelfHealing}
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border border-sky-500/40 bg-sky-500/15 hover:bg-sky-500/30 text-sky-300 hover:text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+            title="Auto-Manutenção: peça ao Tellus para auto-diagnosticar e corrigir bugs no sistema"
+          >
+            <Wrench className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden xl:inline text-[11px]">Auto-Manutenção</span>
           </button>
         )}
       </div>
@@ -551,6 +566,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-red-500/20 text-red-300">
                     Ao Vivo
+                  </span>
+                </button>
+              )}
+
+              {/* Auto-Manutenção Option */}
+              {onOpenSelfHealing && (
+                <button
+                  onClick={() => {
+                    setIsMenuDropdownOpen(false);
+                    onOpenSelfHealing();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-panel text-slate-200 flex items-center justify-between"
+                  title="Auto-Manutenção: diagnosticar e corrigir bugs com o Tellus"
+                >
+                  <div className="flex items-center space-x-2">
+                    <Wrench className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Auto-Manutenção</span>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-sky-500/20 text-sky-300">
+                    Self-Healing
                   </span>
                 </button>
               )}
