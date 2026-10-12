@@ -49,14 +49,15 @@ export interface OrganizeRequestParams {
 
 export class SmartOrganizer {
   private static getVaultDir(): string {
-    if (!fs.existsSync(OBSIDIAN_VAULT_DIR)) {
+    const dir = process.env.TELLUS_VAULT_DIR || process.env.OBSIDIAN_VAULT_DIR || OBSIDIAN_VAULT_DIR;
+    if (!fs.existsSync(dir)) {
       try {
-        fs.mkdirSync(OBSIDIAN_VAULT_DIR, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true });
       } catch {
         return path.resolve('./Vault');
       }
     }
-    return OBSIDIAN_VAULT_DIR;
+    return dir;
   }
 
   public static listExistingFolders(baseDir: string = this.getVaultDir()): string[] {
@@ -187,7 +188,7 @@ SUA MISSÃO OBRIGATÓRIA:
    - "reason": Justificativa detalhada de por que foi colocado nessa pasta específica e como esse contexto foi interpretado e separado das demais ideias.
    - "summary": Resumo conciso de 1 parágrafo da ideia central.
    - "tags": Array com tags úteis (ex: ["#seguranca", "#jwt", "#estudos"]).
-   - "content": O conteúdo completo e enriquecido da nota em Markdown elegante no estilo Obsidian/FrankMD, estruturado com seções:
+   - "content": O conteúdo completo e enriquecido da nota em Markdown elegante no estilo Obsidian/TellusMD, estruturado com seções:
      # [Título]
      > Resumo executivo / insight central.
      ## 📌 Conceitos-Chave e Detalhes

@@ -411,7 +411,7 @@ app.get('/api/openrouter/credits', async (req, res) => {
   }
 });
 
-// FrankMD Note Taker & Knowledge Graph
+// TellusMD (antigo FrankMD) Note Taker & Knowledge Graph
 app.get('/api/notes', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
@@ -728,7 +728,7 @@ app.delete('/api/notes/:id', (req, res) => {
   }
 });
 
-// Sintetizar e criar uma nota do FrankMD a partir do chat atual
+// Sintetizar e criar uma nota do TellusMD a partir do chat atual
 app.post('/api/notes/generate-from-chat', async (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
@@ -753,7 +753,7 @@ app.post('/api/notes/generate-from-chat', async (req, res) => {
     const promptMessages = [
       {
         role: 'system' as const,
-        content: `Você é o sintetizador de conhecimento do Notes Module (módulo de notas baseado nas arquiteturas Frank MD e AI-Memory).
+        content: `Você é o sintetizador de conhecimento do TellusMD Vault (motor de notas fundamentado nas arquiteturas Frank MD e AI-Memory).
 IDIOMA OBRIGATÓRIO: Responda EXCLUSIVAMENTE em ${userLanguage} (${userLocale}).
 É TOTALMENTE PROIBIDO responder em espanhol ou portunhol, mesmo que termos técnicos se assemelhem (ex: use "Arquitetura", jamais "Arquitectura"; use "Exercícios", jamais "Ejercicios"; use "Introdução", jamais "Introducción").
 

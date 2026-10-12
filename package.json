@@ -9,6 +9,7 @@
     "dev:server": "cd server && npm run dev",
     "dev:client": "cd client && npm run dev",
     "build": "cd server && npm run build && cd ../client && npm run build",
+    "test": "cd server && npm test",
     "desktop": "electron .",
     "dist": "npm run build && electron-builder --win portable",
     "generate-icons": "node scripts/generate-icons.js",

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { PrivacySanitizer } from '../security/privacySanitizer.js';
 
-// Diretório fixo do cofre Obsidian usado pelo FrankMD.
+// Diretório fixo do cofre Obsidian usado pelo TellusMD (fundamentado na arquitetura Frank MD).
 // No Windows, este caminho representa o volume E: e não depende do diretório
 // de execução do servidor.
 const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
@@ -58,19 +58,30 @@ export interface DeletedNoteItem {
   content: string;
 }
 
-const GLOBAL_NOTES_DIR = OBSIDIAN_VAULT_DIR;
-const BACKUPS_DIR = path.join(OBSIDIAN_VAULT_DIR, '.backups');
+function getGlobalNotesDir(): string {
+  return process.env.TELLUS_VAULT_DIR || process.env.OBSIDIAN_VAULT_DIR || OBSIDIAN_VAULT_DIR;
+}
+
+function getBackupsDir(): string {
+  return path.join(getGlobalNotesDir(), '.backups');
+}
 
 export class FrankNoteEngine {
-  public static readonly VAULT_DIR = OBSIDIAN_VAULT_DIR;
-  public static readonly ATTACHMENTS_DIR = path.join(OBSIDIAN_VAULT_DIR, '_attachments');
+  public static get VAULT_DIR(): string {
+    return getGlobalNotesDir();
+  }
+  public static get ATTACHMENTS_DIR(): string {
+    return path.join(getGlobalNotesDir(), '_attachments');
+  }
 
   private static ensureDirs(projectPath?: string) {
-    if (!fs.existsSync(GLOBAL_NOTES_DIR)) {
-      fs.mkdirSync(GLOBAL_NOTES_DIR, { recursive: true });
+    const vaultDir = getGlobalNotesDir();
+    const backupsDir = getBackupsDir();
+    if (!fs.existsSync(vaultDir)) {
+      fs.mkdirSync(vaultDir, { recursive: true });
     }
-    if (!fs.existsSync(BACKUPS_DIR)) {
-      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    if (!fs.existsSync(backupsDir)) {
+      fs.mkdirSync(backupsDir, { recursive: true });
     }
     if (!fs.existsSync(this.ATTACHMENTS_DIR)) {
       fs.mkdirSync(this.ATTACHMENTS_DIR, { recursive: true });
@@ -165,7 +176,7 @@ export class FrankNoteEngine {
     const stat = fs.statSync(filePath);
     const filename = path.basename(filePath);
     const id = filename.replace(/\.md$/i, '');
-    const relativePath = path.relative(GLOBAL_NOTES_DIR, filePath).replace(/\\/g, '/');
+    const relativePath = path.relative(getGlobalNotesDir(), filePath).replace(/\\/g, '/');
 
     // Extract title from first Markdown heading, or fallback to filename
     const lines = content.split('\n');
@@ -184,7 +195,7 @@ export class FrankNoteEngine {
     }
 
     // Extract folder from physical directory or comment
-    const dirRelative = path.relative(GLOBAL_NOTES_DIR, path.dirname(filePath)).replace(/\\/g, '/');
+    const dirRelative = path.relative(getGlobalNotesDir(), path.dirname(filePath)).replace(/\\/g, '/');
     const physicalFolder = dirRelative && dirRelative !== '.' ? dirRelative : 'Geral';
 
     const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
@@ -231,14 +242,14 @@ export class FrankNoteEngine {
         if (entry.isDirectory()) {
           scanDir(fullPath);
         } else if (entry.isFile() && entry.name.endsWith('.md')) {
-          const relativeDir = path.relative(GLOBAL_NOTES_DIR, currentDir).replace(/\\/g, '/');
+          const relativeDir = path.relative(getGlobalNotesDir(), currentDir).replace(/\\/g, '/');
           const folderName = relativeDir && relativeDir !== '.' ? relativeDir : 'Geral';
           notes.push(this.parseNote(fullPath, folderName, false));
         }
       }
     };
 
-    scanDir(GLOBAL_NOTES_DIR);
+    scanDir(getGlobalNotesDir());
 
     // 3. Compute Backlinks
     for (const note of notes) {
@@ -255,14 +266,14 @@ export class FrankNoteEngine {
     }
 
     // Only create starter note on very first initialization of the vault
-    const initFlagPath = path.join(GLOBAL_NOTES_DIR, '.initialized');
+    const initFlagPath = path.join(getGlobalNotesDir(), '.initialized');
     if (!fs.existsSync(initFlagPath) && notes.length === 0) {
       fs.writeFileSync(initFlagPath, 'true', 'utf-8');
       this.saveNote({
-        title: 'Bem-vindo ao Notes Module',
+        title: 'Bem-vindo ao TellusMD Vault',
         folder: 'Início',
         subject: 'Início',
-        content: `# Bem-vindo ao Notes Module\n\nSistema de anotações seguras baseado no conceito **Frank MD** e na arquitetura **AI-Memory** com suporte ao grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian (\`E:\\Die-Sonne\\Vault\`).\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n- Seus dados permanecem 100% locais e protegidos com sanitização de segredos antes da gravação.\n`,
+        content: `# Bem-vindo ao TellusMD Vault\n\nSistema de anotações seguras TellusMD (fundamentado no conceito **Frank MD** e na arquitetura **AI-Memory**) com suporte ao grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian (\`E:\\Die-Sonne\\Vault\`).\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n- Seus dados permanecem 100% locais e protegidos com sanitização de segredos antes da gravação.\n`,
         isProjectSpecific: false
       });
       return this.listNotes(projectPath);
@@ -284,14 +295,14 @@ export class FrankNoteEngine {
       for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.')) {
           const fullPath = path.join(currentDir, entry.name);
-          const relative = path.relative(GLOBAL_NOTES_DIR, fullPath).replace(/\\/g, '/');
+          const relative = path.relative(getGlobalNotesDir(), fullPath).replace(/\\/g, '/');
           if (relative) folders.add(relative);
           scanFolders(fullPath);
         }
       }
     };
 
-    scanFolders(GLOBAL_NOTES_DIR);
+    scanFolders(getGlobalNotesDir());
 
     // Also include folders from all existing notes (do not treat subject as folder)
     const notes = this.listNotes(projectPath);
@@ -310,7 +321,7 @@ export class FrankNoteEngine {
     const cleanPath = this.sanitizePath(folderName);
     if (!cleanPath || cleanPath === 'Geral') return false;
 
-    const folderPath = path.join(GLOBAL_NOTES_DIR, cleanPath);
+    const folderPath = path.join(getGlobalNotesDir(), cleanPath);
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
       return true;
@@ -325,13 +336,13 @@ export class FrankNoteEngine {
     const cleanTargetParent = this.sanitizePath(targetParentFolder);
     if (!cleanSource || cleanSource === cleanTargetParent) return false;
 
-    const sourcePath = path.join(GLOBAL_NOTES_DIR, cleanSource);
+    const sourcePath = path.join(getGlobalNotesDir(), cleanSource);
     if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isDirectory()) return false;
 
     const folderBaseName = path.basename(sourcePath);
     const targetDir = (cleanTargetParent === 'Geral' || !cleanTargetParent)
-      ? path.join(GLOBAL_NOTES_DIR, folderBaseName)
-      : path.join(GLOBAL_NOTES_DIR, cleanTargetParent, folderBaseName);
+      ? path.join(getGlobalNotesDir(), folderBaseName)
+      : path.join(getGlobalNotesDir(), cleanTargetParent, folderBaseName);
 
     if (path.resolve(sourcePath) === path.resolve(targetDir)) return true;
 
@@ -355,7 +366,7 @@ export class FrankNoteEngine {
       return { success: false, deletedNotesCount: 0 };
     }
 
-    const folderPath = path.join(GLOBAL_NOTES_DIR, cleanPath);
+    const folderPath = path.join(getGlobalNotesDir(), cleanPath);
     let count = 0;
 
     // 1. Find and backup all notes within this folder and its subfolders
@@ -366,12 +377,12 @@ export class FrankNoteEngine {
     });
 
     for (const note of notesToDelete) {
-      const filePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
+      const filePath = path.join(getGlobalNotesDir(), note.relativePath);
       if (fs.existsSync(filePath)) {
         try {
           const existingContent = fs.readFileSync(filePath, 'utf-8');
           const backupFilename = `${note.id}_deleted_folder_${Date.now()}.md`;
-          fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
+          fs.writeFileSync(path.join(getBackupsDir(), backupFilename), existingContent, 'utf-8');
           fs.unlinkSync(filePath);
           count++;
         } catch (e) {
@@ -393,7 +404,7 @@ export class FrankNoteEngine {
               const existingContent = fs.readFileSync(fullPath, 'utf-8');
               const fileId = entry.name.replace(/\.md$/i, '');
               const backupFilename = `${fileId}_deleted_folder_${Date.now()}.md`;
-              fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
+              fs.writeFileSync(path.join(getBackupsDir(), backupFilename), existingContent, 'utf-8');
               count++;
             }
           }
@@ -429,9 +440,9 @@ export class FrankNoteEngine {
     const rawFolder = data.folder ? this.normalizePortuguese(data.folder) : (data.subject ? this.normalizePortuguese(data.subject) : 'Geral');
     const folder = this.sanitizePath(rawFolder);
 
-    let targetDir = GLOBAL_NOTES_DIR;
+    let targetDir = getGlobalNotesDir();
     if (folder && folder !== 'Geral') {
-      targetDir = path.join(GLOBAL_NOTES_DIR, folder);
+      targetDir = path.join(getGlobalNotesDir(), folder);
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
@@ -443,7 +454,7 @@ export class FrankNoteEngine {
     if (fs.existsSync(filePath)) {
       const existingContent = fs.readFileSync(filePath, 'utf-8');
       const backupFilename = `${id}_backup_${Date.now()}.md`;
-      fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
+      fs.writeFileSync(path.join(getBackupsDir(), backupFilename), existingContent, 'utf-8');
     }
 
     // GitSafe Sanitization: Never write raw API keys or credentials to disk
@@ -460,10 +471,12 @@ export class FrankNoteEngine {
     }
     subject = this.normalizePortuguese(subject.trim());
 
+    const subjectToPersist = data.subject ? this.normalizePortuguese(data.subject.trim()) : folder;
+
     if (!finalContent.includes('<!-- subject:')) {
-      finalContent = `<!-- subject: ${folder} -->\n${finalContent}`;
+      finalContent = `<!-- subject: ${subjectToPersist} -->\n${finalContent}`;
     } else {
-      finalContent = finalContent.replace(/<!--\s*subject:\s*(.*?)\s*-->/i, `<!-- subject: ${folder} -->`);
+      finalContent = finalContent.replace(/<!--\s*subject:\s*(.*?)\s*-->/i, `<!-- subject: ${subjectToPersist} -->`);
     }
 
     fs.writeFileSync(filePath, finalContent, 'utf-8');
@@ -606,11 +619,11 @@ export class FrankNoteEngine {
     const note = notes.find(n => n.id === id || n.filename === `${id}.md`);
     if (!note) return false;
 
-    const filePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
+    const filePath = path.join(getGlobalNotesDir(), note.relativePath);
     if (fs.existsSync(filePath)) {
       const existingContent = fs.readFileSync(filePath, 'utf-8');
       const backupFilename = `${id}_deleted_${Date.now()}.md`;
-      fs.writeFileSync(path.join(BACKUPS_DIR, backupFilename), existingContent, 'utf-8');
+      fs.writeFileSync(path.join(getBackupsDir(), backupFilename), existingContent, 'utf-8');
       fs.unlinkSync(filePath);
       return true;
     }
@@ -624,13 +637,13 @@ export class FrankNoteEngine {
     const note = notes.find(n => n.id === id || n.filename === `${id}.md`);
     if (!note) return null;
 
-    const currentFilePath = path.join(GLOBAL_NOTES_DIR, note.relativePath);
+    const currentFilePath = path.join(getGlobalNotesDir(), note.relativePath);
     if (!fs.existsSync(currentFilePath)) return null;
 
     const cleanTargetFolder = this.sanitizePath(targetFolder) || 'Geral';
-    let targetDir = GLOBAL_NOTES_DIR;
+    let targetDir = getGlobalNotesDir();
     if (cleanTargetFolder !== 'Geral') {
-      targetDir = path.join(GLOBAL_NOTES_DIR, cleanTargetFolder);
+      targetDir = path.join(getGlobalNotesDir(), cleanTargetFolder);
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
@@ -765,15 +778,15 @@ export class FrankNoteEngine {
   // List deleted / backup notes (Trash Bin)
   public static listDeletedNotes(projectPath?: string): DeletedNoteItem[] {
     this.ensureDirs(projectPath);
-    if (!fs.existsSync(BACKUPS_DIR)) return [];
+    if (!fs.existsSync(getBackupsDir())) return [];
 
     const items: DeletedNoteItem[] = [];
-    const files = fs.readdirSync(BACKUPS_DIR);
+    const files = fs.readdirSync(getBackupsDir());
 
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
 
-      const fullPath = path.join(BACKUPS_DIR, file);
+      const fullPath = path.join(getBackupsDir(), file);
       try {
         const stat = fs.statSync(fullPath);
         const content = fs.readFileSync(fullPath, 'utf-8');
@@ -786,9 +799,20 @@ export class FrankNoteEngine {
           .replace(/_(deleted_folder|deleted|backup)_\d+\.md$/i, '')
           .replace(/\.md$/i, '');
 
-        const firstLine = content.split('\n')[0] || '';
-        const titleMatch = firstLine.match(/^#+\s*(.*)/);
-        const title = titleMatch ? titleMatch[1].trim() : baseId.replace(/[-_]/g, ' ');
+        const lines = content.split('\n');
+        let title = '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('<!--')) continue;
+          const headingMatch = trimmed.match(/^#+\s*(.*)/);
+          if (headingMatch) {
+            title = headingMatch[1].trim();
+            break;
+          }
+        }
+        if (!title) {
+          title = baseId.replace(/[-_]/g, ' ');
+        }
 
         const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
         const originalFolder = subjectMatch ? subjectMatch[1].trim() : 'Geral';
@@ -813,7 +837,7 @@ export class FrankNoteEngine {
   // Restore a deleted note back to the active vault
   public static restoreDeletedNote(backupFilename: string, projectPath?: string): FrankNote | null {
     this.ensureDirs(projectPath);
-    const backupPath = path.join(BACKUPS_DIR, backupFilename);
+    const backupPath = path.join(getBackupsDir(), backupFilename);
     if (!fs.existsSync(backupPath)) return null;
 
     const content = fs.readFileSync(backupPath, 'utf-8');
@@ -846,7 +870,7 @@ export class FrankNoteEngine {
 
   // Permanently delete a single note backup from disk
   public static permanentlyDeleteNote(backupFilename: string): boolean {
-    const backupPath = path.join(BACKUPS_DIR, backupFilename);
+    const backupPath = path.join(getBackupsDir(), backupFilename);
     if (fs.existsSync(backupPath)) {
       try {
         fs.unlinkSync(backupPath);
@@ -861,13 +885,13 @@ export class FrankNoteEngine {
 
   // Permanently empty all deleted notes in trash
   public static emptyTrash(): { success: boolean; count: number } {
-    if (!fs.existsSync(BACKUPS_DIR)) return { success: true, count: 0 };
-    const files = fs.readdirSync(BACKUPS_DIR);
+    if (!fs.existsSync(getBackupsDir())) return { success: true, count: 0 };
+    const files = fs.readdirSync(getBackupsDir());
     let count = 0;
     for (const file of files) {
       if (file.endsWith('.md')) {
         try {
-          fs.unlinkSync(path.join(BACKUPS_DIR, file));
+          fs.unlinkSync(path.join(getBackupsDir(), file));
           count++;
         } catch {
           // ignore
@@ -880,7 +904,7 @@ export class FrankNoteEngine {
   // Automatic retention cleanup: cleans notes older than specified retention (30d, 90d, 120d, 1y)
   public static cleanupExpiredBackups(retention: string = '90_days'): number {
     if (!retention || retention === 'never') return 0;
-    if (!fs.existsSync(BACKUPS_DIR)) return 0;
+    if (!fs.existsSync(getBackupsDir())) return 0;
 
     let maxAgeMs = 90 * 24 * 60 * 60 * 1000; // default 90 days
     if (retention === '30_days') {
@@ -894,13 +918,13 @@ export class FrankNoteEngine {
     }
 
     const now = Date.now();
-    const files = fs.readdirSync(BACKUPS_DIR);
+    const files = fs.readdirSync(getBackupsDir());
     let cleanedCount = 0;
 
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
 
-      const fullPath = path.join(BACKUPS_DIR, file);
+      const fullPath = path.join(getBackupsDir(), file);
       try {
         const tsMatch = file.match(/_(\d+)\.md$/i);
         const timestamp = tsMatch ? parseInt(tsMatch[1], 10) : fs.statSync(fullPath).mtimeMs;
@@ -918,3 +942,6 @@ export class FrankNoteEngine {
 }
 
 export const NotesEngine = FrankNoteEngine;
+export const TellusNoteEngine = FrankNoteEngine;
+export type TellusNote = FrankNote;
+export type TellusMDNote = FrankNote;

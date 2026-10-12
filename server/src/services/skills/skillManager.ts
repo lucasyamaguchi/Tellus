@@ -133,7 +133,7 @@ PRINCÍPIOS METODOLÓGICOS FUNDAMENTAIS:
      * Tecnologia e Engenharia de Software (Linguagens, Frameworks, Cloud, DevOps, Arquitetura).
      * Preparação para Vagas e Processos Seletivos Técnicos.
 
-ESTRUTURA COMPLETA NO VAULT (chame note_save / frank_note_save):
+ESTRUTURA COMPLETA NO VAULT (chame tellus_note_save / note_save / frank_note_save):
 Crie dentro de 'Estudos/[Assunto ou Concurso]' (ou 'Carreira/Vaga - [Cargo]'):
 - '00_Roadmap_e_Ementa_Geral': Raio-X do edital/assunto, checklist de todos os módulos (- [ ] [[Modulo_01_...]]) e referências oficiais/bancas de questões.
 - 'Modulo_01_[Tema]', 'Modulo_02_[Tema]' ... 'Modulo_N_[Tema]': Todos os módulos da ementa esquematizados, com tabelas comparativas, fluxogramas e alertas de pegadinha.

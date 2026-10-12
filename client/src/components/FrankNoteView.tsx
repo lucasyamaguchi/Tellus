@@ -3667,7 +3667,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           <button
             onClick={() => setIsCreditsOpen(true)}
             className="px-2.5 py-1 rounded-lg bg-panel hover:bg-card border border-card-border text-xs text-slate-300 hover:text-accent-light flex items-center space-x-1.5 transition-all cursor-pointer"
-            title="Créditos e Fundamentos do Notes Module (Frank MD e AI-Memory)"
+            title="Créditos e Fundamentos do TellusMD Vault (Fundamentado no Frank MD & AI-Memory)"
           >
             <Sparkles className="w-3.5 h-3.5 text-accent-light" />
             <span className="hidden sm:inline">Créditos</span>
@@ -6500,10 +6500,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                               <button
                                 onClick={() => setIsCreditsOpen(true)}
                                 className="px-2.5 py-1 rounded-xl bg-panel hover:bg-card border border-card-border hover:border-emerald-500/40 text-slate-300 hover:text-emerald-300 flex items-center space-x-1.5 transition-colors group cursor-pointer"
-                                title="Abrir Créditos & Fundamentos Arquiteturais (Frank MD e AI-Memory do Akita)"
+                                title="Abrir Créditos & Fundamentos Arquiteturais (TellusMD Vault fundamentado no Frank MD & AI-Memory do Akita)"
                               >
                                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
-                                <span>Notes Module (Frank MD & AI-Memory) • Ver Créditos</span>
+                                <span>TellusMD Vault • Ver Créditos</span>
                                 <Sparkles className="w-2.5 h-2.5 text-accent-light" />
                               </button>
                             </div>

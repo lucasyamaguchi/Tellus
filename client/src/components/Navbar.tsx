@@ -201,10 +201,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ? 'bg-brand-cyan/20 border border-brand-cyan/40 text-brand-cyan font-semibold shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Notes Module (baseado no Frank MD & AI-Memory do Akita)"
+            title="TellusMD Vault (Cofre de Conhecimento e Notas)"
           >
             <FileText className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Notes Module</span>
+            <span className="hidden md:inline">TellusMD Vault</span>
           </button>
 
           <button
