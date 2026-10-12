@@ -503,36 +503,36 @@ export function markdownToEditorHtml(markdown: string): string {
 
   // 6. Cabeçalhos H1, H2, H3, H4
   html = html.replace(/^#### (.*$)/gim, '<h4 class="text-sm font-bold text-slate-200 mt-4 mb-2">$1</h4>');
-  html = html.replace(/^### (.*$)/gim, '<h3 class="text-base font-bold text-accent-light mt-5 mb-2">$1</h3>');
+  html = html.replace(/^### (.*$)/gim, '<h3 class="text-base font-bold text-sky-400 mt-5 mb-2">$1</h3>');
   html = html.replace(/^## (.*$)/gim, '<h2 class="text-lg font-bold text-slate-100 mt-6 mb-2.5 pb-1 border-b border-card-border/60">$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-black text-slate-500 mt-6 mb-3 pb-2 border-b-2 border-accent">$1</h1>');
+  html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-black text-slate-100 mt-6 mb-3 pb-2 border-b-2 border-sky-500/60">$1</h1>');
 
   // 7. Citações / Callouts
-  html = html.replace(/^\> (.*$)/gim, '<blockquote class="border-l-4 border-accent pl-3.5 my-3 italic text-slate-400 bg-card/40 py-2 rounded-r-xl">$1</blockquote>');
+  html = html.replace(/^\> (.*$)/gim, '<blockquote class="border-l-4 border-sky-500 pl-3.5 my-3 italic text-slate-300 bg-sky-950/20 py-2 rounded-r-xl">$1</blockquote>');
 
   // 8. Linhas horizontais
   html = html.replace(/^---$/gim, '<hr class="border-0 border-t border-card-border/80 my-6" />');
 
   // 9. Checklists interativos (- [ ] e - [x])
-  html = html.replace(/^- \[ \] (.*$)/gim, '<div class="note-task-row flex items-start space-x-2.5 my-1.5" data-task="true"><input type="checkbox" class="mt-1 w-4 h-4 rounded border-slate-600 accent-emerald-500 cursor-pointer" /><span>$1</span></div>');
-  html = html.replace(/^- \[x\] (.*$)/gim, '<div class="note-task-row flex items-start space-x-2.5 my-1.5 opacity-70" data-task="true"><input type="checkbox" checked class="mt-1 w-4 h-4 rounded border-slate-600 accent-emerald-500 cursor-pointer" /><span class="line-through text-slate-400">$1</span></div>');
+  html = html.replace(/^- \[ \] (.*$)/gim, '<div class="note-task-row flex items-start space-x-2.5 my-1.5" data-task="true"><input type="checkbox" class="mt-1 w-4 h-4 rounded border-slate-600 accent-sky-500 cursor-pointer" /><span>$1</span></div>');
+  html = html.replace(/^- \[x\] (.*$)/gim, '<div class="note-task-row flex items-start space-x-2.5 my-1.5 opacity-70" data-task="true"><input type="checkbox" checked class="mt-1 w-4 h-4 rounded border-slate-600 accent-sky-500 cursor-pointer" /><span class="line-through text-slate-400">$1</span></div>');
 
   // 10. Listas de marcadores e listas numeradas
-  html = html.replace(/^- (.*$)/gim, '<li class="ml-5 list-disc my-1">$1</li>');
-  html = html.replace(/^(\d+)\. (.*$)/gim, '<li class="ml-5 list-decimal my-1">$2</li>');
+  html = html.replace(/^- (.*$)/gim, '<li class="ml-5 list-disc my-1 text-slate-200">$1</li>');
+  html = html.replace(/^(\d+)\. (.*$)/gim, '<li class="ml-5 list-decimal my-1 text-slate-200">$2</li>');
 
   // 11. Destaques (Highlights):
   // a) Desenrolar marcas sem background para evitar o amarelo nativo do browser
   html = html.replace(/<mark(?:\s+style="(?![^"]*background)[^"]*")?>([\s\S]*?)<\/mark>/gi, '$1');
-  // b) Obsidian ==destaque== -> <mark> formatado
-  html = html.replace(/==([^=\r\n]+)==/g, '<mark style="background: rgba(234, 179, 8, 0.25); color: #fef08a; padding: 2px 6px; border-radius: 4px;">$1</mark>');
+  // b) Obsidian ==destaque== -> <mark> formatado em azul translúcido
+  html = html.replace(/==([^=\r\n]+)==/g, '<mark style="background: rgba(56, 189, 248, 0.22); color: #bae6fd; padding: 2px 6px; border-radius: 4px;">$1</mark>');
 
   // 12. Formatação inline: Negrito, Itálico, Tachado, Código
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
   html = html.replace(/~~(.*?)~~/g, '<del>$1</del>');
-  html = html.replace(/`([^`]+)`/g, '<code class="bg-card border border-card-border/60 text-amber-300 px-1.5 py-0.5 rounded-md font-mono text-xs">$1</code>');
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-card border border-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded-md font-mono text-xs">$1</code>');
 
   // 12. Restaurar Tabelas
   tables.forEach((tbl, idx) => {
