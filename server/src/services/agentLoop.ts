@@ -281,8 +281,26 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'tellus_note_save',
+      description: 'Cria ou atualiza uma anotação estruturada no cofre TellusMD Vault.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Título claro da nota' },
+          folder: { type: 'string', description: 'Caminho do Caderno e Subpasta no cofre (ex: Estudos/Segurança Web)' },
+          subject: { type: 'string', description: 'Assunto ou tema principal da nota' },
+          content: { type: 'string', description: 'Conteúdo em Markdown puro compatível com Obsidian/TellusMD' },
+          is_project_specific: { type: 'boolean', description: 'Se true salva no projeto atual, se false salva no cofre global' }
+        },
+        required: ['title', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'frank_note_save',
-      description: '[Alias de compatibilidade legado para note_save] Cria ou atualiza uma anotação no Notes Module.',
+      description: '[Alias legado para tellus_note_save] Cria ou atualiza uma anotação no TellusMD Vault.',
       parameters: {
         type: 'object',
         properties: {
@@ -408,6 +426,7 @@ export class AgentLoop {
           return { status: 'success', artifact: { id: artifact.id, title: artifact.title, path: artifact.relativePath } };
         }
         case 'note_save':
+        case 'tellus_note_save':
         case 'frank_note_save': {
           const cfg = ConfigManager.getConfig();
           const isPt = (cfg.locale || 'pt-BR').startsWith('pt');

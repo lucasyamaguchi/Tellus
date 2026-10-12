@@ -602,10 +602,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       case 'memory_create_handoff':
         return <ArrowRightLeft className="w-4 h-4 text-brand-emerald" />;
       case 'note_save':
+      case 'tellus_note_save':
       case 'frank_note_save':
       case 'note_search':
+      case 'tellus_note_search':
       case 'frank_note_search':
       case 'note_list':
+      case 'tellus_note_list':
       case 'frank_note_list':
         return <FileText className="w-4 h-4 text-amber-400" />;
       default:
@@ -1080,7 +1083,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                               {completedCount}/{totalCount}
                             </span>
                             <div className="hidden sm:flex items-center space-x-1">
-                              {Array.from(new Set(msg.toolCalls.map(tc => tc.name.replace(/^frank_/, '')))).slice(0, 3).map(name => (
+                              {Array.from(new Set(msg.toolCalls.map(tc => tc.name.replace(/^(frank_|tellus_)/, '')))).slice(0, 3).map(name => (
                                 <span key={name} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-slate-300 border border-white/5">
                                   {name}
                                 </span>
@@ -1110,7 +1113,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         <div className="p-2 space-y-2 border-t border-card-border/60 bg-background/40">
                           {msg.toolCalls.map((tc) => {
                             const isItemExpanded = expandedTools[tc.id];
-                            const cleanName = tc.name.replace(/^frank_/, '');
+                            const cleanName = tc.name.replace(/^(frank_|tellus_)/, '');
                             return (
                               <div
                                 key={tc.id}

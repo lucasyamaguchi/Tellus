@@ -55,25 +55,25 @@ export const CreditsModal: React.FC<CreditsModalProps> = ({ isOpen, onClose }) =
 
           {/* Pillars Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Frank MD Card */}
+            {/* TellusMD Card */}
             <div className="p-4 rounded-xl bg-card border border-card-border hover:border-card-border/80 transition-all flex flex-col justify-between space-y-3">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <BookOpen className="w-4 h-4 text-amber-400" />
-                    <span className="font-bold text-slate-100 text-sm">Frank MD</span>
+                    <BookOpen className="w-4 h-4 text-cyan-400" />
+                    <span className="font-bold text-slate-100 text-sm">TellusMD</span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 font-mono">
-                    Conhecimento Local
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono">
+                    Motor de Notas & Vault
                   </span>
                 </div>
-                <p className="text-slate-400 text-xs">
-                  Inspirado na proposta do <strong>Frank</strong>: gestão inteligente de anotações em Markdown puro, estrutura hierárquica por pastas e integração profunda com cofres do Obsidian com suporte a wikilinks <code className="text-amber-300 font-mono">[[Nota]]</code> e navegação por grafos interativos.
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Novo motor de notas oficial do Tellus, fundamentado no projeto <strong>FrankMD</strong> de Akira: gestão inteligente de anotações em Markdown puro, estrutura hierárquica de cadernos e pastas, compatibilidade total com cofres do Obsidian com suporte a wikilinks <code className="text-amber-300 font-mono">[[Nota]]</code>, marca-texto semântico e grafos interativos.
                 </p>
               </div>
               <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
-                <span>Criador: Fábio Akita</span>
-                <span className="font-mono text-accent-light">Notas & Grafos</span>
+                <span>Fundação: Projeto FrankMD (Akira)</span>
+                <span className="font-mono text-cyan-400">TellusMD Engine</span>
               </div>
             </div>
 
