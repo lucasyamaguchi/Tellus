@@ -3,7 +3,7 @@ import path from 'path';
 import pdfParse from 'pdf-parse';
 import { ProviderHub } from '../providers/providerHub.js';
 import { ConfigManager } from '../configManager.js';
-import { FrankNoteEngine } from './frankNoteEngine.js';
+import { TelluNoteEngine } from './telluNoteEngine.js';
 
 const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
 
@@ -150,7 +150,7 @@ export class SmartOrganizer {
     const { files = [], textDump = '', customVaultDir } = params;
     const vaultDir = customVaultDir && fs.existsSync(customVaultDir) ? customVaultDir : this.getVaultDir();
     const existingFolders = this.listExistingFolders(vaultDir);
-    const existingNotes = FrankNoteEngine.listNotes(vaultDir).slice(0, 40).map(n => ({
+    const existingNotes = TelluNoteEngine.listNotes(vaultDir).slice(0, 40).map(n => ({
       title: n.title,
       folder: n.folder
     }));
@@ -269,11 +269,11 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO (sem markdown ou com \`\`\`jso
       // Save each parsed topic note into the Vault
       for (let i = 0; i < parsedTextDecisions.length; i++) {
         const decision = parsedTextDecisions[i];
-        const cleanTitle = FrankNoteEngine.sanitizeName(decision.title || `Ideia_${i + 1}`);
-        const cleanFolder = FrankNoteEngine.sanitizePath(decision.targetFolder || 'Geral/Ideias');
+        const cleanTitle = TelluNoteEngine.sanitizeName(decision.title || `Ideia_${i + 1}`);
+        const cleanFolder = TelluNoteEngine.sanitizePath(decision.targetFolder || 'Geral/Ideias');
 
         try {
-          const savedNote = FrankNoteEngine.saveNote({
+          const savedNote = TelluNoteEngine.saveNote({
             title: cleanTitle,
             folder: cleanFolder,
             subject: cleanFolder,
@@ -407,8 +407,8 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO:
         const pf = preparedFiles[i];
         const decision = parsedFileDecisions.find(d => d.index === (i + 1)) || parsedFileDecisions[i];
 
-        let targetFolder = decision?.targetFolder ? FrankNoteEngine.sanitizePath(decision.targetFolder) : '';
-        let cleanedFilename = decision?.cleanedFilename ? FrankNoteEngine.sanitizeName(decision.cleanedFilename) : '';
+        let targetFolder = decision?.targetFolder ? TelluNoteEngine.sanitizePath(decision.targetFolder) : '';
+        let cleanedFilename = decision?.cleanedFilename ? TelluNoteEngine.sanitizeName(decision.cleanedFilename) : '';
         let reason = decision?.reason || '';
         let summary = decision?.summary || '';
         let tags = decision?.tags || [];
@@ -433,7 +433,7 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO:
         }
 
         if (!cleanedFilename) {
-          cleanedFilename = FrankNoteEngine.sanitizeName(pf.file.name);
+          cleanedFilename = TelluNoteEngine.sanitizeName(pf.file.name);
         }
 
         const originalExt = path.extname(pf.file.name);

@@ -128,7 +128,7 @@ export interface OpenRouterCredits {
   remainingCredits: number;
 }
 
-export interface FrankNote {
+export interface TelluNote {
   id: string;
   title: string;
   filename: string;
@@ -144,8 +144,9 @@ export interface FrankNote {
   relativePath?: string;
 }
 
-export type TellusNote = FrankNote;
-export type TellusMDNote = FrankNote;
+export type TellusNote = TelluNote;
+export type TellusMDNote = TelluNote;
+export type FrankNote = TelluNote;
 
 export interface GraphNode {
   id: string;
@@ -284,7 +285,7 @@ export interface TerminalTask {
 }
 
 export interface NoteSearchResult {
-  note: FrankNote;
+  note: TelluNote;
   score: number;
   matchedSnippets: string[];
 }

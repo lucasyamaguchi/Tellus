@@ -5,7 +5,7 @@ import { ChatArea } from './components/ChatArea';
 import { CodeViewer } from './components/CodeViewer';
 import { MemoryInspector } from './components/MemoryInspector';
 import { TerminalView } from './components/TerminalView';
-import { FrankNoteView } from './components/FrankNoteView';
+import { TelluNoteView } from './components/TelluNoteView';
 import { SkillsAndArtifactsView } from './components/SkillsAndArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -30,7 +30,7 @@ import {
   ChatSession,
   QuotedMessage,
   Attachment,
-  FrankNote,
+  TelluNote,
   AgentPipelineConfig
 } from './types';
 import { api } from './api';
@@ -734,10 +734,10 @@ export const App: React.FC = () => {
         onNewChat={handleNewSession}
       />
 
-      {/* MODE 1: DEDICATED NOTION-STYLE FRANKMD NOTES & VAULT */}
+      {/* MODE 1: DEDICATED NOTION-STYLE TELLUSMD NOTES & VAULT */}
       {mainViewMode === 'notes' && (
         <div className="flex-1 flex overflow-hidden">
-          <FrankNoteView
+          <TelluNoteView
             targetNoteIdOrTitle={targetNoteIdOrTitle}
             onMentionInChat={async (note) => {
               setMainViewMode('agent');
