@@ -10,6 +10,7 @@
 [![Node.js](https://img.shields.io/badge/Backend-Node.js%20%2B%20Express-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TailwindCSS](https://img.shields.io/badge/Styling-TailwindCSS%20v4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![Obsidian Compatible](https://img.shields.io/badge/Vault-Obsidian%20Compatible-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/)
+[![GitSafe Protected](https://img.shields.io/badge/Security-GitSafe%20Verified-emerald?logo=shield&logoColor=white)](https://github.com/lucasyamaguchi/Tellus)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>
@@ -20,7 +21,7 @@
 
 **Tellus** é uma IDE agêntica de nova geração que combina orquestração multi-modelo de inteligência artificial, execução local segura de ferramentas de código e terminal, curadoria de memória de longo prazo e um ecossistema completo de gestão de conhecimento compatível com **Obsidian Markdown (`FrankMD Vault`)**.
 
-Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus transforma requisitos complexos de vagas e editais em planos de estudo e projetos práticos, mantendo um cofre de conhecimento interconectado por grafos.
+Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus transforma requisitos complexos de vagas e editais em planos de estudo e projetos práticos, organizando despejos caóticos de anotações (mensagens de WhatsApp, transcrições de vídeos e anexos multimídia) em um cofre de conhecimento interconectado por grafos e destaques temáticos.
 
 ---
 
@@ -28,25 +29,37 @@ Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus t
 
 <div align="center">
 
-### 💻 1. Workspace Agêntico, Engenharia de Carreira & Links Clicáveis
+### 📥 1. Smart Dropzone Multimodal & Console de Brain Dump
+*Área unificada para despejo de notas do WhatsApp, transcrições de vídeos, ideias soltas e arquivos multimídia (PDF, imagens, planilhas), com decomposição automática pelo AI Archivist e relatório detalhado de organização.*
+<img src="docs/assets/tellus_smart_dropzone.png" alt="Tellus Smart Dropzone & Multimodal Brain Dump" width="95%" />
+
+---
+
+### 🎨 2. Explorador Temático & Destaques Hierárquicos (Tema ➔ Cor ➔ Destaques)
+*Interface limpa de visualização inspirada no Notion/Goodnotes focada em conteúdo: filtro hierárquico por tema e paleta de marca-texto, busca temática universal e hub de ações rápidas para iniciar Chat, Live Voice com o Orbe ou compilar trilhas de estudo.*
+<img src="docs/assets/tellus_thematic_notes_highlights.png" alt="Tellus Thematic Notes & Highlights Explorer" width="95%" />
+
+---
+
+### 💻 3. Workspace Agêntico, Engenharia de Carreira & Links Clicáveis
 *Interface moderna de chat com renderização rica de estratégias de vagas, links interativos para notas no Vault e painel lateral.*
 <img src="docs/assets/tellus_ide_overview.png" alt="Tellus Workspace & Career Engineering" width="95%" />
 
 ---
 
-### 📚 2. FrankMD Vault, Pastas Obsidian & Lixeira com Retenção
-*Cofre compatível com Obsidian, árvore de pastas hierárquica e controle completo de retenção da lixeira.*
+### 📚 4. FrankMD Vault, Pastas Obsidian & Lixeira com Retenção
+*Cofre compatível com Obsidian, árvore de pastas hierárquica, editor split com preview em tempo real e controle completo de retenção da lixeira.*
 <img src="docs/assets/tellus_frankmd_vault.png" alt="Tellus FrankMD Vault & Folders" width="95%" />
 
 ---
 
-### 🧭 3. Orquestração Multi-Agente Visual (Pipeline Mind Map)
+### 🧭 5. Orquestração Multi-Agente Visual (Pipeline Mind Map)
 *Mapeamento visual e especialização de papéis entre modelos (Hub Central, Planner, Coding, Deep Thinking, Fast Tools).*
 <img src="docs/assets/tellus_pipeline_mindmap.png" alt="Tellus Multi-Agent Pipeline Mind Map" width="95%" />
 
 ---
 
-### ⚡ 4. Raciocínio Profundo (Deep Thought) & Barra de Ações Rápidas
+### ⚡ 6. Raciocínio Profundo (Deep Thought) & Streaming Contínuo
 *Streaming em tempo real com processo analítico de raciocínio, citação de mensagens, atualização de contexto e modo eficiência.*
 <img src="docs/assets/tellus_deep_reasoning.png" alt="Tellus Deep Thought & Streaming" width="95%" />
 
@@ -56,68 +69,75 @@ Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus t
 
 ## ✨ Principais Funcionalidades
 
-### 🧠 1. Orquestração Multi-Modelo e Agentes Especializados
-- **Suporte a Provedores Líderes:** Integração nativa com OpenRouter, Google Gemini, Anthropic Claude, OpenAI e DeepSeek.
+### 📥 1. Smart Dropzone Unificado & Brain Dump Multimodal
+- **Entrada Única Multimodal:** Sem necessidade de alternar entre abas isoladas. Cole longos despejos de texto (mensagens encaminhadas do WhatsApp, transcrições brutas do YouTube, anotações de reuniões) e anexe arquivos simultaneamente (PDFs, imagens, planilhas, trechos de código).
+- **Decomposição em Múltiplos Tópicos:** O motor do **AI Archivist** decompõe despejos mistos em notas atômicas independentes, evitando misturar assuntos distintos.
+- **Contextualização com o Cofre:** O agente inspeciona as pastas e notas existentes no Vault para decidir onde cada nota se encaixa melhor.
+- **Relatório de Auditoria Transparente:** Cada processamento gera um relatório detalhado em `Relatórios de Organização/`, explicando *o porquê* e *o como* de cada nota ter sido arquivada e classificada.
+
+### 🎨 2. Gestão de Destaques Hierárquicos (Tema ➔ Cor ➔ Destaques)
+- **Design Focado em Legibilidade:** Visualização clean, sem pontilhados ou linhas distrativas. Foco total em hierarquia de conteúdo, tipografia e escaneabilidade rápida.
+- **Hierarquia 3 Níveis:**
+  1. **Tema / Assunto:** Carrossel dinâmico dos principais temas extraídos das pastas, tags e assuntos do Vault.
+  2. **Cor do Marca-Texto:** Paleta semântica com contadores em tempo real (Amarelo, Verde, Azul, Roxo, Rosa, etc.).
+  3. **Destaques & Citações:** Cartões com o trecho exato, nota de origem, wikilink e pasta.
+- **Thematic Action Hub (Ações Rápidas):**
+  - 💬 **Abrir Chat Temático:** Inicia uma conversa com o Tellus trazendo todos os destaques do tema selecionado para aprofundamento.
+  - 🎙️ **Live Voice com o Orbe:** Dispara uma sessão de voz interativa para debater e fixar o conteúdo.
+  - 📁 **Criar Trilha no Vault:** Compila todos os destaques em um roteiro consolidado (`00_Roteiro_...`) dentro de `Estudos/Trilhas/`.
+  - ❓ **Botão "Perguntar" em Cada Destaque:** Envia diretamente para o chat uma solicitação contextualizada sobre a citação.
+
+### 🧠 3. Orquestração Multi-Modelo e Agentes Especializados
+- **Suporte Nativo a Provedores:** Integração com OpenRouter, Google Gemini, Anthropic Claude, OpenAI e DeepSeek.
 - **Divisão de Papéis em Pipeline:**
-  - `Planner / Architect:` Decomposição de tarefas de alto nível.
-  - `Deep Reasoning:` Rastreamento profundo de erros com modelos como *DeepSeek R1*.
-  - `Fast Tools & Coder:` Execução ágil de ferramentas e geração de código com *Gemini 2.0 Flash / DeepSeek V4 Flash*.
-  - `Memory Curator:` Gestão da memória ativa e persistência de decisões do projeto.
+  - `Planner / Architect:` Decomposição de tarefas complexas e roteiros de estudo.
+  - `Deep Reasoning:` Raciocínio analítico avançado com *DeepSeek R1*.
+  - `Fast Tools & Coder:` Ferramentas e automação ágil com *Gemini 2.5 Flash / DeepSeek V4 Flash*.
+  - `AI Archivist:` Classificação, decomposição de texto e arquivamento de documentos no Vault.
 
-### 🗂️ 2. FrankMD Vault (Cofre de Notas Obsidian)
-- **Visualização Formatada e Split Editor:** Renderização rica de Markdown, tabelas, blocos de código com destaque de sintaxe e modo de edição rápida.
-- **Hierarquia de Pastas e Subpastas:** Crie, renomeie, arraste pastas para dentro de outras pastas ou mova notas com suporte a drag-and-drop.
-- **Visualização em Grafo Interativo (Tela Cheia):** Grafo Obsidian com física em tempo real para explorar conexões entre notas `[[Wikilinks]]`, `#tags` e pastas.
-- **Links Clicáveis no Chat:** Qualquer nota ou arquivo gerado pelo agente (ex: `` `01-analise-vaga.md` ``) vira um chip interativo que abre diretamente o documento no cofre.
-
-### 🗑️ 3. Lixeira Inteligente & Políticas de Retenção
-- **Proteção contra Exclusão Acidental:** Pastas e notas deletadas são movidas para o diretório de segurança `.backups`.
-- **Períodos de Retenção Configuráveis:**
-  - `30 dias`
-  - `90 dias (Padrão)`
-  - `120 dias`
-  - `1 ano`
-  - `Sempre (Nunca excluir definitivamente)`
-- **Restauração Rápida:** Recupere notas para sua pasta de origem com um clique.
-- **Agente com Consciência de Disco:** O agente valida se as notas existem fisicamente no cofre e recria planos atualizados caso tenham sido excluídas.
-
-### ⚡ 4. Processamento Otimizado de Arquivos & PDFs
-- **Extração Sem Erros de Buffer:** Tratamento seguro de PDFs volumosos (como provas de concursos e editais) com persistência em `.agentic/attachments/` e controle de tamanho para evitar interrupções de stream.
+### 🗂️ 4. FrankMD Vault (Cofre de Conhecimento Obsidian)
+- **Compatibilidade 100% Obsidian:** Arquivos `.md` padrão com suporte a `[[Wikilinks]]`, tags `#tag` e metadados frontmatter.
+- **Visualização em Grafo Interativo:** Grafo de conexões com simulação física (repulsão, gravidade, colisão e conexões entre conceitos).
+- **Lixeira com Retenção Configurável:** Proteção contra exclusão acidental via diretório `.backups` com retenção de 30, 90, 120 dias, 1 ano ou permanente.
 
 ---
 
-## 🧪 Exemplos de Uso e Testes de Prompts
+## 💰 Avaliação de Custos & Viabilidade via OpenRouter
 
-### 🎯 Exemplo 1: Preparação Completa para Vaga de Emprego
-**Prompt de entrada:**
-```text
-quero me candidatar a essa vaga:
-Experiência sólida em Engenharia de Dados e soluções analíticas em escala.
-Conhecimento avançado em Snowflake, modelagem de dados, otimização de queries e governança.
-Experiência com Databricks, PySpark e arquiteturas modernas de Lakehouse.
-Proficiência em SQL avançado, Python e desenvolvimento de pipelines com dbt.
-```
+O Tellus utiliza nativamente o hub de provedores (`ProviderHub`) conectado à API do **OpenRouter** através da variável de ambiente `OPENROUTER_API_KEY`:
 
-**Resultado gerado no Vault:**
-1. Criação automática da pasta `carreira/vaga-engenheiro-dados-senior/`.
-2. `01-analise-vaga.md`: Mapeamento de gaps e requisitos prioritários.
-3. `02-roteiro-estudo.md`: Cronograma por semanas e módulos de nivelamento.
-4. `03-projetos-praticos.md`: Especificações de 2 projetos de portfólio (ex: Pipeline dbt + Snowflake).
-5. `04-perguntas-tecnicas-entrevista.md`: Simulação de sabatina técnica com respostas ideais.
-6. `05-acompanhamento-candidatura.md`: Checklist de aplicação e networking.
+| Modelo | Entrada (1M tokens) | Saída (1M tokens) | Custo Médio por Lote (10k chars / ~3k tokens) |
+| :--- | :--- | :--- | :--- |
+| **Google Gemini 2.5 Flash** | ~\$0.075 | ~\$0.30 | **\$0.00045** (< R\$ 0,01) |
+| **DeepSeek Chat (V3/V4)** | ~\$0.14 | ~\$0.28 | **\$0.00060** (< R\$ 0,01) |
+| **DeepSeek R1 (Reasoning)** | ~\$0.55 | ~\$2.19 | **\$0.00350** (~ R\$ 0,02) |
+
+> [!TIP]
+> **Extrema Eficiência:** Um lote com 15 mensagens longas do WhatsApp e 3 arquivos anexados consome menos de R$ 0,01 para ser totalmente decomposto, categorizado e arquivado no Vault. Nenhuma conta adicional ou infraestrutura externa proprietária é necessária.
 
 ---
 
-### 📖 Exemplo 2: Plano de Estudos a partir de PDFs de Prova e Gabarito
-**Prompt de entrada:**
-```text
-Analisar os 2 PDFs em anexo (Caderno de Provas SPREGULA e Gabarito Oficial).
-Crie um plano de estudos com cronograma, análise das questões com maior peso,
-conceitos teóricos exigidos e exercícios práticos para cada matéria.
+## 🛡️ Política de Versionamento & Protocolo GitSafe
+
+O projeto segue rigorosamente o protocolo **GitSafe** antes de qualquer commit ou submissão para a branch principal (`main`):
+
+```bash
+# 1. Auditoria de status e arquivos não rastreados
+git status
+
+# 2. Verificação estrita de compilação sem erros
+npm run build   # Frontend (client)
+npm run build   # Backend (server)
+
+# 3. Blindagem de segredos e credenciais (.gitignore)
+# Zero chaves de API, arquivos .env ou dados pessoais rastreados
 ```
 
-**Resultado gerado no Vault:**
-- Criação da pasta `estudos/concurso-spregula/` contendo notas temáticas para Regulação, Direito Administrativo e Legislação Específica, com links cruzados e bibliografia recomendada.
+### Regras de Ouro do GitSafe:
+1. **Blindagem de Segredos:** Arquivos `.env`, `config.json`, chaves e credenciais jamais são commitados.
+2. **Sanitização de Dados:** Bancos locais (`*.db`, `*.sqlite`), uploads temporários e pastas de cache (`.agentic/attachments/`, `scratch/`) são estritamente ignorados.
+3. **Compilação Limpa:** Todo merge exige aprovação de `tsc --noEmit` e `vite build` sem warnings impeditivos.
+4. **Imagens Oficiais:** O repositório armazena apenas mockups e diagramas gerados do sistema, preservando dados pessoais de conversas.
 
 ---
 
@@ -128,33 +148,36 @@ Tellus/
 ├── client/                     # Frontend React 19 + TypeScript + Vite + TailwindCSS
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── ChatArea.tsx           # Área de chat com renderizador de Markdown & Chips clicáveis
-│   │   │   ├── FrankNoteView.tsx      # Cofre Obsidian, Árvore de Pastas, Grafo & Lixeira
-│   │   │   ├── SettingsModal.tsx      # Configurações de API Keys, Tema e Retenção
-│   │   │   ├── PipelineMindMapModal.tsx # Mindmap de orquestração multi-agente
-│   │   │   └── Sidebar.tsx            # Navegação de projetos, histórico e rotinas
-│   │   ├── api.ts                     # Cliente REST & WebSocket para comunicação com o backend
-│   │   └── types.ts                   # Definições de tipos TypeScript
+│   │   │   ├── ChatArea.tsx              # Chat com renderizador Markdown, Voice Orbe & Chips
+│   │   │   ├── FrankNoteView.tsx         # Cofre Obsidian, Destaques Temáticos & Grafo
+│   │   │   ├── SmartDropzoneModal.tsx    # Dropzone Unificado & Brain Dump Multimodal
+│   │   │   ├── SettingsModal.tsx         # Configurações de API Keys, Modelos e Retenção
+│   │   │   ├── PipelineMindMapModal.tsx  # Mindmap de orquestração multi-agente
+│   │   │   └── Sidebar.tsx               # Navegação de projetos, histórico e rotinas
+│   │   ├── api.ts                        # Cliente REST & WebSocket para comunicação com o backend
+│   │   └── types.ts                      # Definições de tipos TypeScript
 │   └── vite.config.ts
 │
 ├── server/                     # Backend Node.js + Express + TypeScript
 │   ├── src/
 │   │   ├── services/
-│   │   │   ├── agentLoop.ts           # Loop autônomo do agente, invocação de tools e streaming
-│   │   │   ├── configManager.ts       # Gestão persistente de configurações locais
+│   │   │   ├── agentLoop.ts              # Loop autônomo do agente, invocação de tools e streaming
+│   │   │   ├── configManager.ts          # Gestão persistente de configurações locais
 │   │   │   ├── notes/
-│   │   │   │   └── frankNoteEngine.ts # Motor do Vault (CRUD, Grafo, Pastas, Backups & Lixeira)
+│   │   │   │   ├── frankNoteEngine.ts    # Motor do Vault (CRUD, Grafo, Pastas & Lixeira)
+│   │   │   │   └── smartOrganizer.ts     # AI Archivist (Decomposição, Classificação & Relatórios)
 │   │   │   ├── providers/
-│   │   │   │   └── openrouter.ts      # Streaming SSE resiliente para OpenRouter e LLMs
+│   │   │   │   ├── providerHub.ts        # Hub unificado OpenRouter / Gemini / DeepSeek
+│   │   │   │   └── openrouter.ts         # Streaming SSE resiliente para OpenRouter e LLMs
 │   │   │   └── tools/
-│   │   │       ├── fileParser.ts      # Extração de PDF, CSV e arquivos com buffer safe
-│   │   │       ├── fileManager.ts     # Manipulação de arquivos do projeto
-│   │   │       └── terminalRunner.ts  # Execução local segura de comandos e scripts
-│   │   └── index.ts                   # Rotas da API REST e inicialização do servidor
+│   │   │       ├── fileParser.ts         # Extração de PDF, CSV e arquivos multimídia
+│   │   │       ├── fileManager.ts        # Manipulação de arquivos do projeto
+│   │   │       └── terminalRunner.ts     # Execução local segura de comandos e scripts
+│   │   └── index.ts                      # Rotas da API REST e endpoints do Vault
 │   └── tsconfig.json
 │
-└── docs/                       # Recursos visuais e documentação
-    └── assets/                 # Imagens e capturas do sistema
+└── docs/                       # Recursos visuais e documentação oficial
+    └── assets/                 # Mockups e imagens de alta resolução
 ```
 
 ---
@@ -173,11 +196,11 @@ cd Tellus
 
 ### 2. Instalar Dependências
 ```bash
-# Instalar dependências do backend
+# Dependências do backend
 cd server
 npm install
 
-# Instalar dependências do frontend
+# Dependências do frontend
 cd ../client
 npm install
 ```
@@ -193,21 +216,22 @@ cd client
 npm run dev
 ```
 
-Abra seu navegador em `http://localhost:5173` para acessar o Tellus.
+Acesse o Tellus em seu navegador: `http://localhost:5173`.
 
 ---
 
 ## 🔒 Segurança e Privacidade
 
-- **Armazenamento 100% Local:** Suas anotações, arquivos do cofre, histórico de conversas e chaves de API permanecem na sua máquina.
-- **Comunicação Direta:** As requisições para os provedores de inteligência artificial trafegam diretamente do seu cliente para as APIs oficiais via HTTPS criptografado.
+- **Armazenamento 100% Local:** Suas notas do Vault, configurações e histórico de projetos permanecem na sua máquina.
+- **Comunicação Direta via HTTPS:** As chamadas de inferência trafegam diretamente para os endpoints seguros das APIs oficiais.
+- **Zero Retenção Indesejada:** Suas anotações privadas nunca são utilizadas para treinamento público.
 
 ---
 
 ## 📄 Licença
 
-Este projeto é distribuído sob a licença **MIT**. Consulte o arquivo [LICENSE](LICENSE) para obter mais informações.
+Distribuído sob a licença **MIT**. Consulte o arquivo [LICENSE](LICENSE) para obter detalhes.
 
 <div align="center">
-  <sub>Desenvolvido com foco em autonomia, clareza e alto desempenho agêntico.</sub>
+  <sub>Desenvolvido com foco em autonomia, clareza e alta performance no Tellus IDE.</sub>
 </div>

@@ -177,13 +177,14 @@ export interface OrganizedFileResult {
   savedName: string;
   targetFolder: string;
   fullRelativePath: string;
-  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'other';
+  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'note' | 'idea' | 'whatsapp' | 'transcript' | 'other';
   size: number;
   reason: string;
   summary: string;
   tags: string[];
   success: boolean;
   error?: string;
+  noteTitle?: string;
 }
 
 export interface DropzoneOrganizeReport {
