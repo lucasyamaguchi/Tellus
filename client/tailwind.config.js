@@ -15,10 +15,10 @@ export default {
         'sidebar-border': 'var(--color-sidebar-border)',
         panel: 'var(--color-panel)',
         accent: {
-          DEFAULT: '#d97706',
-          hover: '#b45309',
-          light: '#f59e0b',
-          glow: 'rgba(217, 119, 6, 0.15)',
+          DEFAULT: '#2563eb', // Royal Blue
+          hover: '#1d4ed8',   // Deep Blue
+          light: '#38bdf8',   // Sky Blue
+          glow: 'rgba(37, 99, 235, 0.20)',
         },
         brand: {
           cyan: '#2dd4bf',

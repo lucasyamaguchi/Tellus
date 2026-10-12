@@ -676,7 +676,14 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [floatingActionPos, setFloatingActionPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Window Resizing & Layout State (Obsidian / Notion style)
-  const [sidebarWidth, setSidebarWidth] = useState<number>(330);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('tellus_sidebar_width');
+      return saved ? Math.min(Math.max(parseInt(saved, 10), 240), 650) : 380;
+    } catch {
+      return 380;
+    }
+  });
   const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(true);
   const [isNoteMaximized, setIsNoteMaximized] = useState<boolean>(false);
@@ -713,8 +720,11 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   // Mouse Drag Handlers for Resizing Sidebar
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isDraggingSidebar) {
-      const newWidth = Math.min(Math.max(e.clientX, 220), 650);
+      const newWidth = Math.min(Math.max(e.clientX, 240), 650);
       setSidebarWidth(newWidth);
+      try {
+        localStorage.setItem('tellus_sidebar_width', String(newWidth));
+      } catch {}
     }
   }, [isDraggingSidebar]);
 
@@ -2061,11 +2071,14 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
 
   const toggleFolderCollapse = (folderName: string) => {
     setCollapsedFolders(prev => {
-      const willBeExpanded = !!prev[folderName]; // if currently collapsed, will expand
+      const isSub = !folderName.startsWith('nb:');
+      // Subpastas iniciam fechadas (true), Cadernos iniciam abertos (false)
+      const currentlyCollapsed = prev[folderName] !== undefined ? prev[folderName] : (isSub ? true : false);
+      const willBeExpanded = currentlyCollapsed; // se estava true (fechada), passará a expandida
+
       if (isSingleNotebookMode && folderName.startsWith('nb:') && willBeExpanded) {
         // Modo foco em um caderno por vez: colapsa todos os outros cadernos
         const next: Record<string, boolean> = {};
-        // fecha todos
         notebooksList.forEach(nb => {
           next[`nb:${nb.id}`] = true;
         });
@@ -2074,7 +2087,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
       }
       return {
         ...prev,
-        [folderName]: !prev[folderName]
+        [folderName]: !currentlyCollapsed
       };
     });
   };
@@ -2570,10 +2583,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
       return {
         label: notebookName,
         icon: GraduationCap,
-        color: 'text-amber-400',
-        bg: 'bg-amber-950/25 border-amber-500/30',
-        badgeBg: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',
-        accentBorder: 'border-amber-500',
+        color: 'text-sky-400',
+        bg: 'bg-sky-950/25 border-sky-500/30',
+        badgeBg: 'bg-sky-500/20 text-sky-300 border border-sky-500/30',
+        accentBorder: 'border-sky-500',
         category: 'Estudos'
       };
     }
@@ -2592,10 +2605,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
       return {
         label: notebookName,
         icon: Sparkles,
-        color: 'text-rose-400',
-        bg: 'bg-rose-950/25 border-rose-500/30',
-        badgeBg: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
-        accentBorder: 'border-rose-500',
+        color: 'text-indigo-400',
+        bg: 'bg-indigo-950/25 border-indigo-500/30',
+        badgeBg: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',
+        accentBorder: 'border-indigo-500',
         category: 'Handoffs & Sessões'
       };
     }
@@ -2603,20 +2616,20 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
       return {
         label: notebookName,
         icon: BookOpen,
-        color: 'text-emerald-400',
-        bg: 'bg-emerald-950/25 border-emerald-500/30',
-        badgeBg: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-        accentBorder: 'border-emerald-500',
+        color: 'text-teal-400',
+        bg: 'bg-teal-950/25 border-teal-500/30',
+        badgeBg: 'bg-teal-500/20 text-teal-300 border border-teal-500/30',
+        accentBorder: 'border-teal-500',
         category: 'Anotações'
       };
     }
     return {
       label: notebookName,
       icon: Book,
-      color: 'text-purple-400',
-      bg: 'bg-purple-950/25 border-purple-500/30',
-      badgeBg: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
-      accentBorder: 'border-purple-500',
+      color: 'text-blue-300',
+      bg: 'bg-slate-900/40 border-blue-500/20',
+      badgeBg: 'bg-blue-500/15 text-blue-200 border border-blue-500/30',
+      accentBorder: 'border-blue-500',
       category: 'Geral'
     };
   };
@@ -3005,9 +3018,9 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
               setShowFloatingAction(false);
               handleToggleFormatPainter();
             }}
-            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-panel text-slate-300 hover:text-amber-300 flex items-center space-x-2 transition-all cursor-pointer"
+            className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-panel text-slate-300 hover:text-sky-300 flex items-center space-x-2 transition-all cursor-pointer"
           >
-            <Paintbrush className="w-4 h-4 text-amber-400" />
+            <Paintbrush className="w-4 h-4 text-sky-400" />
             <span>Pincel de Formatação</span>
           </button>
 
@@ -3037,8 +3050,8 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
-                  <ArrowUpDown className="w-4 h-4 text-amber-400" />
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center">
+                  <ArrowUpDown className="w-4 h-4 text-sky-400" />
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-slate-100">Organizar Tópicos & Seções da Nota</h3>
@@ -3209,8 +3222,8 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           >
             <div className="p-4 border-b border-card-border flex items-center justify-between bg-sidebar">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
-                  <FolderInput className="w-4 h-4 text-amber-400" />
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center">
+                  <FolderInput className="w-4 h-4 text-sky-400" />
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-slate-100">Mover Anotação para Pasta</h3>
@@ -3236,7 +3249,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                     }`}
                   >
                     <div className="flex items-center space-x-2">
-                      <Folder className="w-3.5 h-3.5 text-amber-400" />
+                      <Folder className="w-3.5 h-3.5 text-sky-400" />
                       <span>{f}</span>
                     </div>
                     {getNoteFolder(moveModalNote) === f && (
@@ -3707,15 +3720,15 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
               }}
               className={`px-3 py-1 rounded-md transition-all flex items-center space-x-1.5 ${
                 viewMode === 'editor' && sidebarTab === 'highlights'
-                  ? 'bg-amber-500/25 text-amber-300 font-semibold shadow-sm border border-amber-500/40'
-                  : 'text-slate-400 hover:text-amber-300'
+                  ? 'bg-sky-500/20 text-sky-300 font-semibold shadow-sm border border-sky-500/40'
+                  : 'text-slate-400 hover:text-sky-300'
               }`}
               title="Abrir painel de trechos destacados e citações"
             >
-              <Highlighter className="w-3.5 h-3.5 text-amber-400" />
+              <Highlighter className="w-3.5 h-3.5 text-sky-400" />
               <span>Destaques</span>
               {allVaultHighlights.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-300 font-mono">
                   {allVaultHighlights.length}
                 </span>
               )}
@@ -3802,7 +3815,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
         <div className="flex-1 flex overflow-hidden relative">
           {/* MINIMIZED ICON-RAIL SIDEBAR (Modo Limpo Focado no Conteúdo) */}
           {!isNoteMaximized && isSidebarCollapsed && (
-            <div className="w-14 border-r border-card-border/70 bg-[#0d1017] flex flex-col items-center py-3 gap-2 shrink-0 z-20 select-none shadow-sm transition-all">
+            <div className="w-14 border-r border-card-border/70 bg-[#0d1017] flex flex-col items-center py-3 gap-2 shrink-0 z-40 select-none shadow-sm transition-all">
               {/* Expand Trigger Button */}
               <div className="relative group">
                 <button
@@ -3857,21 +3870,21 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                   }}
                   className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all relative cursor-pointer ${
                     sidebarTab === 'highlights'
-                      ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                      : 'text-slate-400 hover:text-amber-300 hover:bg-card-border/40'
+                      ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                      : 'text-slate-400 hover:text-sky-300 hover:bg-card-border/40'
                   }`}
                   aria-label="Destaques & Citações"
                 >
                   <Highlighter className="w-5 h-5 transition-transform group-hover:scale-110" />
                   {allVaultHighlights.length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-slate-950 font-bold text-[9px] flex items-center justify-center ring-2 ring-sidebar">
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-sky-500 text-slate-950 font-bold text-[9px] flex items-center justify-center ring-2 ring-sidebar">
                       {allVaultHighlights.length > 99 ? '99+' : allVaultHighlights.length}
                     </span>
                   )}
                 </button>
                 <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-xl bg-card border border-card-border shadow-2xl text-xs whitespace-nowrap text-slate-200 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-2">
-                  <span className="font-semibold text-amber-300">Destaques & Citações</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                  <span className="font-semibold text-sky-300">Destaques & Citações</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-mono">
                     {allVaultHighlights.length} trechos
                   </span>
                 </div>
@@ -3969,7 +3982,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           {/* Notes & Folders Explorer Sidebar */}
           <div 
             style={{ width: isSidebarCollapsed || isNoteMaximized ? '0px' : `${sidebarWidth}px` }}
-            className={`border-r border-card-border bg-sidebar flex flex-col shrink-0 overflow-hidden relative select-none transition-[width] duration-75 ${
+            className={`border-r border-card-border bg-sidebar flex flex-col shrink-0 overflow-hidden relative select-none z-30 transition-[width] duration-75 ${
               isSidebarCollapsed || isNoteMaximized ? 'w-0 border-r-0 invisible' : ''
             }`}
           >
@@ -3986,9 +3999,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                     ? 'bg-card text-accent-light shadow-sm border border-card-border'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title={`Cadernos & Pastas (${allFolderNames.length})`}
               >
-                <Folder className="w-3.5 h-3.5" />
-                <span>Pastas</span>
+                <Folder className="w-3.5 h-3.5 shrink-0" />
+                <span className={sidebarWidth < 310 ? 'hidden' : 'inline'}>Pastas</span>
                 <span className="text-[10px] opacity-70">({allFolderNames.length})</span>
               </button>
               <button
@@ -3996,14 +4010,15 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                 onClick={() => setSidebarTab('highlights')}
                 className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all ${
                   sidebarTab === 'highlights'
-                    ? 'bg-card text-amber-300 shadow-sm border border-card-border'
+                    ? 'bg-card text-sky-300 shadow-sm border border-card-border'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title={`Destaques (${allVaultHighlights.length})`}
               >
-                <Highlighter className="w-3.5 h-3.5" />
-                <span>Destaques</span>
+                <Highlighter className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                <span className={sidebarWidth < 310 ? 'hidden' : 'inline'}>Destaques</span>
                 {allVaultHighlights.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-300 font-mono">
                     {allVaultHighlights.length}
                   </span>
                 )}
@@ -4019,9 +4034,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                     ? 'bg-card text-rose-400 shadow-sm border border-card-border'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title={`Lixeira (${deletedNotes.length})`}
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Lixeira</span>
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span className={sidebarWidth < 310 ? 'hidden' : 'inline'}>Lixeira</span>
                 {deletedNotes.length > 0 && (
                   <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-mono">
                     {deletedNotes.length}
@@ -4061,9 +4077,9 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
               {sidebarTab === 'folders' ? (
                 <>
                   {/* Folders & Notebooks Header + View Switcher */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-1.5">
                     {/* View Switcher: Árvore (Notion) vs Estante (Goodnotes) */}
-                    <div className="flex items-center p-0.5 bg-card/90 rounded-lg border border-card-border text-[10px]">
+                    <div className="flex items-center p-0.5 bg-card/90 rounded-lg border border-card-border text-[10px] shrink-0">
                       <button
                         type="button"
                         onClick={() => setViewModeAndSave('tree')}
@@ -4074,25 +4090,25 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                         }`}
                         title="Modo Árvore Hierárquica (Notion)"
                       >
-                        <ListTree className="w-3 h-3" />
-                        <span>Árvore</span>
+                        <ListTree className="w-3 h-3 shrink-0" />
+                        <span className={sidebarWidth < 340 ? 'hidden' : 'inline'}>Árvore</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setViewModeAndSave('shelf')}
                         className={`px-2 py-0.5 rounded-md font-semibold transition-all flex items-center gap-1 cursor-pointer ${
                           notebookViewMode === 'shelf'
-                            ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40 shadow-xs'
+                            ? 'bg-sky-500/25 text-sky-300 border border-sky-500/40 shadow-xs'
                             : 'text-slate-400 hover:text-slate-200'
                         }`}
                         title="Modo Estante de Cadernos (Goodnotes)"
                       >
-                        <BookMarked className="w-3 h-3" />
-                        <span>Estante</span>
+                        <BookMarked className="w-3 h-3 shrink-0" />
+                        <span className={sidebarWidth < 340 ? 'hidden' : 'inline'}>Estante</span>
                       </button>
                     </div>
 
-                    <div className="flex items-center space-x-1.5">
+                    <div className="flex items-center space-x-1.5 shrink-0">
                       <button
                         onClick={() => {
                           const next = !isSingleNotebookMode;
@@ -4108,24 +4124,24 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                         }`}
                         title={isSingleNotebookMode ? "Modo 1 Caderno por vez ATIVO (expandir um caderno fecha os demais)" : "Ativar Modo 1 Caderno por vez"}
                       >
-                        <Layers className="w-3 h-3" />
-                        <span className="hidden sm:inline">1 por vez</span>
+                        <Layers className="w-3 h-3 shrink-0" />
+                        <span className={sidebarWidth < 370 ? 'hidden' : 'inline'}>1 por vez</span>
                       </button>
                       <button
                         onClick={() => setIsCreatingNotebook(true)}
-                        className="text-[11px] text-cyan-400 hover:text-cyan-200 flex items-center space-x-1 font-semibold transition-colors"
+                        className="text-[11px] text-sky-400 hover:text-sky-200 flex items-center space-x-1 font-semibold transition-colors"
                         title="Criar novo caderno temático no cofre"
                       >
-                        <BookOpen className="w-3 h-3" />
-                        <span>+ Caderno</span>
+                        <BookOpen className="w-3 h-3 shrink-0" />
+                        <span className={sidebarWidth < 330 ? 'hidden' : 'inline'}>+ Caderno</span>
                       </button>
                       <button
                         onClick={() => setIsCreatingFolder(true)}
                         className="text-[11px] text-accent-light hover:text-white flex items-center space-x-1 font-semibold transition-colors"
                         title="Criar nova pasta ou subpasta no cofre"
                       >
-                        <FolderPlus className="w-3.5 h-3.5" />
-                        <span>+ Pasta</span>
+                        <FolderPlus className="w-3.5 h-3.5 shrink-0" />
+                        <span className={sidebarWidth < 330 ? 'hidden' : 'inline'}>+ Pasta</span>
                       </button>
                     </div>
                   </div>
@@ -4708,7 +4724,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                             <div className="pl-3 pr-0.5 space-y-2 pt-1 border-l-2 border-card-border/50 ml-3">
                               {/* Subfolders */}
                               {nb.subfolders.map((sub) => {
-                                const isSubCollapsed = collapsedFolders[sub.path];
+                                const isSubCollapsed = collapsedFolders[sub.path] !== undefined ? collapsedFolders[sub.path] : true;
                                 const isDragTargetSub = dragOverFolder === sub.path;
 
                                 return (
@@ -4767,7 +4783,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                         ) : (
                                           <ChevronDown className="w-3 h-3 text-accent-light shrink-0" />
                                         )}
-                                        <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                        <Folder className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                                         <span className="font-semibold text-xs text-slate-200 truncate" title={sub.path}>
                                           {sub.name}
                                         </span>
@@ -4843,21 +4859,21 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                                   isBeingDragged
                                                     ? 'opacity-40 border-dashed border-accent scale-95'
                                                     : isActive
-                                                    ? 'bg-accent/20 border-accent text-white shadow-sm'
+                                                    ? 'bg-sky-500/20 border-sky-500 text-white shadow-sm ring-1 ring-sky-500/30'
                                                     : isBibliography
-                                                    ? 'bg-amber-950/20 border-amber-500/30 text-amber-200 hover:bg-amber-950/30'
+                                                    ? 'bg-sky-950/20 border-sky-500/30 text-sky-200 hover:bg-sky-950/30'
                                                     : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card hover:text-white'
                                                 }`}
                                               >
-                                                <div className="flex items-center justify-between">
-                                                  <span className="font-semibold text-xs truncate max-w-[150px] text-slate-100 flex items-center space-x-1.5">
+                                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                                  <span className="min-w-0 flex-1 flex items-center space-x-1.5 text-slate-100">
                                                     <GripVertical className="w-3 h-3 text-slate-500 opacity-40 group-hover/card:opacity-100 shrink-0" />
                                                     {isBibliography ? (
-                                                      <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
+                                                      <BookOpen className="w-3 h-3 text-sky-400 shrink-0" />
                                                     ) : (
                                                       <FileText className="w-3 h-3 text-slate-400 shrink-0" />
                                                     )}
-                                                    <span className="truncate">{n.title}</span>
+                                                    <span className="truncate font-semibold text-xs" title={n.title}>{n.title}</span>
                                                   </span>
 
                                                   <div className="flex items-center space-x-1 opacity-0 group-hover/card:opacity-100 transition-opacity">
@@ -4932,21 +4948,21 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                       isBeingDragged
                                         ? 'opacity-40 border-dashed border-accent scale-95'
                                         : isActive
-                                        ? 'bg-accent/20 border-accent text-white shadow-sm'
+                                        ? 'bg-sky-500/20 border-sky-500 text-white shadow-sm ring-1 ring-sky-500/30'
                                         : isBibliography
-                                        ? 'bg-amber-950/20 border-amber-500/30 text-amber-200 hover:bg-amber-950/30'
+                                        ? 'bg-sky-950/20 border-sky-500/30 text-sky-200 hover:bg-sky-950/30'
                                         : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card hover:text-white'
                                     }`}
                                   >
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-semibold text-xs truncate max-w-[150px] text-slate-100 flex items-center space-x-1.5">
+                                    <div className="flex items-center justify-between gap-2 min-w-0">
+                                      <span className="min-w-0 flex-1 flex items-center space-x-1.5 text-slate-100">
                                         <GripVertical className="w-3 h-3 text-slate-500 opacity-40 group-hover/card:opacity-100 shrink-0" />
                                         {isBibliography ? (
-                                          <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
+                                          <BookOpen className="w-3 h-3 text-sky-400 shrink-0" />
                                         ) : (
                                           <FileText className="w-3 h-3 text-slate-400 shrink-0" />
                                         )}
-                                        <span className="truncate">{n.title}</span>
+                                        <span className="truncate font-semibold text-xs" title={n.title}>{n.title}</span>
                                       </span>
 
                                       <div className="flex items-center space-x-1 opacity-0 group-hover/card:opacity-100 transition-opacity">
@@ -5651,7 +5667,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           {!isNoteMaximized && !isSidebarCollapsed && (
             <div
               onMouseDown={() => setIsDraggingSidebar(true)}
-              className={`w-1.5 cursor-col-resize hover:bg-accent transition-colors z-20 flex items-center justify-center shrink-0 ${
+              className={`w-1.5 cursor-col-resize hover:bg-accent transition-colors z-30 flex items-center justify-center shrink-0 ${
                 isDraggingSidebar ? 'bg-accent shadow-sm' : 'bg-transparent hover:bg-accent/40'
               }`}
               title="Arraste para redimensionar barra lateral de notas"
@@ -5692,7 +5708,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                   
                   {/* Folder Breadcrumb & Switcher */}
                   <div className="flex items-center space-x-1.5 bg-panel border border-card-border px-2.5 py-1 rounded-xl shrink-0">
-                    <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <Folder className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                     <select
                       value={editFolder}
                       onChange={(e) => {
@@ -5700,7 +5716,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                         setEditFolder(newF);
                         handleMoveNote(activeNote.id, newF);
                       }}
-                      className="bg-transparent text-xs text-amber-300 focus:outline-none font-mono cursor-pointer max-w-[180px] truncate"
+                      className="bg-transparent text-xs text-sky-300 focus:outline-none font-mono cursor-pointer max-w-[180px] truncate"
                       title="Mover anotação para outra pasta"
                     >
                       {allFolderNames.map(f => (
@@ -5917,7 +5933,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                   <div className={`space-y-6 ${isFullWidth ? 'w-full max-w-none' : 'max-w-4xl mx-auto'}`}>
                     {/* Cover Banner & Page Header Flexível (Sem sobreposição) */}
                     <div className="relative mb-4">
-                      <div className="min-h-[90px] py-4 px-5 w-full rounded-3xl bg-gradient-to-r from-violet-950/60 via-accent/25 to-cyan-950/60 border border-card-border/60 shadow-lg relative overflow-visible flex items-center justify-between flex-wrap gap-3">
+                      <div className="min-h-[90px] py-4 px-5 w-full rounded-3xl bg-gradient-to-r from-blue-950/60 via-slate-900/60 to-cyan-950/50 border border-blue-500/30 shadow-lg relative overflow-visible flex items-center justify-between flex-wrap gap-3">
                         <div className="absolute top-0 right-0 w-48 h-48 bg-accent/20 rounded-full blur-3xl pointer-events-none" />
                         <div className="relative z-10 flex items-center justify-between w-full flex-wrap gap-3">
                           <div className="flex items-center space-x-3.5 min-w-0 flex-1">
@@ -5958,7 +5974,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                 className="text-xl sm:text-2xl font-black text-slate-100 tracking-tight bg-transparent focus:outline-none focus:border-b border-accent w-full"
                               />
                               <p className="text-xs text-slate-400 font-mono flex items-center space-x-1.5 mt-0.5 truncate">
-                                <Folder className="w-3 h-3 text-amber-400 shrink-0" />
+                                <Folder className="w-3 h-3 text-sky-400 shrink-0" />
                                 <span>{activeNote.relativePath || `${editFolder}/${activeNote.filename}`}</span>
                               </p>
                             </div>
@@ -5967,10 +5983,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                             <button
                               type="button"
                               onClick={() => setIsReorderModalOpen(true)}
-                              className="px-3 py-1.5 rounded-xl bg-card/80 hover:bg-card border border-card-border text-xs text-slate-200 hover:text-amber-300 flex items-center space-x-1.5 transition-all shadow-md backdrop-blur-md"
+                              className="px-3 py-1.5 rounded-xl bg-card/80 hover:bg-card border border-card-border text-xs text-slate-200 hover:text-sky-300 flex items-center space-x-1.5 transition-all shadow-md backdrop-blur-md"
                               title="Reordenar tópicos e seções da nota"
                             >
-                              <ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />
+                              <ArrowUpDown className="w-3.5 h-3.5 text-sky-400" />
                               <span className="hidden sm:inline">Organizar Tópicos</span>
                             </button>
                           </div>
@@ -5979,7 +5995,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                     </div>
 
                     {/* Sticky Rich Formatting Toolbar (Disponível diretamente no Modo Formatado!) */}
-                    <div className="sticky top-0 z-30 mb-4 p-2 rounded-2xl bg-[#13151f]/95 border border-card-border/80 shadow-xl flex flex-wrap items-center gap-1 shrink-0 backdrop-blur-md">
+                    <div className="sticky top-0 z-10 mb-4 p-2 rounded-2xl bg-[#13151f]/95 border border-card-border/80 shadow-xl flex flex-wrap items-center gap-1 shrink-0 backdrop-blur-md">
                       {/* Undo / Redo History */}
                       <div className="flex items-center space-x-0.5 pr-1.5 border-r border-card-border">
                         <button
@@ -6265,10 +6281,10 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                         type="button"
                         onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                         onClick={() => setIsReorderModalOpen(true)}
-                        className="p-1.5 rounded-lg hover:bg-card-border text-amber-300 hover:text-amber-200 transition-colors flex items-center space-x-1 text-xs"
+                        className="p-1.5 rounded-lg hover:bg-card-border text-sky-300 hover:text-sky-200 transition-colors flex items-center space-x-1 text-xs"
                         title="Organizar Tópicos (Mover seções para cima ▲ ou baixo ▼)"
                       >
-                        <ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />
+                        <ArrowUpDown className="w-3.5 h-3.5 text-sky-400" />
                         <span className="hidden xl:inline text-[11px]">Organizar</span>
                       </button>
 
@@ -6289,11 +6305,11 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
 
                     {/* Format Painter Active Indicator Banner */}
                     {formatPainterState && (
-                      <div className="sticky top-2 z-30 p-2.5 rounded-2xl bg-amber-950/90 border border-amber-500/50 shadow-2xl backdrop-blur-md flex items-center justify-between text-xs text-amber-200 animate-in fade-in slide-in-from-top-2">
+                      <div className="sticky top-2 z-10 p-2.5 rounded-2xl bg-sky-950/90 border border-sky-500/50 shadow-2xl backdrop-blur-md flex items-center justify-between text-xs text-sky-200 animate-in fade-in slide-in-from-top-2">
                         <div className="flex items-center space-x-2">
-                          <Paintbrush className="w-4 h-4 text-amber-400 animate-bounce" />
+                          <Paintbrush className="w-4 h-4 text-sky-400 animate-bounce" />
                           <span className="font-semibold">Pincel de Formatação Ativo:</span>
-                          <span className="text-amber-300/90">
+                          <span className="text-sky-300/90">
                             Selecione qualquer trecho de texto no editor para aplicar o estilo capturado
                           </span>
                         </div>
@@ -6303,7 +6319,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                             setFormatPainterState(null);
                             setPainterToast(null);
                           }}
-                          className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 text-[11px] font-bold transition-colors cursor-pointer"
+                          className="px-2.5 py-1 rounded-xl bg-sky-500/20 hover:bg-sky-500/40 text-sky-200 text-[11px] font-bold transition-colors cursor-pointer"
                         >
                           Cancelar (Esc)
                         </button>
