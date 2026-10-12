@@ -144,6 +144,9 @@ export interface FrankNote {
   relativePath?: string;
 }
 
+export type TellusNote = FrankNote;
+export type TellusMDNote = FrankNote;
+
 export interface GraphNode {
   id: string;
   label: string;
