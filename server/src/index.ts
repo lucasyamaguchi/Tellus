@@ -544,18 +544,21 @@ app.get('/api/notes/graph', (req, res) => {
   }
 });
 
-// Dropzone Smart Auto-Organizer Endpoint
+// Dropzone Smart Auto-Organizer Endpoint (Multimodal & Brain Dump)
 app.post('/api/vault/dropzone-organize', async (req, res) => {
   try {
-    const { files, customVaultDir } = req.body;
-    if (!files || !Array.isArray(files) || files.length === 0) {
-      return res.status(400).json({ error: 'Nenhum arquivo enviado para organização.' });
+    const { files, textDump, customVaultDir } = req.body;
+    const hasFiles = Array.isArray(files) && files.length > 0;
+    const hasText = typeof textDump === 'string' && textDump.trim().length > 0;
+
+    if (!hasFiles && !hasText) {
+      return res.status(400).json({ error: 'Nenhum arquivo ou texto enviado para organização.' });
     }
-    const report = await SmartOrganizer.organizeFiles(files, customVaultDir);
+    const report = await SmartOrganizer.organize({ files: hasFiles ? files : [], textDump: hasText ? textDump : '', customVaultDir });
     res.json(report);
   } catch (err: any) {
     console.error('[Dropzone Organize Error]', err);
-    res.status(500).json({ error: err.message || 'Falha ao organizar arquivos na dropzone' });
+    res.status(500).json({ error: err.message || 'Falha ao organizar arquivos e ideias na dropzone' });
   }
 });
 

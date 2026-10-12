@@ -171,6 +171,7 @@ export const FrankNoteView: React.FC<FrankNoteViewProps> = ({
   const [sidebarTab, setSidebarTab] = useState<'folders' | 'highlights' | 'trash'>('folders');
   const [highlightColorFilter, setHighlightColorFilter] = useState<HighlightColorId>('all');
   const [highlightScopeFilter, setHighlightScopeFilter] = useState<'all' | 'current'>('all');
+  const [selectedThemeFilter, setSelectedThemeFilter] = useState<string>('all');
   const [highlightSearchQuery, setHighlightSearchQuery] = useState<string>('');
   const [copiedHighlightId, setCopiedHighlightId] = useState<string | null>(null);
   const [deletedNotes, setDeletedNotes] = useState<DeletedNoteItem[]>([]);
@@ -2329,11 +2330,60 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     return counts;
   }, [highlightScopeFilter, currentNoteHighlights, allVaultHighlights]);
 
-  // Filtered highlights list based on scope, color, and search
+  // Discover all distinct themes across notes and highlights (folders, subjects, and tags)
+  const themeCategories = useMemo<Array<{ id: string; label: string; count: number }>>(() => {
+    const themeMap = new Map<string, number>();
+    
+    // 1. From folders
+    folders.forEach(f => {
+      const clean = f.trim();
+      if (clean && clean !== 'Geral') {
+        const top = clean.split('/')[0];
+        themeMap.set(clean, (themeMap.get(clean) || 0) + 1);
+        if (top !== clean) themeMap.set(top, (themeMap.get(top) || 0) + 1);
+      }
+    });
+
+    // 2. From note tags and subjects
+    notes.forEach(n => {
+      if (n.tags) {
+        n.tags.forEach(t => {
+          const cleanTag = t.trim();
+          if (cleanTag) themeMap.set(cleanTag, (themeMap.get(cleanTag) || 0) + 1);
+        });
+      }
+      if (n.subject && n.subject !== 'Geral') {
+        themeMap.set(n.subject, (themeMap.get(n.subject) || 0) + 1);
+      }
+    });
+
+    // 3. Count highlights for each theme
+    const items: Array<{ id: string; label: string; count: number }> = [];
+    themeMap.forEach((_, key) => {
+      const hlCount = allVaultHighlights.filter(h => 
+        h.folder.toLowerCase().includes(key.toLowerCase()) || 
+        h.noteTitle.toLowerCase().includes(key.toLowerCase())
+      ).length;
+      if (hlCount > 0 || (themeMap.get(key) || 0) > 1) {
+        items.push({ id: key, label: key, count: hlCount });
+      }
+    });
+
+    return items.sort((a, b) => b.count - a.count).slice(0, 16);
+  }, [folders, notes, allVaultHighlights]);
+
+  // Filtered highlights list based on scope, theme, color, and search
   const filteredHighlights = useMemo<ExtractedHighlight[]>(() => {
     const source: ExtractedHighlight[] = highlightScopeFilter === 'current' ? currentNoteHighlights : allVaultHighlights;
     return source.filter((h: ExtractedHighlight) => {
       if (highlightColorFilter !== 'all' && h.colorId !== highlightColorFilter) return false;
+      
+      if (selectedThemeFilter !== 'all') {
+        const matchTheme = h.folder.toLowerCase().includes(selectedThemeFilter.toLowerCase()) ||
+          h.noteTitle.toLowerCase().includes(selectedThemeFilter.toLowerCase());
+        if (!matchTheme) return false;
+      }
+
       const effectiveSearch = (highlightSearchQuery || searchQuery).trim().toLowerCase();
       if (effectiveSearch) {
         const matchesText = h.text.toLowerCase().includes(effectiveSearch);
@@ -2343,7 +2393,67 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       }
       return true;
     });
-  }, [highlightScopeFilter, currentNoteHighlights, allVaultHighlights, highlightColorFilter, highlightSearchQuery, searchQuery]);
+  }, [highlightScopeFilter, currentNoteHighlights, allVaultHighlights, highlightColorFilter, selectedThemeFilter, highlightSearchQuery, searchQuery]);
+
+  const handleStartChatWithTheme = useCallback((themeName: string, highlights: ExtractedHighlight[]) => {
+    const effectiveTheme = themeName === 'all' ? 'Destaques e Conceitos do Vault' : themeName;
+    const topExcerpts = highlights.slice(0, 12).map(h => `- [[${h.noteTitle}]]: "${h.text}"`).join('\n');
+    const prompt = `Olá Tellus! Quero desenvolver e estudar sobre o tema "${effectiveTheme}".\n\nAqui estão os principais conceitos e trechos destacados no meu Vault sobre este assunto:\n${topExcerpts}\n\nPor favor, faça uma análise integrada desses pontos, aponte conexões e me pergunte por qual aspecto prático prefiro começar.`;
+    onSearchInNewChat?.(prompt);
+  }, [onSearchInNewChat]);
+
+  const handleStartVoiceWithTheme = useCallback((themeName: string, highlights: ExtractedHighlight[]) => {
+    const effectiveTheme = themeName === 'all' ? 'Destaques do Vault' : themeName;
+    const topExcerpts = highlights.slice(0, 8).map(h => `[[${h.noteTitle}]]: "${h.text}"`).join('\n');
+    onStartLiveVoice?.(effectiveTheme, topExcerpts);
+  }, [onStartLiveVoice]);
+
+  const handleCreateTrackFromTheme = useCallback(async (themeName: string, highlights: ExtractedHighlight[]) => {
+    const effectiveTheme = themeName === 'all' ? 'Estudos Gerais' : themeName;
+    const cleanTheme = effectiveTheme.replace(/^#/, '').replace(/[^a-zA-Z0-9\s_\u00C0-\u00FF-]/g, '').trim() || 'Trilha de Estudo';
+    const targetFolder = `Estudos/Trilhas/${cleanTheme}`;
+    const title = `00_Roteiro_${cleanTheme.replace(/\s+/g, '_')}`;
+    
+    const content = `# 🗺️ Trilha Consolidada: ${cleanTheme}
+
+**Data de Consolidação:** ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}
+**Total de Destaques Compilados:** ${highlights.length}
+**Pasta no Vault:** \`${targetFolder}\`
+
+> Esta trilha de estudos e roteiro foi consolidada automaticamente a partir dos destaques e anotações do Vault referentes ao tema **${cleanTheme}**.
+
+---
+
+## 📌 Principais Destaques & Citações do Tema
+
+${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] (${h.colorName})
+> "${h.text}"
+- **Pasta:** \`${h.folder}\`
+`).join('\n')}
+
+---
+
+## 🧭 Próximos Passos & Sugestões de Prática
+1. Revisar as notas de origem linkadas acima.
+2. Iniciar uma sessão de Live Voice com o Tellus para simulação de perguntas e respostas.
+3. Criar cadernos de exercícios nos tópicos com maior volume de anotações.
+`;
+
+    try {
+      await api.saveNote({
+        title,
+        folder: targetFolder,
+        subject: targetFolder,
+        content,
+        isProjectSpecific: false
+      });
+      await fetchNotesAndFolders();
+      setExportToast({ message: `Trilha "${title}" criada com sucesso na pasta ${targetFolder}!` });
+      setTimeout(() => setExportToast(null), 3500);
+    } catch (err: any) {
+      alert(`Erro ao criar trilha: ${err.message}`);
+    }
+  }, [fetchNotesAndFolders]);
 
   // Jump smoothly to note & highlight mark in visual editor
   const handleJumpToHighlight = useCallback((hl: ExtractedHighlight) => {
@@ -4589,8 +4699,29 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
             ) : sidebarTab === 'highlights' ? (
               /* HIGHLIGHTS & CITATIONS FILTER PANEL */
               <div className="flex-1 flex flex-col overflow-hidden bg-sidebar select-none">
-                {/* Scope selector & Color Filters Header */}
+                {/* Scope selector, Thematic Search & Color Filters Header */}
                 <div className="p-3 border-b border-card-border space-y-3 shrink-0 bg-panel/60">
+                  {/* Thematic & Keyword Search */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={highlightSearchQuery}
+                      onChange={(e) => setHighlightSearchQuery(e.target.value)}
+                      placeholder="Buscar por tema, conceito ou destaque..."
+                      className="w-full bg-card/80 border border-card-border rounded-xl pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent"
+                    />
+                    {highlightSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setHighlightSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
                   {/* Scope Selector: Todo o Cofre vs Nota Atual */}
                   <div className="flex items-center gap-1.5 p-1 bg-card/80 border border-card-border rounded-xl text-xs">
                     <button
@@ -4627,12 +4758,63 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     </button>
                   </div>
 
-                  {/* Filter by Specific Color */}
+                  {/* 1. Filter by Theme (Tema) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                      <span className="flex items-center gap-1">
+                        <Tag className="w-3 h-3 text-cyan-400" />
+                        <span>1. Tema / Assunto:</span>
+                      </span>
+                      {selectedThemeFilter !== 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedThemeFilter('all')}
+                          className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
+                        >
+                          Limpar tema
+                        </button>
+                      )}
+                    </div>
+                    {/* Theme pills carousel */}
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-card-border/60">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedThemeFilter('all')}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all border cursor-pointer shrink-0 ${
+                          selectedThemeFilter === 'all'
+                            ? 'bg-accent/20 text-accent-light border-accent/40 shadow-xs'
+                            : 'bg-card/40 text-slate-400 border-card-border hover:bg-card hover:text-slate-200'
+                        }`}
+                      >
+                        Todos ({allVaultHighlights.length})
+                      </button>
+                      {themeCategories.map(cat => {
+                        const isSel = selectedThemeFilter.toLowerCase() === cat.id.toLowerCase();
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setSelectedThemeFilter(isSel ? 'all' : cat.id)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all border cursor-pointer shrink-0 flex items-center gap-1 ${
+                              isSel
+                                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 shadow-xs ring-1 ring-cyan-500/30'
+                                : 'bg-card/40 text-slate-300 border-card-border hover:bg-card hover:text-white'
+                            }`}
+                          >
+                            <span>{cat.label}</span>
+                            <span className="text-[9px] font-mono opacity-70">({cat.count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 2. Filter by Specific Color (Cor) */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
                       <span className="flex items-center gap-1">
                         <Filter className="w-3 h-3 text-amber-400" />
-                        <span>Filtrar por cor:</span>
+                        <span>2. Cor do Destaque:</span>
                       </span>
                       {highlightColorFilter !== 'all' && (
                         <button
@@ -4640,7 +4822,7 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                           onClick={() => setHighlightColorFilter('all')}
                           className="text-[10px] text-accent-light hover:underline cursor-pointer"
                         >
-                          Limpar filtro
+                          Limpar cor
                         </button>
                       )}
                     </div>
@@ -4684,6 +4866,55 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                     </div>
                   </div>
                 </div>
+
+                {/* Thematic Action Hub Banner when filtered */}
+                {filteredHighlights.length > 0 && (selectedThemeFilter !== 'all' || highlightSearchQuery.trim()) && (
+                  <div className="p-2.5 mx-2.5 mt-2.5 rounded-xl bg-gradient-to-r from-accent/15 via-cyan-950/20 to-purple-950/20 border border-accent/30 space-y-2 shrink-0 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Sparkles className="w-3.5 h-3.5 text-accent-light shrink-0" />
+                        <span className="text-xs font-semibold text-slate-200 truncate">
+                          {selectedThemeFilter !== 'all' ? selectedThemeFilter : `Busca: "${highlightSearchQuery}"`}
+                        </span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-accent/20 text-accent-light font-mono font-medium shrink-0">
+                        {filteredHighlights.length} {filteredHighlights.length === 1 ? 'destaque' : 'destaques'}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleStartChatWithTheme(selectedThemeFilter !== 'all' ? selectedThemeFilter : highlightSearchQuery, filteredHighlights)}
+                        className="px-2 py-1.5 rounded-lg bg-card/80 hover:bg-card border border-card-border hover:border-cyan-400/40 text-slate-200 hover:text-white text-[10px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                        title="Abrir novo chat com todos os destaques deste tema"
+                      >
+                        <MessageSquare className="w-3 h-3 text-cyan-400" />
+                        <span>Chat</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleStartVoiceWithTheme(selectedThemeFilter !== 'all' ? selectedThemeFilter : highlightSearchQuery, filteredHighlights)}
+                        className="px-2 py-1.5 rounded-lg bg-card/80 hover:bg-card border border-card-border hover:border-amber-400/40 text-slate-200 hover:text-white text-[10px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                        title="Iniciar sessão de voz interativa sobre estes destaques"
+                      >
+                        <Mic className="w-3 h-3 text-amber-400" />
+                        <span>Live Voice</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCreateTrackFromTheme(selectedThemeFilter !== 'all' ? selectedThemeFilter : highlightSearchQuery, filteredHighlights)}
+                        className="px-2 py-1.5 rounded-lg bg-card/80 hover:bg-card border border-card-border hover:border-purple-400/40 text-slate-200 hover:text-white text-[10px] font-medium flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                        title="Compilar estes destaques em uma trilha organizada no Vault"
+                      >
+                        <FolderPlus className="w-3 h-3 text-purple-400" />
+                        <span>Criar Trilha</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Highlights List Body */}
                 <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin scrollbar-thumb-card-border select-text">
@@ -4743,6 +4974,18 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
                               <span>{hl.colorName}</span>
                             </span>
                             <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSearchInNewChat?.(`Sobre o trecho destacado da nota [[${hl.noteTitle}]]:\n"${hl.text}"\n\nPoderia me explicar os principais conceitos, contexto e aplicações práticas desse ponto?`);
+                                }}
+                                className="px-2 py-0.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 flex items-center gap-1 transition-all text-[10px] font-semibold cursor-pointer"
+                                title="Abrir novo chat com o Tellus para debater este trecho"
+                              >
+                                <MessageSquare className="w-3 h-3" />
+                                <span>Perguntar</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={(e) => {

@@ -363,15 +363,21 @@ export const api = {
     return res.json();
   },
 
-  async organizeDropzoneFiles(files: IncomingDropzoneFile[], customVaultDir?: string): Promise<DropzoneOrganizeReport> {
+  async organizeDropzoneFiles(
+    input: IncomingDropzoneFile[] | { files?: IncomingDropzoneFile[]; textDump?: string; customVaultDir?: string },
+    customVaultDir?: string
+  ): Promise<DropzoneOrganizeReport> {
+    const payload = Array.isArray(input)
+      ? { files: input, customVaultDir }
+      : input;
     const res = await fetch(`${API_BASE}/vault/dropzone-organize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files, customVaultDir })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Falha ao organizar arquivos na dropzone' }));
-      throw new Error(err.error || 'Falha ao processar arquivos na dropzone');
+      throw new Error(err.error || 'Falha ao processar arquivos e ideias na dropzone');
     }
     return res.json();
   },
