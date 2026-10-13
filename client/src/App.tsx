@@ -46,7 +46,7 @@ export const App: React.FC = () => {
   const [activeModel, setActiveModel] = useState<string>('deepseek/deepseek-r1');
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
 
-  // Top-Level Main View Mode: Agent Workspace vs FrankMD Notes vs Skills
+  // Top-Level Main View Mode: Agent Workspace vs TellusMD Notes vs Skills
   const [mainViewMode, setMainViewMode] = useState<'agent' | 'notes' | 'skills'>('agent');
 
   // Chat & Session State
