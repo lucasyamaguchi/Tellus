@@ -32,6 +32,7 @@ import { api } from '../api';
 import { Message } from '../types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { stripVoiceTags, normalizeVoiceVocabulary } from '../utils/voiceVocabulary';
 
 export interface ParsedLiveResponse {
   spokenText: string;
@@ -371,7 +372,8 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
         },
         onResult: (transcript, isFinal) => {
           if (!isComponentMounted.current) return;
-          setCurrentTranscript(transcript);
+          const normalized = normalizeVoiceVocabulary(transcript);
+          setCurrentTranscript(normalized);
           setIsTranscribingAudio(false);
 
           if (silenceTimeoutRef.current) {
@@ -379,8 +381,8 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
           }
 
           if (isFinal) {
-            handleUserSpeechCompleted(transcript);
-          } else if (isHandsFreeRef.current && transcript.trim().length > 2) {
+            handleUserSpeechCompleted(normalized);
+          } else if (isHandsFreeRef.current && normalized.trim().length > 2) {
             // Em modo Mãos-Livres, 1.2s de silêncio após falar conclui e envia IMEDIATAMENTE ao chat
             silenceTimeoutRef.current = setTimeout(() => {
               if (isComponentMounted.current && (voiceStateRef.current === 'listening' || voiceStateRef.current === 'idle')) {
@@ -1077,11 +1079,11 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
                           {msg.role === 'assistant' ? (
                             <div className="prose prose-invert prose-xs max-w-none">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {msg.content.replace(/\[FALA\][\s\S]*?\[\/FALA\]/gi, '').trim() || msg.content}
+                                {stripVoiceTags(msg.content)}
                               </ReactMarkdown>
                             </div>
                           ) : (
-                            <p className="whitespace-pre-wrap">{msg.content}</p>
+                            <p className="whitespace-pre-wrap">{stripVoiceTags(msg.content)}</p>
                           )}
                         </div>
                       </div>

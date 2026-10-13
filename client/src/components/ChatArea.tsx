@@ -47,6 +47,7 @@ import { api } from '../api';
 import { voiceService, generateThinkingAcknowledgement } from '../services/voiceService';
 import { voiceToneAnalyzer } from '../services/voiceToneAnalyzer';
 import { parseLiveResponse } from './LiveVoiceModal';
+import { stripVoiceTags, normalizeVoiceVocabulary } from '../utils/voiceVocabulary';
 
 interface ChatAreaProps {
   messages: Message[];
@@ -291,17 +292,18 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         },
         onResult: (transcript, isFinal) => {
           if (!transcript || !transcript.trim()) return;
+          const normalized = normalizeVoiceVocabulary(transcript);
 
           if (isLiveVoiceActive) {
-            setInput(transcript);
-            if (isFinal && transcript.trim().length > 1) {
-              sendSpeechDirectly(transcript);
+            setInput(normalized);
+            if (isFinal && normalized.trim().length > 1) {
+              sendSpeechDirectly(normalized);
               return;
             }
           } else {
             setInput(prev => {
               const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-              return prev + separator + transcript;
+              return prev + separator + normalized;
             });
           }
 
@@ -1285,7 +1287,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           }
                         }}
                       >
-                        {msg.content}
+                        {stripVoiceTags(msg.content)}
                       </ReactMarkdown>
                     </div>
                   )
@@ -1309,7 +1311,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     <span>•</span>
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(msg.content, msg.id)}
+                      onClick={() => copyToClipboard(stripVoiceTags(msg.content), msg.id)}
                       className="hover:text-white flex items-center space-x-1 transition-colors"
                     >
                       {copiedId === msg.id ? (
@@ -1344,7 +1346,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     )}
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(msg.content, msg.id)}
+                      onClick={() => copyToClipboard(stripVoiceTags(msg.content), msg.id)}
                       className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center space-x-1 transition-colors"
                     >
                       {copiedId === msg.id ? (

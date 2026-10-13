@@ -556,14 +556,15 @@ export const api = {
     pipeline?: AgentPipelineConfig,
     onEvent?: (event: { type: string; data: any }) => void,
     onDone?: () => void,
-    onError?: (err: any) => void
+    onError?: (err: any) => void,
+    isLiveVoice?: boolean
   ) {
     const controller = new AbortController();
 
     fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline }),
+      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice }),
       signal: controller.signal
     })
       .then(async (response) => {

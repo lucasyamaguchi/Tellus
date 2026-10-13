@@ -579,14 +579,27 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
 
     const voiceGuideline = `[🎙️ DIRETRIZ DE RETORNO EM VOZ & SÍNTESE CONCISA [FALA]]
 - Quando houver interação por voz ou modo Live Voice / Retorno por voz ativo:
-- Inclua SEMPRE no início da sua resposta um bloco [FALA]...[/FALA] curto (máximo de 2 a 3 frases, cerca de 30 a 45 palavras):
+- Inclua no início da sua resposta um bloco [FALA][tag_de_tom] curto (máximo de 2 a 3 frases, cerca de 30 a 45 palavras) para a síntese vocal guiar a entonação do assistente:
   1. Explique em alto nível o que foi criado/feito (SEM citar nomes de módulos, nomes de arquivos ou wikilinks [[...]]).
   2. Destaque a importância prática ou regra de ouro do conceito (o que fazer ou evitar).
   3. Indique o próximo passo prático.
-  4. Inicie com uma tag de emoção em colchetes correspondente ao tom (ex: [calm], [thoughtful], [happy], [whispering]).
-- NUNCA leia listas de arquivos ou notas dentro de [FALA]. Todo o detalhamento escrito, código e links permanecem no chat e nas notas.`;
+  4. Inicie com uma tag de emoção em colchetes correspondente ao tom da conversa (ex: [calm], [thoughtful], [happy], [whispering], [excited]).
+- NUNCA leia listas de arquivos ou notas dentro de [FALA]. Todo o detalhamento escrito, código e links permanecem no chat e nas notas.
+- Se a sessão for estritamente em TEXTO (sem Live Voice), NÃO use a tag [FALA] nem tags de emoção como [thoughtful].`;
 
-    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${voiceGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    const techVoiceInterpretationPolicy = `[🎧 INTERPRETAÇÃO DE VOZ & TERMOS TÉCNICOS EM INGLÊS]
+- O usuário pode interagir por voz (Live Voice / Áudio). Transcrições de áudio podem conter pequenas imprecisões fonéticas de termos em inglês pronunciados em contexto brasileiro:
+  * "ficha api", "ficha pi" ou "ficha áudio" -> refere-se a Fish API ou Fish Audio (TTS de voz).
+  * "te te esse" ou "titi s" -> refere-se a TTS (Text-to-Speech).
+  * "deep cique", "deep sick" ou "dipe cique" -> refere-se a DeepSeek.
+  * "open roteador" ou "open route" -> refere-se a OpenRouter.
+  * "eleven lebs" ou "eleve labs" -> refere-se a ElevenLabs.
+  * "uisper" ou "visper" -> refere-se a Whisper.
+  * "épi ai" ou "ápi" -> refere-se a API.
+  * "paipline" -> refere-se a pipeline.
+- Sempre interprete com inteligência contextual o termo técnico pretendido pelo usuário.`;
+
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${techVoiceInterpretationPolicy}\n\n${voiceGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     // Process Multimodal Images from .agentic/attachments/
     const processedMessages: ChatMessage[] = messages.map(m => {

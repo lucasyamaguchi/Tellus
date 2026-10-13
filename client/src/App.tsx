@@ -38,6 +38,7 @@ import { api } from './api';
 import { voiceService } from './services/voiceService';
 import { voiceToneAnalyzer } from './services/voiceToneAnalyzer';
 import { parseLiveResponse } from './components/LiveVoiceModal';
+import { stripVoiceTags } from './utils/voiceVocabulary';
 
 export const App: React.FC = () => {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -396,8 +397,9 @@ export const App: React.FC = () => {
 
     const firstUserMsg = currentMsgs.find(m => m.role === 'user');
     const defaultTitle = isVoice ? `🎙️ Live Voice (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : 'Novo Chat';
-    const title = firstUserMsg 
-      ? (isVoice ? '🎙️ ' : '') + firstUserMsg.content.slice(0, 35) + (firstUserMsg.content.length > 35 ? '...' : '') 
+    const cleanFirstContent = firstUserMsg ? stripVoiceTags(firstUserMsg.content) : '';
+    const title = cleanFirstContent 
+      ? (isVoice ? '🎙️ ' : '') + cleanFirstContent.slice(0, 35) + (cleanFirstContent.length > 35 ? '...' : '') 
       : defaultTitle;
 
     try {
@@ -567,7 +569,8 @@ export const App: React.FC = () => {
           saveCurrentSession(finalMsgs);
           return finalMsgs;
         });
-      }
+      },
+      isLiveVoiceActiveInChatRef.current || isLiveVoiceOpen
     );
 
     stopStreamRef.current = cancelFn;

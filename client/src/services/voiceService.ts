@@ -1,4 +1,5 @@
 // Voice Service for Tellus: TTS (Text-to-Speech) & STT (Speech-to-Text)
+import { normalizeVoiceVocabulary, stripVoiceTags } from '../utils/voiceVocabulary';
 
 export interface VoiceOption {
   uri: string;
@@ -171,6 +172,11 @@ class VoiceService {
     if (!text) return '';
 
     return text
+      // Remove voice packaging tags: [FALA]...[/FALA] or stray [FALA] tags
+      .replace(/\[\/?FALA\]/gi, '')
+      // Remove note metadata and details blocks that are purely for UI/Vault
+      .replace(/\[NOTA:[\s\S]*?\[\/NOTA\]/gi, '')
+      .replace(/\[DETALHES\][\s\S]*?\[\/DETALHES\]/gi, '')
       // Remove code blocks
       .replace(/```[\s\S]*?```/g, ' [código omitido para leitura] ')
       // Remove inline code
@@ -398,6 +404,12 @@ class VoiceService {
     }
 
     const isWhispering = /\[whisper/i.test(clean);
+    const isThoughtful = /\[thoughtful/i.test(clean);
+    const isExcited = /\[(?:excited|happy|cheerful)/i.test(clean);
+    const isCalm = /\[calm/i.test(clean);
+    const isSerious = /\[serious/i.test(clean);
+    const isCurious = /\[curious/i.test(clean);
+
     // Remove emotion tags in brackets for system synthesizer so it doesn't speak bracket names
     const textForSystem = clean.replace(/\[[a-zA-Z\s_-]+\]/g, '').replace(/\s+/g, ' ').trim();
     if (!textForSystem) {
@@ -419,11 +431,41 @@ class VoiceService {
       utterance.lang = 'pt-BR';
     }
 
-    utterance.rate = isWhispering 
-      ? (options?.rate || this.getSpeechRate()) * 0.9 
-      : (options?.rate || this.getSpeechRate());
-    utterance.pitch = 1.0;
-    utterance.volume = isWhispering ? 0.35 : 1.0;
+    const baseRate = options?.rate || this.getSpeechRate();
+    if (isWhispering) {
+      utterance.rate = baseRate * 0.90;
+      utterance.pitch = 0.92;
+      utterance.volume = 0.35;
+    } else if (isThoughtful) {
+      // Tom reflexivo, compassado e analítico
+      utterance.rate = baseRate * 0.94;
+      utterance.pitch = 0.95;
+      utterance.volume = 1.0;
+    } else if (isExcited) {
+      // Tom animado e vibrante
+      utterance.rate = baseRate * 1.06;
+      utterance.pitch = 1.12;
+      utterance.volume = 1.0;
+    } else if (isCalm) {
+      // Tom calmo e equilibrado
+      utterance.rate = baseRate * 0.97;
+      utterance.pitch = 0.98;
+      utterance.volume = 1.0;
+    } else if (isSerious) {
+      // Tom firme e sóbrio
+      utterance.rate = baseRate * 0.95;
+      utterance.pitch = 0.90;
+      utterance.volume = 1.0;
+    } else if (isCurious) {
+      // Tom inquisitivo com leve subida de pitch
+      utterance.rate = baseRate * 1.01;
+      utterance.pitch = 1.06;
+      utterance.volume = 1.0;
+    } else {
+      utterance.rate = baseRate;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+    }
 
     utterance.onstart = () => {
       options?.onStart?.();
@@ -631,9 +673,11 @@ class NativeWebSpeechRecognizer {
           }
 
           if (finalTranscript.trim()) {
-            this.callbacks.onResult(finalTranscript.trim(), true);
+            const normalized = normalizeVoiceVocabulary(finalTranscript.trim());
+            this.callbacks.onResult(normalized, true);
           } else if (interimTranscript.trim()) {
-            this.callbacks.onResult(interimTranscript.trim(), false);
+            const normalized = normalizeVoiceVocabulary(interimTranscript.trim());
+            this.callbacks.onResult(normalized, false);
           }
         };
 
@@ -866,8 +910,9 @@ class DirectMicRecognizer {
           const data = await res.json();
           const text = (data.text || '').trim();
           if (text) {
-            console.log(`[DirectMicRecognizer] ✅ Transcrição recebida (${data.provider}): "${text}"`);
-            this.callbacks.onResult(text, true);
+            const normalized = normalizeVoiceVocabulary(text);
+            console.log(`[DirectMicRecognizer] ✅ Transcrição recebida (${data.provider}): "${normalized}"`);
+            this.callbacks.onResult(normalized, true);
           } else if (data.isSilent) {
             console.log('[DirectMicRecognizer] Áudio com silêncio ou sem fala detectada.');
           }
