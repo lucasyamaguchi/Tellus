@@ -3,7 +3,7 @@
 <img src="docs/assets/tellus_logo.png" alt="Tellus Logo" width="110" style="border-radius: 24px;" />
 
 # 🌐 Tellus (Agentic IDE)
-### *Ambiente Integrado de Desenvolvimento Agêntico, Gestão de Conhecimento Obsidian/FrankMD e Engenharia de Carreira*
+### *Ambiente Integrado de Desenvolvimento Agêntico, Gestão de Conhecimento Obsidian/TellusMD e Engenharia de Carreira*
 
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -19,7 +19,7 @@
 
 ## 📌 Visão Geral
 
-**Tellus** é uma IDE agêntica de nova geração que combina orquestração multi-modelo de inteligência artificial, execução local segura de ferramentas de código e terminal, curadoria de memória de longo prazo e um ecossistema completo de gestão de conhecimento compatível com **Obsidian Markdown (`FrankMD Vault`)**.
+**Tellus** é uma IDE agêntica de nova geração que combina orquestração multi-modelo de inteligência artificial, execução local segura de ferramentas de código e terminal, curadoria de memória de longo prazo e um ecossistema completo de gestão de conhecimento compatível com **Obsidian Markdown (`TellusMD Vault`)**.
 
 Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus transforma requisitos complexos de vagas e editais em planos de estudo e projetos práticos, organizando despejos caóticos de anotações (mensagens de WhatsApp, transcrições de vídeos e anexos multimídia) em um cofre de conhecimento interconectado por grafos e destaques temáticos.
 
@@ -47,9 +47,9 @@ Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus t
 
 ---
 
-### 📚 4. FrankMD Vault, Pastas Obsidian & Lixeira com Retenção
+### 📚 4. TellusMD Vault, Pastas Obsidian & Lixeira com Retenção
 *Cofre compatível com Obsidian, árvore de pastas hierárquica, editor split com preview em tempo real e controle completo de retenção da lixeira.*
-<img src="docs/assets/tellus_frankmd_vault.png" alt="Tellus FrankMD Vault & Folders" width="95%" />
+<img src="docs/assets/tellus_frankmd_vault.png" alt="Tellus TellusMD Vault & Folders" width="95%" />
 
 ---
 
@@ -95,7 +95,7 @@ Projetado para engenheiros de dados, desenvolvedores e pesquisadores, o Tellus t
   - `Fast Tools & Coder:` Ferramentas e automação ágil com *Gemini 2.5 Flash / DeepSeek V4 Flash*.
   - `AI Archivist:` Classificação, decomposição de texto e arquivamento de documentos no Vault.
 
-### 🗂️ 4. FrankMD Vault (Cofre de Conhecimento Obsidian)
+### 🗂️ 4. TellusMD Vault (Cofre de Conhecimento Obsidian)
 - **Compatibilidade 100% Obsidian:** Arquivos `.md` padrão com suporte a `[[Wikilinks]]`, tags `#tag` e metadados frontmatter.
 - **Visualização em Grafo Interativo:** Grafo de conexões com simulação física (repulsão, gravidade, colisão e conexões entre conceitos).
 - **Lixeira com Retenção Configurável:** Proteção contra exclusão acidental via diretório `.backups` com retenção de 30, 90, 120 dias, 1 ano ou permanente.
