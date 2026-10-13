@@ -18,6 +18,7 @@ import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
 import { PrivacySanitizer } from './services/security/privacySanitizer.js';
+import { normalizeVoiceVocabulary } from './utils/voiceVocabulary.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1015,7 +1016,7 @@ app.get('/api/terminal/tasks', (req, res) => {
 
 // 9. Streaming Agent Chat SSE Endpoint
 app.post('/api/chat/stream', async (req, res) => {
-  const { messages, model, provider, routineId, tokenEfficiency, pipeline } = req.body;
+  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice } = req.body;
   const projectPath = ProjectManager.getCurrentProject();
   const config = ConfigManager.getConfig();
 
@@ -1045,6 +1046,21 @@ app.post('/api/chat/stream', async (req, res) => {
   1. Status: ✅ Concluído
   2. Arquivos alterados/criados (com caminhos relativos)
   3. Resumo objetivo da correção/implementação realizada (máx 2-3 linhas).`;
+  }
+
+  // Regra fundamental de formato: Texto Puro vs Live Voice
+  if (isLiveVoice) {
+    systemPrompt += `\n\n[🎙️ RETORNO EM LIVE VOICE ATIVO]
+- A sessão atual possui RETORNO EM VOZ ATIVO.
+- Inclua no início da sua resposta um bloco [FALA][tag_de_tom] curto (máximo de 2 a 3 frases, cerca de 30 a 45 palavras) para a síntese vocal guiar a entonação do assistente:
+  * Use tags de tom como: [thoughtful], [calm], [happy], [whispering], [excited], de acordo com o contexto.
+  * NUNCA cite códigos, tabelas ou wikilinks dentro de [FALA].
+- Logo após, forneça o detalhamento escrito completo normalmente.`;
+  } else {
+    systemPrompt += `\n\n[📄 RETORNO EXCLUSIVO EM TEXTO (SEM VOZ)]
+- Esta sessão é estritamente em TEXTO (sem sintetizador de voz).
+- É EXPRESSAMENTE PROIBIDO incluir tags de voz [FALA], [/FALA] ou tags de tom como [thoughtful], [calm], etc.
+- Responda de forma direta, fluída e natural sem qualquer metadado de voz.`;
   }
 
   // Regra fundamental de retorno textual para conversa e voz (Live Voice Hands-off)
@@ -1115,6 +1131,7 @@ app.post('/api/voice/transcribe', async (req, res) => {
         formData.append('file', blob, `audio.${ext}`);
         formData.append('model', 'whisper-1');
         formData.append('language', 'pt');
+        formData.append('prompt', 'Vocabulário técnico em inglês e português: Fish API, Fish Audio, TTS, API, Whisper, OpenRouter, ElevenLabs, DeepSeek, Gemini, LLM, prompt, token, pipeline, GitHub, React, Vite, Node.js, Markdown, Obsidian Vault.');
 
         const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
@@ -1126,7 +1143,8 @@ app.post('/api/voice/transcribe', async (req, res) => {
 
         if (whisperResponse.ok) {
           const result: any = await whisperResponse.json();
-          const text = (result.text || '').trim();
+          let text = (result.text || '').trim();
+          text = normalizeVoiceVocabulary(text);
           console.log(`[Voice Transcribe] OpenAI Whisper sucesso: "${text}"`);
           return res.json({ text, provider: 'whisper-1' });
         }
@@ -1145,7 +1163,7 @@ app.post('/api/voice/transcribe', async (req, res) => {
             contents: [
               {
                 parts: [
-                  { text: 'Transcreva com precisão o que foi dito em português do Brasil neste áudio. Se não houver fala compreensível ou se for apenas ruído ambiente ou silêncio, responda exatamente: SILENCIO. Caso haja fala, responda APENAS o texto exato transcrito, sem aspas ou introduções.' },
+                  { text: 'Transcreva com máxima precisão o que foi falado no áudio. O áudio é em português do Brasil com termos técnicos e nomes em inglês (por exemplo: Fish API, Fish Audio, TTS, API, Whisper, DeepSeek, OpenRouter, ElevenLabs, Gemini, LLM, prompts, tokens, pipeline, Docker, GitHub, etc.). NUNCA confunda "Fish API" ou "Fish Audio" com "ficha", "ficha pi" ou "peixe". Se não houver fala compreensível ou se for apenas ruído ambiente ou silêncio, responda exatamente: SILENCIO. Caso haja fala, responda APENAS o texto exato transcrito com os termos técnicos corretos em inglês preservados.' },
                   {
                     inlineData: {
                       mimeType: 'audio/wav',
@@ -1164,6 +1182,8 @@ app.post('/api/voice/transcribe', async (req, res) => {
           transcription = transcription.replace(/^["']|["']$/g, '').trim();
           if (/^sil[eê]ncio\.?$/i.test(transcription)) {
             transcription = '';
+          } else {
+            transcription = normalizeVoiceVocabulary(transcription);
           }
           console.log(`[Voice Transcribe] Google Gemini Oficial sucesso: "${transcription}"`);
           return res.json({ text: transcription, provider: 'google:gemini-2.0-flash' });
@@ -1197,7 +1217,7 @@ app.post('/api/voice/transcribe', async (req, res) => {
                   content: [
                     {
                       type: 'text',
-                      text: 'Transcreva o áudio falado em português do Brasil com máxima precisão. Se não houver fala humana compreensível ou se for apenas ruído ambiente ou silêncio, responda exatamente: SILENCIO. Caso haja fala, responda APENAS o texto exato transcrito, sem introduções, aspas ou comentários adicionais.'
+                      text: 'Transcreva o áudio falado com máxima precisão. O áudio é em português com termos e nomes técnicos em inglês (por exemplo: Fish API, Fish Audio, TTS, API, Whisper, DeepSeek, OpenRouter, ElevenLabs, Gemini, LLM, prompts, tokens, pipeline, Docker, GitHub, etc.). NUNCA confunda "Fish API" ou "Fish Audio" com "ficha", "ficha pi" ou "peixe". Se não houver fala humana compreensível ou se for apenas ruído ambiente ou silêncio, responda exatamente: SILENCIO. Caso haja fala, responda APENAS o texto exato transcrito com os termos técnicos corretos em inglês preservados.'
                     },
                     {
                       type: 'input_audio',
@@ -1220,6 +1240,7 @@ app.post('/api/voice/transcribe', async (req, res) => {
               console.log(`[Voice Transcribe] OpenRouter (${modelName}) detectou silêncio.`);
               return res.json({ text: '', provider: `openrouter:${modelName}`, isSilent: true });
             }
+            transcription = normalizeVoiceVocabulary(transcription);
             console.log(`[Voice Transcribe] OpenRouter (${modelName}) sucesso: "${transcription}"`);
             return res.json({ text: transcription, provider: `openrouter:${modelName}` });
           } else {
