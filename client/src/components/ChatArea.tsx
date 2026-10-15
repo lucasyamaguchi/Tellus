@@ -39,7 +39,8 @@ import {
   VolumeX,
   Radio,
   Plus,
-  FolderGit2
+  FolderGit2,
+  History
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -88,6 +89,7 @@ interface ChatAreaProps {
   globalSecurityPreset?: 'request_review' | 'default' | 'turbo';
   onChangeExecutionMode?: (mode: ExecutionSecurityPreset) => void;
   onOpenProjectSettings?: () => void;
+  onOpenFileHistory?: (filePath?: string) => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -126,7 +128,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   effectiveSecurityPreset = 'default',
   globalSecurityPreset = 'default',
   onChangeExecutionMode,
-  onOpenProjectSettings
+  onOpenProjectSettings,
+  onOpenFileHistory
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -1125,6 +1128,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           messages.map((msg) => (
             <div
               key={msg.id}
+              id={`msg-${msg.id}`}
               className={`flex flex-col space-y-2 ${
                 msg.role === 'user' ? 'items-end' : 'items-start'
               }`}
@@ -1343,6 +1347,25 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     </span>
                                   </div>
                                   <div className="flex items-center space-x-2 shrink-0">
+                                    {['write_file', 'edit_file'].includes(cleanName) && onOpenFileHistory && (
+                                      <button
+                                        type="button"
+                                        title="Ver no Histórico / Diff"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          try {
+                                            const parsed = JSON.parse(tc.arguments || '{}');
+                                            onOpenFileHistory(parsed.path || parsed.file_path);
+                                          } catch {
+                                            onOpenFileHistory();
+                                          }
+                                        }}
+                                        className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent-light text-[10px] font-sans font-medium transition-colors"
+                                      >
+                                        <History className="w-2.5 h-2.5" />
+                                        <span>Diff</span>
+                                      </button>
+                                    )}
                                     {tc.status === 'running' && (
                                       <span className="flex items-center text-[10px] text-amber-400">
                                         <Clock className="w-2.5 h-2.5 mr-1 animate-spin" /> Executando
@@ -1368,6 +1391,27 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                                 {isItemExpanded && (
                                   <div className="p-2.5 border-t border-card-border/50 text-[11px] font-mono space-y-2 bg-background/60">
+                                    {['write_file', 'edit_file'].includes(cleanName) && onOpenFileHistory && (
+                                      <div className="flex items-center justify-between pb-1.5 border-b border-card-border/40">
+                                        <span className="text-[10px] text-accent-light font-sans font-medium flex items-center">
+                                          <History className="w-3 h-3 mr-1" /> Alteração registrada no histórico
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            try {
+                                              const parsed = JSON.parse(tc.arguments || '{}');
+                                              onOpenFileHistory(parsed.path || parsed.file_path);
+                                            } catch {
+                                              onOpenFileHistory();
+                                            }
+                                          }}
+                                          className="flex items-center space-x-1 px-2 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent-light text-[10px] font-sans font-medium transition-colors"
+                                        >
+                                          <span>Abrir Histórico Completo &rarr;</span>
+                                        </button>
+                                      </div>
+                                    )}
                                     <div>
                                       <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
                                         Argumentos:

@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, FileCode, Check, RefreshCw } from 'lucide-react';
+import { Save, FileCode, Check, RefreshCw, History } from 'lucide-react';
 import { api } from '../api';
 
 interface CodeViewerProps {
   filePath: string | null;
   onFileSaved?: () => void;
+  onOpenHistory?: () => void;
 }
 
-export const CodeViewer: React.FC<CodeViewerProps> = ({ filePath, onFileSaved }) => {
+export const CodeViewer: React.FC<CodeViewerProps> = ({ filePath, onFileSaved, onOpenHistory }) => {
   const [content, setContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -71,6 +72,15 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({ filePath, onFileSaved })
           <p className="text-xs font-medium text-slate-400">Nenhum arquivo aberto</p>
           <p className="text-[11px] text-slate-500">Selecione um arquivo no explorador lateral para visualizar e editar o código.</p>
         </div>
+        {onOpenHistory && (
+          <button
+            onClick={onOpenHistory}
+            className="mt-2 flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-accent/40 bg-accent/10 hover:bg-accent/20 text-accent-light text-xs font-medium transition-all shadow-sm"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Ver Histórico de Alterações</span>
+          </button>
+        )}
       </div>
     );
   }
@@ -79,12 +89,24 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({ filePath, onFileSaved })
     <div className="h-full flex flex-col bg-[#1e1e1e]">
       {/* Top File Bar */}
       <div className="h-10 border-b border-card-border bg-sidebar px-3 flex items-center justify-between select-none">
-        <div className="flex items-center space-x-2 text-xs text-slate-300 font-mono">
-          <FileCode className="w-3.5 h-3.5 text-accent-light" />
-          <span className="font-medium text-slate-100">{filePath}</span>
+        <div className="flex items-center space-x-2 text-xs text-slate-300 font-mono min-w-0 pr-2">
+          <FileCode className="w-3.5 h-3.5 text-accent-light shrink-0" />
+          <span className="font-medium text-slate-100 truncate">{filePath}</span>
         </div>
 
-        <button
+        <div className="flex items-center space-x-2 shrink-0">
+          {onOpenHistory && (
+            <button
+              onClick={onOpenHistory}
+              title="Abrir Histórico e Diffs"
+              className="flex items-center space-x-1 px-2 py-1 rounded border border-card-border hover:bg-card-hover text-slate-400 hover:text-slate-200 text-xs transition-colors"
+            >
+              <History className="w-3.5 h-3.5 text-accent-light" />
+              <span className="hidden sm:inline">Histórico</span>
+            </button>
+          )}
+
+          <button
           onClick={handleSave}
           disabled={isSaving}
           className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
@@ -110,6 +132,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({ filePath, onFileSaved })
             </>
           )}
         </button>
+        </div>
       </div>
 
       {/* Monaco Editor Container */}

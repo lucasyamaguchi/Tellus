@@ -418,3 +418,34 @@ export interface SanitizationResult {
   detectedTypes: string[];
 }
 
+export interface FileChangeEntry {
+  id: string;
+  filePath: string;
+  action: 'create' | 'modify' | 'delete';
+  timestamp: number;
+  sessionId?: string;
+  sessionTitle?: string;
+  messageId?: string;
+  reason?: string;
+  linesAdded: number;
+  linesRemoved: number;
+  lineRange?: { start: number; end: number };
+  diff: string;
+  oldContent?: string;
+  newContent?: string;
+}
+
+export interface GitDiffFile {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'untracked';
+  diff: string;
+  insertions: number;
+  deletions: number;
+}
+
+export interface GitDiffReport {
+  files: GitDiffFile[];
+  branch: string;
+  isGitRepo: boolean;
+}
+

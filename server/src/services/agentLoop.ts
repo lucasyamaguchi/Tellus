@@ -11,6 +11,7 @@ import { ProviderHub } from './providers/providerHub.js';
 import { ChatMessage, ToolDefinition } from './providers/openrouter.js';
 import { ConfigManager } from './configManager.js';
 import { ProjectSettingsManager } from './projectSettingsManager.js';
+import { FileHistoryManager } from './history/fileHistoryManager.js';
 
 // Strict Portunhol / Spanish replacement map for Portuguese responses (especially from DeepSeek)
 const PORTUNHOL_REPLACEMENTS: Array<[RegExp, string]> = [
@@ -102,7 +103,8 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Caminho relativo do arquivo no projeto (ex: "src/utils.ts")' },
-          content: { type: 'string', description: 'Conteúdo completo a ser gravado no arquivo' }
+          content: { type: 'string', description: 'Conteúdo completo a ser gravado no arquivo' },
+          description: { type: 'string', description: 'Breve explicação em português do porquê desta alteração ou criação' }
         },
         required: ['path', 'content']
       }
@@ -118,7 +120,8 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         properties: {
           path: { type: 'string', description: 'Caminho relativo do arquivo (ex: "src/app.tsx")' },
           target_content: { type: 'string', description: 'Trecho exato de código a ser substituído (incluindo quebras de linha e indentação)' },
-          replacement_content: { type: 'string', description: 'Novo trecho de código que substituirá o target_content' }
+          replacement_content: { type: 'string', description: 'Novo trecho de código que substituirá o target_content' },
+          description: { type: 'string', description: 'Breve explicação em português do porquê desta alteração e quais linhas foram afetadas' }
         },
         required: ['path', 'target_content', 'replacement_content']
       }
@@ -338,7 +341,8 @@ export class AgentLoop {
     projectPath: string,
     toolName: string,
     rawArgs: string,
-    currentModel: string
+    currentModel: string,
+    context?: { sessionId?: string; sessionTitle?: string; messageId?: string }
   ): Promise<any> {
     let args: any = {};
     try {
@@ -377,12 +381,80 @@ export class AgentLoop {
           return { status: 'success', path: args.path, size: result.size, content: result.content };
         }
         case 'write_file': {
+          let oldContent = '';
+          const fullPath = path.resolve(projectPath, args.path);
+          const existed = fs.existsSync(fullPath);
+          if (existed) {
+            try { oldContent = fs.readFileSync(fullPath, 'utf-8'); } catch {}
+          }
           const res = FileTools.writeFile(projectPath, args.path, args.content);
-          return { status: 'success', path: args.path, bytesWritten: res.bytesWritten, message: `Arquivo ${args.path} gravado com sucesso.` };
+
+          const diffInfo = FileHistoryManager.computeDiff(args.path, oldContent, args.content);
+          const historyEntry = FileHistoryManager.recordChange(projectPath, {
+            filePath: args.path,
+            action: existed ? 'modify' : 'create',
+            sessionId: context?.sessionId,
+            sessionTitle: context?.sessionTitle,
+            messageId: context?.messageId,
+            reason: args.description || args.reason || (existed ? `Arquivo ${args.path} atualizado` : `Arquivo ${args.path} criado`),
+            linesAdded: diffInfo.linesAdded,
+            linesRemoved: diffInfo.linesRemoved,
+            lineRange: diffInfo.lineRange,
+            diff: diffInfo.diff,
+            oldContent: existed ? oldContent : undefined,
+            newContent: args.content
+          });
+
+          return {
+            status: 'success',
+            path: args.path,
+            bytesWritten: res.bytesWritten,
+            message: `Arquivo ${args.path} gravado com sucesso.`,
+            changeId: historyEntry.id,
+            linesAdded: diffInfo.linesAdded,
+            linesRemoved: diffInfo.linesRemoved,
+            lineRange: diffInfo.lineRange,
+            reason: historyEntry.reason
+          };
         }
         case 'edit_file': {
+          let oldContent = '';
+          const fullPath = path.resolve(projectPath, args.path);
+          if (fs.existsSync(fullPath)) {
+            try { oldContent = fs.readFileSync(fullPath, 'utf-8'); } catch {}
+          }
           const res = FileTools.editFile(projectPath, args.path, args.target_content, args.replacement_content);
-          return { status: 'success', path: args.path, message: res.message };
+          let newContent = '';
+          if (fs.existsSync(fullPath)) {
+            try { newContent = fs.readFileSync(fullPath, 'utf-8'); } catch {}
+          }
+
+          const diffInfo = FileHistoryManager.computeDiff(args.path, oldContent, newContent);
+          const historyEntry = FileHistoryManager.recordChange(projectPath, {
+            filePath: args.path,
+            action: 'modify',
+            sessionId: context?.sessionId,
+            sessionTitle: context?.sessionTitle,
+            messageId: context?.messageId,
+            reason: args.description || args.reason || `Edição pontual em ${args.path}`,
+            linesAdded: diffInfo.linesAdded,
+            linesRemoved: diffInfo.linesRemoved,
+            lineRange: diffInfo.lineRange,
+            diff: diffInfo.diff,
+            oldContent,
+            newContent
+          });
+
+          return {
+            status: 'success',
+            path: args.path,
+            message: res.message,
+            changeId: historyEntry.id,
+            linesAdded: diffInfo.linesAdded,
+            linesRemoved: diffInfo.linesRemoved,
+            lineRange: diffInfo.lineRange,
+            reason: historyEntry.reason
+          };
         }
         case 'list_dir': {
           const items = FileTools.listDir(projectPath, args.path || '.', args.depth || 2);
@@ -508,13 +580,14 @@ export class AgentLoop {
     messages: ChatMessage[],
     systemPrompt: string,
     onEvent: (event: {
-      type: 'content' | 'reasoning' | 'tool_start' | 'tool_end' | 'turn_complete' | 'error';
+      type: 'content' | 'reasoning' | 'tool_start' | 'tool_end' | 'turn_complete' | 'error' | 'file_changed';
       data: any;
     }) => void,
     maxToolSteps = 10,
     abortSignal?: AbortSignal,
     executionSecurityPreset?: 'request_review' | 'default' | 'turbo',
-    planReviewPolicy?: 'always_proceed' | 'always_review'
+    planReviewPolicy?: 'always_proceed' | 'always_review',
+    sessionContext?: { sessionId?: string; sessionTitle?: string }
   ): Promise<{ fullMessages: ChatMessage[] }> {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
     const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
@@ -762,7 +835,26 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
             data: { toolCallId: tc.id, name: fnName, arguments: fnArgs }
           });
 
-          const result = await this.executeTool(projectPath, fnName, fnArgs, model);
+          const result = await this.executeTool(projectPath, fnName, fnArgs, model, {
+            sessionId: sessionContext?.sessionId,
+            sessionTitle: sessionContext?.sessionTitle,
+            messageId: tc.id
+          });
+
+          if (result && result.changeId) {
+            onEvent({
+              type: 'file_changed',
+              data: {
+                changeId: result.changeId,
+                filePath: result.path,
+                linesAdded: result.linesAdded,
+                linesRemoved: result.linesRemoved,
+                lineRange: result.lineRange,
+                reason: result.reason,
+                sessionId: sessionContext?.sessionId
+              }
+            });
+          }
 
           onEvent({
             type: 'tool_end',

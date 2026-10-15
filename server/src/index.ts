@@ -21,6 +21,7 @@ import { ProviderHub } from './services/providers/providerHub.js';
 import { PrivacySanitizer } from './services/security/privacySanitizer.js';
 import { ObsidianPluginManager } from './services/obsidian/obsidianPluginManager.js';
 import { ProjectSettingsManager } from './services/projectSettingsManager.js';
+import { FileHistoryManager } from './services/history/fileHistoryManager.js';
 import { normalizeVoiceVocabulary } from './utils/voiceVocabulary.js';
 
 const app = express();
@@ -303,6 +304,55 @@ app.post('/api/files/write', (req, res) => {
     res.json(result);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// 4.1 File Change History & Live Git Diff Endpoints
+app.get('/api/history/changes', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const sessionId = req.query.sessionId as string | undefined;
+    const changes = FileHistoryManager.getChanges(currentPath, sessionId);
+    res.json(changes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/history/changes/:id', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const change = FileHistoryManager.getChangeById(currentPath, req.params.id);
+    if (!change) {
+      return res.status(404).json({ error: 'Alteração não encontrada' });
+    }
+    res.json(change);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/history/revert', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { changeId } = req.body;
+    if (!changeId) {
+      return res.status(400).json({ error: 'changeId é obrigatório' });
+    }
+    const result = FileHistoryManager.revertChange(currentPath, changeId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/history/git-diff', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const diff = FileHistoryManager.getGitDiff(currentPath);
+    res.json(diff);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1318,7 +1368,7 @@ app.get('/api/terminal/tasks', (req, res) => {
 
 // 9. Streaming Agent Chat SSE Endpoint
 app.post('/api/chat/stream', async (req, res) => {
-  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode } = req.body;
+  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode, sessionId, sessionTitle } = req.body;
   const projectPath = ProjectManager.getCurrentProject();
   const config = ConfigManager.getConfig();
 
@@ -1400,7 +1450,8 @@ app.post('/api/chat/stream', async (req, res) => {
       12,
       abortController.signal,
       effectiveSecurity.preset,
-      effectiveSecurity.planReviewPolicy
+      effectiveSecurity.planReviewPolicy,
+      { sessionId, sessionTitle }
     );
 
     sendSSE('done', { status: 'completed' });
