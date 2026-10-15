@@ -86,4 +86,24 @@ describe('📁 Módulo 8: ProjectManager & ConfigManager Multi-Projeto', () => {
     assert.equal(updated.locale, 'pt-BR');
     assert.equal(updated.enforceStrictLanguage, true);
   });
+
+  test('5. Persistência de Pipeline de Modelos Especializados (ConfigManager.pipeline)', () => {
+    const pipelineConfig = {
+      primaryModel: 'anthropic/claude-3.7-sonnet',
+      plannerModel: 'deepseek/deepseek-r1',
+      codingModel: 'anthropic/claude-3.7-sonnet',
+      reasoningModel: 'openai/o3-mini',
+      fastToolsModel: 'google/gemini-2.0-flash-001'
+    };
+
+    const updated = ConfigManager.updateConfig({
+      pipeline: pipelineConfig
+    });
+
+    assert.deepEqual(updated.pipeline, pipelineConfig);
+
+    // Relê diretamente do disco via getConfig()
+    const reloaded = ConfigManager.getConfig();
+    assert.deepEqual(reloaded.pipeline, pipelineConfig);
+  });
 });
