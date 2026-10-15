@@ -42,12 +42,13 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, ToolCallItem, Routine, Attachment, QuotedMessage } from '../types';
+import { Message, ToolCallItem, Routine, Attachment, QuotedMessage, ExecutionSecurityPreset } from '../types';
 import { api } from '../api';
 import { voiceService, generateThinkingAcknowledgement } from '../services/voiceService';
 import { voiceToneAnalyzer } from '../services/voiceToneAnalyzer';
 import { parseLiveResponse } from './LiveVoiceModal';
 import { stripVoiceTags, normalizeVoiceVocabulary } from '../utils/voiceVocabulary';
+import { ExecutionModeDropdown } from './ExecutionModeDropdown';
 
 interface ChatAreaProps {
   messages: Message[];
@@ -80,6 +81,11 @@ interface ChatAreaProps {
   onChangeLiveVoiceMode?: (mode: 'voice_only' | 'mixed' | 'voice_output_only') => void;
   onOpenLiveVoiceOrb?: () => void;
   onNewChat?: () => void;
+  executionMode?: ExecutionSecurityPreset;
+  effectiveSecurityPreset?: 'request_review' | 'default' | 'turbo';
+  globalSecurityPreset?: 'request_review' | 'default' | 'turbo';
+  onChangeExecutionMode?: (mode: ExecutionSecurityPreset) => void;
+  onOpenProjectSettings?: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -112,7 +118,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onToggleLiveVoice,
   onChangeLiveVoiceMode,
   onOpenLiveVoiceOrb,
-  onNewChat
+  onNewChat,
+  executionMode = 'inherit',
+  effectiveSecurityPreset = 'default',
+  globalSecurityPreset = 'default',
+  onChangeExecutionMode,
+  onOpenProjectSettings
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -842,6 +853,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               </button>
             )}
 
+            {onChangeExecutionMode && onOpenProjectSettings && (
+              <ExecutionModeDropdown
+                currentMode={executionMode}
+                effectivePreset={effectiveSecurityPreset}
+                globalPreset={globalSecurityPreset}
+                onSelectMode={onChangeExecutionMode}
+                onOpenDetailedSettings={onOpenProjectSettings}
+                disabled={isStreaming}
+              />
+            )}
+
             {onToggleLiveVoice && (
               <button
                 type="button"
@@ -861,6 +883,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               <span className="font-semibold text-slate-300 truncate max-w-[280px]">
                 {activeSessionTitle}
               </span>
+            )}
+            {onChangeExecutionMode && onOpenProjectSettings && (
+              <ExecutionModeDropdown
+                currentMode={executionMode}
+                effectivePreset={effectiveSecurityPreset}
+                globalPreset={globalSecurityPreset}
+                onSelectMode={onChangeExecutionMode}
+                onOpenDetailedSettings={onOpenProjectSettings}
+                disabled={isStreaming}
+              />
             )}
           </div>
           <div className="flex items-center space-x-2">

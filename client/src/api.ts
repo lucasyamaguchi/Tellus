@@ -23,7 +23,9 @@ import {
   GitSafeAuditReport,
   SanitizationResult,
   ObsidianPluginInfo,
-  RecommendedObsidianPlugin
+  RecommendedObsidianPlugin,
+  ProjectSettings,
+  ExecutionSecurityPreset
 } from './types';
 
 const API_BASE = '/api';
@@ -84,6 +86,37 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path })
     });
+    return res.json();
+  },
+
+  // Project Settings & Security Presets
+  async getProjectSettings(projectPath?: string): Promise<ProjectSettings> {
+    const url = projectPath 
+      ? `${API_BASE}/project/settings?projectPath=${encodeURIComponent(projectPath)}`
+      : `${API_BASE}/project/settings`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  async saveProjectSettings(settings: Partial<ProjectSettings>, projectPath?: string): Promise<ProjectSettings> {
+    const res = await fetch(`${API_BASE}/project/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectPath, settings })
+    });
+    return res.json();
+  },
+
+  async getEffectiveSecurity(chatMode?: string, projectPath?: string): Promise<{
+    preset: 'request_review' | 'default' | 'turbo';
+    planReviewPolicy: 'always_proceed' | 'always_review';
+    source: 'chat' | 'project' | 'global';
+    settings: ProjectSettings;
+  }> {
+    const params = new URLSearchParams();
+    if (chatMode) params.append('chatMode', chatMode);
+    if (projectPath) params.append('projectPath', projectPath);
+    const res = await fetch(`${API_BASE}/project/effective-security?${params.toString()}`);
     return res.json();
   },
 
@@ -622,14 +655,15 @@ export const api = {
     onEvent?: (event: { type: string; data: any }) => void,
     onDone?: () => void,
     onError?: (err: any) => void,
-    isLiveVoice?: boolean
+    isLiveVoice?: boolean,
+    executionMode?: ExecutionSecurityPreset
   ) {
     const controller = new AbortController();
 
     fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice }),
+      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode }),
       signal: controller.signal
     })
       .then(async (response) => {

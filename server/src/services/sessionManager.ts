@@ -13,6 +13,7 @@ export interface ChatSession {
   messages: any[];
   isLiveVoice?: boolean;
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
+  executionMode?: 'request_review' | 'default' | 'turbo' | 'inherit';
 }
 
 export interface MessageSearchResult {
@@ -46,6 +47,7 @@ export class SessionManager {
     liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
     projectPath?: string;
     projectName?: string;
+    executionMode?: 'request_review' | 'default' | 'turbo' | 'inherit';
   }> {
     const dir = this.getSessionsDir(projectPath);
     const files = fs.readdirSync(dir);
@@ -71,7 +73,8 @@ export class SessionManager {
           isLiveVoice: !!session.isLiveVoice,
           liveVoiceMode: session.liveVoiceMode || 'mixed',
           projectPath,
-          projectName: path.basename(projectPath)
+          projectName: path.basename(projectPath),
+          executionMode: session.executionMode || 'inherit'
         });
       } catch {
         // ignore corrupted file

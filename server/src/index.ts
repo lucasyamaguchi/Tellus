@@ -20,6 +20,7 @@ import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
 import { PrivacySanitizer } from './services/security/privacySanitizer.js';
 import { ObsidianPluginManager } from './services/obsidian/obsidianPluginManager.js';
+import { ProjectSettingsManager } from './services/projectSettingsManager.js';
 import { normalizeVoiceVocabulary } from './utils/voiceVocabulary.js';
 
 const app = express();
@@ -163,6 +164,39 @@ app.post('/api/projects/close', (req, res) => {
     }
     const result = ProjectManager.closeOpenProject(projectPath);
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3.1 Project Settings & Execution Security Endpoints
+app.get('/api/project/settings', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const settings = ProjectSettingsManager.getSettings(targetPath);
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/project/settings', (req, res) => {
+  try {
+    const targetPath = (req.body.projectPath as string) || ProjectManager.getCurrentProject();
+    const settings = req.body.settings || req.body;
+    const updated = ProjectSettingsManager.saveSettings(targetPath, settings);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/project/effective-security', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const chatMode = req.query.chatMode as any;
+    const effective = ProjectSettingsManager.resolveEffectiveSecurity(chatMode, targetPath);
+    res.json(effective);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1219,9 +1253,12 @@ app.get('/api/terminal/tasks', (req, res) => {
 
 // 9. Streaming Agent Chat SSE Endpoint
 app.post('/api/chat/stream', async (req, res) => {
-  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice } = req.body;
+  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode } = req.body;
   const projectPath = ProjectManager.getCurrentProject();
   const config = ConfigManager.getConfig();
+
+  // Resolve Effective Security Preset and Plan Review Policy
+  const effectiveSecurity = ProjectSettingsManager.resolveEffectiveSecurity(executionMode, projectPath);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -1296,7 +1333,9 @@ app.post('/api/chat/stream', async (req, res) => {
         sendSSE(event.type, event.data);
       },
       12,
-      abortController.signal
+      abortController.signal,
+      effectiveSecurity.preset,
+      effectiveSecurity.planReviewPolicy
     );
 
     sendSSE('done', { status: 'completed' });

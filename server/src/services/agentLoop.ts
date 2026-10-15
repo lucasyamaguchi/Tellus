@@ -10,6 +10,7 @@ import { SkillManager } from './skills/skillManager.js';
 import { ProviderHub } from './providers/providerHub.js';
 import { ChatMessage, ToolDefinition } from './providers/openrouter.js';
 import { ConfigManager } from './configManager.js';
+import { ProjectSettingsManager } from './projectSettingsManager.js';
 
 // Strict Portunhol / Spanish replacement map for Portuguese responses (especially from DeepSeek)
 const PORTUNHOL_REPLACEMENTS: Array<[RegExp, string]> = [
@@ -347,6 +348,29 @@ export class AgentLoop {
     }
 
     try {
+      // Enforce Project Security Rules & Permissions
+      if (toolName === 'read_file') {
+        const check = ProjectSettingsManager.checkFileAccess(projectPath, args.path || '', 'read');
+        if (!check.allowed) {
+          return { error: check.reason || 'Leitura de arquivo não permitida pelas configurações do projeto' };
+        }
+      } else if (toolName === 'write_file' || toolName === 'edit_file') {
+        const check = ProjectSettingsManager.checkFileAccess(projectPath, args.path || '', 'write');
+        if (!check.allowed) {
+          return { error: check.reason || 'Modificação de arquivo não permitida pelas configurações do projeto' };
+        }
+      } else if (toolName === 'run_command') {
+        const check = ProjectSettingsManager.checkTerminalCommand(projectPath, args.command || '');
+        if (!check.allowed) {
+          return { error: check.reason || 'Execução de terminal não permitida pelas configurações do projeto' };
+        }
+      } else if (toolName === 'web_scrape') {
+        const check = ProjectSettingsManager.checkNetworkAccess(projectPath);
+        if (!check.allowed) {
+          return { error: check.reason || 'Acesso à rede / scraping não permitido pelas configurações do projeto' };
+        }
+      }
+
       switch (toolName) {
         case 'read_file': {
           const result = FileTools.readFile(projectPath, args.path);
@@ -488,7 +512,9 @@ export class AgentLoop {
       data: any;
     }) => void,
     maxToolSteps = 10,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    executionSecurityPreset?: 'request_review' | 'default' | 'turbo',
+    planReviewPolicy?: 'always_proceed' | 'always_review'
   ): Promise<{ fullMessages: ChatMessage[] }> {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
     const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
@@ -599,7 +625,37 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
   * "paipline" -> refere-se a pipeline.
 - Sempre interprete com inteligência contextual o termo técnico pretendido pelo usuário.`;
 
-    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${techVoiceInterpretationPolicy}\n\n${voiceGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    // Security & Execution Preset Policy (Antigravity parity)
+    const effectivePreset = executionSecurityPreset || ProjectSettingsManager.resolveEffectiveSecurity(undefined, projectPath).preset;
+    const effectivePlanPolicy = planReviewPolicy || ProjectSettingsManager.resolveEffectiveSecurity(undefined, projectPath).planReviewPolicy;
+
+    let executionPresetPolicy = '';
+    if (effectivePreset === 'turbo') {
+      executionPresetPolicy = `[⚡ MODO DE EXECUÇÃO: TURBO - AUTONOMIA TOTAL SEM RESTRIÇÕES]
+- Você está operando em Modo Turbo ("Run all commands without restrictions").
+- Você tem permissão total para executar todas as ferramentas necessárias (ler, criar, editar arquivos e rodar comandos no terminal) de forma imediata e autônoma para resolver o problema, sem interromper o usuário para pedir confirmação antes de cada passo. Seja ágil, direto e resolva a tarefa de ponta a ponta.`;
+    } else if (effectivePreset === 'request_review') {
+      executionPresetPolicy = `[🛡️ MODO DE EXECUÇÃO: REQUEST REVIEW - REQUER APROVAÇÃO PRÉVIA]
+- Você está operando em modo de estrita supervisão ("Every command requires approval").
+- ANTES de modificar qualquer arquivo (write_file, edit_file) ou executar comandos no terminal (run_command), você DEVE descrever claramente a ação planejada para o usuário e solicitar confirmação explícita no chat.
+- Ferramentas de leitura e consulta podem ser utilizadas para diagnóstico, mas nenhuma mutação no projeto pode ser realizada sem autorização prévia do usuário.`;
+    } else {
+      executionPresetPolicy = `[🔒 MODO DE EXECUÇÃO: DEFAULT - CONFIRMAR OPERAÇÕES SENSÍVEIS]
+- Você está operando em Modo Padrão ("Ask before sensitive operations").
+- Operações de leitura, busca e anotações funcionam normalmente de forma autônoma.
+- Para alterações sensíveis, comandos potencialmente destrutivos ou reestruturações amplas de código, apresente os passos e confirme com o usuário antes de prosseguir se houver risco ao projeto.`;
+    }
+
+    let planPolicyGuideline = '';
+    if (effectivePlanPolicy === 'always_review') {
+      planPolicyGuideline = `[📋 POLÍTICA DE PLANO: ALWAYS REVIEW]
+- Quando for criar um plano de implementação, arquitetura ou refatoração profunda (artefato 'plan'), elabore o plano detalhado no artefato, apresente as etapas no chat e aguarde a validação do usuário antes de iniciar as modificações em código.`;
+    } else {
+      planPolicyGuideline = `[🚀 POLÍTICA DE PLANO: ALWAYS PROCEED]
+- Quando for criar um plano, registre o artefato e prossiga imediatamente com as etapas de implementação sem esperar intervenção.`;
+    }
+
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${techVoiceInterpretationPolicy}\n\n${voiceGuideline}\n\n${executionPresetPolicy}\n\n${planPolicyGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     // Process Multimodal Images from .agentic/attachments/
     const processedMessages: ChatMessage[] = messages.map(m => {

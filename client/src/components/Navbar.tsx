@@ -26,7 +26,8 @@ import {
   Globe,
   Check,
   Plus,
-  Wrench
+  Wrench,
+  Shield
 } from 'lucide-react';
 import { AppConfig, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
@@ -76,6 +77,7 @@ interface NavbarProps {
   onSelectLanguage?: (lang: LanguageOption) => void;
   onNewChat?: () => void;
   onOpenSelfHealing?: () => void;
+  onOpenProjectSettings?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -105,6 +107,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectLanguage,
   onNewChat,
   onOpenSelfHealing,
+  onOpenProjectSettings,
 }) => {
   const [isMenuDropdownOpen, setIsMenuDropdownOpen] = useState(false);
   const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
@@ -507,6 +510,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {configuredKeysCount}/4
                 </span>
               </button>
+
+              {/* Project Settings & Security Presets */}
+              {onOpenProjectSettings && (
+                <button
+                  onClick={() => {
+                    setIsMenuDropdownOpen(false);
+                    onOpenProjectSettings();
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-panel text-slate-200 flex items-center justify-between"
+                  title="Configurações de Execução, Permissões e Segurança do Projeto"
+                >
+                  <div className="flex items-center space-x-2">
+                    <Shield className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Project Settings</span>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-panel border border-card-border text-slate-400 font-mono">
+                    Permissões
+                  </span>
+                </button>
+              )}
 
               {/* Theme Toggle (Dark / Light) */}
               {onToggleTheme && (
