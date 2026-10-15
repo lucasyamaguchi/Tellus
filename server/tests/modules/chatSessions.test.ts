@@ -113,4 +113,30 @@ describe('💬 Módulo 4: Gerenciador de Sessões de Chat & Multi-Projeto', () =
     const betaSessions = SessionManager.listSessions(projectBeta);
     assert.equal(betaSessions.length, 1);
   });
+
+  test('6. Persistência de pipeline multi-agente na sessão (ChatSession.pipeline)', () => {
+    const sessionWithPipeline: ChatSession = {
+      id: 'session_pipeline_1',
+      title: 'Sessão com Pipeline Customizado',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'anthropic/claude-3.7-sonnet',
+      pipeline: {
+        primaryModel: 'anthropic/claude-3.7-sonnet',
+        plannerModel: 'deepseek/deepseek-r1',
+        codingModel: 'anthropic/claude-3.7-sonnet',
+        reasoningModel: 'openai/o3-mini',
+        fastToolsModel: 'google/gemini-2.0-flash-001'
+      },
+      messages: [
+        { role: 'user', content: 'Iniciando arquitetura especializada' }
+      ]
+    };
+
+    SessionManager.saveSession(projectAlpha, sessionWithPipeline);
+
+    const reloaded = SessionManager.getSession(projectAlpha, 'session_pipeline_1');
+    assert.ok(reloaded);
+    assert.deepEqual(reloaded?.pipeline, sessionWithPipeline.pipeline);
+  });
 });

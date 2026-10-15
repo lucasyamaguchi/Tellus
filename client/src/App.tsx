@@ -116,7 +116,14 @@ export const App: React.FC = () => {
 
   // Token Efficiency & Multi-Agent Pipeline State
   const [tokenEfficiency, setTokenEfficiency] = useState<boolean>(false);
-  const [agentPipeline, setAgentPipeline] = useState<AgentPipelineConfig | undefined>(undefined);
+  const [agentPipeline, setAgentPipeline] = useState<AgentPipelineConfig | undefined>(() => {
+    try {
+      const saved = localStorage.getItem('tellus_agent_pipeline');
+      return saved ? JSON.parse(saved) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
 
   // Target Note navigation from Chat
   const [targetNoteIdOrTitle, setTargetNoteIdOrTitle] = useState<string | null>(null);
@@ -153,6 +160,12 @@ export const App: React.FC = () => {
       if (cfg.defaultModel) setActiveModel(cfg.defaultModel);
       if (cfg.customRoutines && cfg.customRoutines.length > 0) {
         setActiveRoutine(cfg.customRoutines[0]);
+      }
+      if (cfg.pipeline) {
+        setAgentPipeline(cfg.pipeline);
+        try {
+          localStorage.setItem('tellus_agent_pipeline', JSON.stringify(cfg.pipeline));
+        } catch {}
       }
     });
 
@@ -235,7 +248,7 @@ export const App: React.FC = () => {
     setMainViewMode('agent');
     setIsLiveVoiceActiveInChat(false);
     setChatLiveVoiceMode('mixed');
-    const pipeline = {
+    const pipeline = agentPipeline || config?.pipeline || {
       primaryModel: activeModel,
       plannerModel: '',
       codingModel: '',
@@ -284,13 +297,14 @@ export const App: React.FC = () => {
     setMainViewMode('agent');
     setIsLiveVoiceActiveInChat(true);
     setChatLiveVoiceMode(mode);
-    setAgentPipeline({
+    const pipeline = agentPipeline || config?.pipeline || {
       primaryModel: activeModel,
       plannerModel: '',
       codingModel: '',
       reasoningModel: '',
       fastToolsModel: ''
-    });
+    };
+    setAgentPipeline(pipeline);
     try {
       await api.saveSession({
         id: newId,
@@ -375,13 +389,13 @@ export const App: React.FC = () => {
           if (session.pipeline) {
             setAgentPipeline(session.pipeline);
           } else {
-            setAgentPipeline({
+            setAgentPipeline(prev => ({
               primaryModel: cleanModel,
-              plannerModel: '',
-              codingModel: '',
-              reasoningModel: '',
-              fastToolsModel: ''
-            });
+              plannerModel: prev?.plannerModel || config?.pipeline?.plannerModel || '',
+              codingModel: prev?.codingModel || config?.pipeline?.codingModel || '',
+              reasoningModel: prev?.reasoningModel || config?.pipeline?.reasoningModel || '',
+              fastToolsModel: prev?.fastToolsModel || config?.pipeline?.fastToolsModel || ''
+            }));
           }
         }
         if (session.tokenEfficiency !== undefined) setTokenEfficiency(session.tokenEfficiency);
@@ -678,14 +692,34 @@ export const App: React.FC = () => {
   const handleSelectModel = (modelId: string) => {
     const cleanId = modelId.replace(/:batch$/i, '').trim();
     setActiveModel(cleanId);
-    setAgentPipeline(prev => ({
-      primaryModel: cleanId,
-      plannerModel: prev?.plannerModel || '',
-      codingModel: prev?.codingModel || '',
-      reasoningModel: prev?.reasoningModel || '',
-      fastToolsModel: prev?.fastToolsModel || ''
-    }));
-    api.updateConfig({ defaultModel: cleanId }).then((c) => setConfig(c));
+    setAgentPipeline(prev => {
+      const updated = {
+        primaryModel: cleanId,
+        plannerModel: prev?.plannerModel || '',
+        codingModel: prev?.codingModel || '',
+        reasoningModel: prev?.reasoningModel || '',
+        fastToolsModel: prev?.fastToolsModel || ''
+      };
+      api.updateConfig({ defaultModel: cleanId, pipeline: updated }).then((c) => setConfig(c)).catch(() => {});
+      try {
+        localStorage.setItem('tellus_agent_pipeline', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const handleSavePipeline = (p: AgentPipelineConfig) => {
+    setAgentPipeline(p);
+    try {
+      localStorage.setItem('tellus_agent_pipeline', JSON.stringify(p));
+    } catch {}
+    api.updateConfig({ pipeline: p }).then(c => setConfig(c)).catch(() => {});
+    if (activeSessionId) {
+      api.saveSession({
+        id: activeSessionId,
+        pipeline: p
+      }).catch(() => {});
+    }
   };
 
   const handleSelectRoutine = (routine: Routine) => {
@@ -1138,7 +1172,7 @@ export const App: React.FC = () => {
         curatedModels={models.curated}
         allModels={models.all}
         currentPipeline={agentPipeline}
-        onSavePipeline={(p) => setAgentPipeline(p)}
+        onSavePipeline={handleSavePipeline}
         onSelectPrimaryModel={handleSelectModel}
       />
 
