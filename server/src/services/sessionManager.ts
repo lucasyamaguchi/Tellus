@@ -44,6 +44,8 @@ export class SessionManager {
     preview: string;
     isLiveVoice?: boolean;
     liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
+    projectPath?: string;
+    projectName?: string;
   }> {
     const dir = this.getSessionsDir(projectPath);
     const files = fs.readdirSync(dir);
@@ -67,7 +69,9 @@ export class SessionManager {
           messageCount: session.messages.length,
           preview,
           isLiveVoice: !!session.isLiveVoice,
-          liveVoiceMode: session.liveVoiceMode || 'mixed'
+          liveVoiceMode: session.liveVoiceMode || 'mixed',
+          projectPath,
+          projectName: path.basename(projectPath)
         });
       } catch {
         // ignore corrupted file

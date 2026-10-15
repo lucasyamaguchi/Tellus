@@ -257,6 +257,8 @@ export interface ChatSessionMetadata {
   preview: string;
   isLiveVoice?: boolean;
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
+  projectPath?: string;
+  projectName?: string;
 }
 
 export interface ChatSession {
@@ -271,6 +273,8 @@ export interface ChatSession {
   messages: Message[];
   isLiveVoice?: boolean;
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
+  projectPath?: string;
+  projectName?: string;
 }
 
 export interface TerminalTask {

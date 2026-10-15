@@ -183,7 +183,7 @@ export const App: React.FC = () => {
 
   const loadSessions = async () => {
     try {
-      const list = await api.listSessions();
+      const list = await api.listSessions(true);
       setSessions(list);
       if (list.length > 0 && !activeSessionId) {
         handleSelectSession(list[0].id);
@@ -232,9 +232,11 @@ export const App: React.FC = () => {
         pipeline,
         messages: [],
         isLiveVoice: false,
-        liveVoiceMode: 'mixed'
+        liveVoiceMode: 'mixed',
+        projectPath: currentProject?.path,
+        projectName: currentProject?.name
       });
-      const list = await api.listSessions();
+      const list = await api.listSessions(true);
       setSessions(list);
     } catch {
       // ignore
@@ -276,9 +278,11 @@ export const App: React.FC = () => {
         pipeline: agentPipeline,
         messages: [],
         isLiveVoice: true,
-        liveVoiceMode: mode
+        liveVoiceMode: mode,
+        projectPath: currentProject?.path,
+        projectName: currentProject?.name
       });
-      api.listSessions().then(list => setSessions(list));
+      api.listSessions(true).then(list => setSessions(list));
       if (initialPrompt) {
         setTimeout(() => {
           handleSendMessage(initialPrompt);
@@ -327,6 +331,12 @@ export const App: React.FC = () => {
     try {
       const session = await api.getSession(sessionId);
       if (session) {
+        if (session.projectPath && currentProject && session.projectPath !== currentProject.path) {
+          api.openProject(session.projectPath).then(overview => {
+            setCurrentProject(overview);
+            loadOpenProjects();
+          }).catch(() => {});
+        }
         setActiveSessionId(session.id);
         setMessages(session.messages || []);
         setIsLiveVoiceActiveInChat(!!session.isLiveVoice);
@@ -414,10 +424,12 @@ export const App: React.FC = () => {
         pipeline: agentPipeline,
         messages: currentMsgs,
         isLiveVoice: isVoice,
-        liveVoiceMode: vMode
+        liveVoiceMode: vMode,
+        projectPath: currentProject?.path,
+        projectName: currentProject?.name
       });
 
-      api.listSessions().then(list => setSessions(list));
+      api.listSessions(true).then(list => setSessions(list));
     } catch {
       // ignore
     }

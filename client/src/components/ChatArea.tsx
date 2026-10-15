@@ -565,6 +565,89 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    const imageFiles: File[] = [];
+
+    // Check files in clipboard
+    if (clipboardData.files && clipboardData.files.length > 0) {
+      for (let i = 0; i < clipboardData.files.length; i++) {
+        const file = clipboardData.files[i];
+        if (file.type && file.type.startsWith('image/')) {
+          imageFiles.push(file);
+        }
+      }
+    }
+
+    // Check items fallback (e.g. Snipping tool / print screen)
+    if (imageFiles.length === 0 && clipboardData.items) {
+      for (let i = 0; i < clipboardData.items.length; i++) {
+        const item = clipboardData.items[i];
+        if (item.type && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            imageFiles.push(file);
+          }
+        }
+      }
+    }
+
+    if (imageFiles.length === 0) {
+      // Regular text paste: let default browser handle it
+      return;
+    }
+
+    // Contains image from clipboard: prevent default binary text injection
+    e.preventDefault();
+
+    // If there is also text in clipboard, append to input
+    const textData = clipboardData.getData('text');
+    if (textData) {
+      setInput(prev => prev + textData);
+    }
+
+    setIsUploading(true);
+
+    try {
+      const filesPayload: Array<{ name: string; type: string; base64: string }> = [];
+
+      for (let i = 0; i < imageFiles.length; i++) {
+        const file = imageFiles[i];
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve) => {
+          reader.onload = () => {
+            const res = reader.result as string;
+            const base64Content = res.split(',')[1] || res;
+            resolve(base64Content);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        const ext = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/webp' ? 'webp' : 'png';
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = (file.name && file.name !== 'image.png') 
+          ? file.name 
+          : `clipboard_${timestamp}.${ext}`;
+
+        filesPayload.push({
+          name: fileName,
+          type: file.type || 'image/png',
+          base64
+        });
+      }
+
+      const uploaded = await api.uploadFiles(filesPayload);
+      setAttachments(prev => [...prev, ...uploaded]);
+    } catch (err: any) {
+      console.error('[ChatArea] Erro ao colar imagem da área de transferência:', err);
+      alert(`Erro ao anexar imagem da área de transferência: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const removeAttachment = (id: string) => {
     setAttachments(prev => prev.filter(a => a.id !== id));
   };
@@ -639,6 +722,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   return (
     <div 
       onClick={handleChatContainerClick}
+      onPaste={handlePaste}
       className="flex-1 flex flex-col h-full min-h-0 bg-background relative overflow-hidden chat-selectable select-text"
     >
       {/* Top Header / Live Voice Bar */}
@@ -1679,6 +1763,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           <textarea
             ref={textareaRef}
             value={input}
+            onPaste={handlePaste}
             onClick={(e) => {
               e.stopPropagation();
               textareaRef.current?.focus();

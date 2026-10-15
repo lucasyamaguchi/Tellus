@@ -3,7 +3,6 @@ import {
   FolderTree, 
   Brain, 
   Bot, 
-  MessageSquare,
   ChevronRight, 
   ChevronDown, 
   FileCode, 
@@ -15,13 +14,10 @@ import {
   ArrowRightLeft,
   Plus,
   Trash2,
-  Clock,
-  Sparkles,
-  FileText,
-  Zap,
   FolderGit2,
   X,
-  FolderSearch
+  Filter,
+  Search
 } from 'lucide-react';
 import { FileTreeItem, MemoryPage, Routine, ProjectOverview, ChatSessionMetadata } from '../types';
 
@@ -49,6 +45,28 @@ interface SidebarProps {
   onDeleteSession: (sessionId: string) => void;
 }
 
+function pathBasename(p: string): string {
+  if (!p) return 'Projeto';
+  const clean = p.replace(/[\\/]+$/, '');
+  const parts = clean.split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+function formatRelativeTime(timestamp: number): string {
+  if (!timestamp) return '';
+  const now = Date.now();
+  const diffMs = Math.max(0, now - timestamp);
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHours = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) return `${diffDays}d`;
+  if (diffHours > 0) return `${diffHours}h`;
+  if (diffMin > 0) return `${diffMin}m`;
+  return 'agora';
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({
   currentProject,
   openProjects,
@@ -63,8 +81,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectRoutine,
   onOpenProjectModal,
   onSwitchProject,
-  onOpenNotes,
-  onOpenSkills,
   recentProjects,
   sessions,
   activeSessionId,
@@ -72,12 +88,94 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewSession,
   onDeleteSession
 }) => {
-  const [activeTab, setActiveTab] = useState<'chats' | 'files' | 'projects' | 'memory' | 'routines'>('chats');
+  const [activeTab, setActiveTab] = useState<'projects' | 'files' | 'memory' | 'routines'>('projects');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
+  const [searchFilter, setSearchFilter] = useState<string>('');
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => ({ ...prev, [path]: !prev[path] }));
   };
+
+  const toggleProject = (path: string) => {
+    setCollapsedProjects(prev => ({ ...prev, [path]: !prev[path] }));
+  };
+
+  // Build Project Groups containing their respective chat sessions
+  interface ProjectGroup {
+    path: string;
+    name: string;
+    isCurrent: boolean;
+    sessions: ChatSessionMetadata[];
+  }
+
+  const projectMap = new Map<string, ProjectGroup>();
+
+  // 1. Current Project
+  if (currentProject) {
+    projectMap.set(currentProject.path, {
+      path: currentProject.path,
+      name: currentProject.name || pathBasename(currentProject.path),
+      isCurrent: true,
+      sessions: []
+    });
+  }
+
+  // 2. Open Projects
+  for (const p of openProjects) {
+    if (!projectMap.has(p.path)) {
+      projectMap.set(p.path, {
+        path: p.path,
+        name: p.name || pathBasename(p.path),
+        isCurrent: currentProject?.path === p.path,
+        sessions: []
+      });
+    }
+  }
+
+  // 3. Recent Projects
+  for (const rPath of recentProjects) {
+    if (!projectMap.has(rPath)) {
+      projectMap.set(rPath, {
+        path: rPath,
+        name: pathBasename(rPath),
+        isCurrent: currentProject?.path === rPath,
+        sessions: []
+      });
+    }
+  }
+
+  // 4. Distribute sessions into projects
+  for (const s of sessions) {
+    const targetProjPath = s.projectPath || currentProject?.path;
+    if (targetProjPath) {
+      let group = projectMap.get(targetProjPath);
+      if (!group) {
+        group = {
+          path: targetProjPath,
+          name: s.projectName || pathBasename(targetProjPath),
+          isCurrent: currentProject?.path === targetProjPath,
+          sessions: []
+        };
+        projectMap.set(targetProjPath, group);
+      }
+      group.sessions.push(s);
+    } else if (currentProject) {
+      projectMap.get(currentProject.path)?.sessions.push(s);
+    }
+  }
+
+  const projectGroups = Array.from(projectMap.values());
+  // Sort: current project first, then projects with recent sessions, then alphabetically
+  projectGroups.sort((a, b) => {
+    if (a.isCurrent) return -1;
+    if (b.isCurrent) return 1;
+    const aLatest = a.sessions[0]?.updatedAt || 0;
+    const bLatest = b.sessions[0]?.updatedAt || 0;
+    if (aLatest !== bLatest) return bLatest - aLatest;
+    return a.name.localeCompare(b.name);
+  });
 
   const renderFileTree = (items: FileTreeItem[], depth = 0) => {
     return (
@@ -131,44 +229,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className="w-full h-[calc(100vh-3.5rem)] border-r border-card-border bg-sidebar flex flex-col select-none overflow-hidden">
-      {/* Top Workspace Header */}
-      <div className="p-3 border-b border-card-border flex items-center justify-between">
-        <div className="flex items-center space-x-2 overflow-hidden flex-1 mr-2">
-          <div className="w-6 h-6 rounded bg-accent/15 border border-accent/30 flex items-center justify-center shrink-0">
-            <FolderGit2 className="w-3.5 h-3.5 text-accent-light" />
-          </div>
-          <div className="overflow-hidden">
-            <span className="text-xs font-bold text-slate-200 block truncate">
-              {currentProject ? currentProject.name : 'Nenhum Projeto'}
-            </span>
-            <span className="text-[10px] text-slate-400 block truncate font-mono">
-              {currentProject?.path || 'Local'}
-            </span>
-          </div>
+      {/* Top Section Header: Projects with filter and new project action buttons (Matching reference UI) */}
+      <div className="px-3 pt-3 pb-2 border-b border-card-border flex items-center justify-between">
+        <span className="text-sm font-semibold text-slate-200 tracking-tight">
+          Projects
+        </span>
+        <div className="flex items-center space-x-1 text-slate-400">
+          <button
+            onClick={() => setIsFilterOpen(!isFilterOpen)}
+            className={`p-1 rounded-md hover:bg-card-border hover:text-white transition-colors ${
+              isFilterOpen ? 'text-accent-light bg-card-border' : ''
+            }`}
+            title="Filtrar projetos e conversas"
+          >
+            <Filter className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onOpenProjectModal}
+            className="p-1 rounded-md hover:bg-card-border hover:text-white transition-colors"
+            title="Abrir pasta de projeto"
+          >
+            <FolderPlusIcon className="w-4 h-4" />
+          </button>
         </div>
-
-        <button
-          onClick={onOpenProjectModal}
-          className="p-1 rounded-lg bg-panel hover:bg-card-border border border-card-border text-slate-400 hover:text-white transition-colors"
-          title="Abrir ou trocar projeto local"
-        >
-          <FolderPlusIcon className="w-3.5 h-3.5" />
-        </button>
       </div>
 
+      {/* Filter / Search Bar (collapsible) */}
+      {isFilterOpen && (
+        <div className="px-3 py-2 border-b border-card-border bg-panel animate-in fade-in">
+          <div className="relative">
+            <input
+              type="text"
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="Filtrar projetos ou chats..."
+              className="w-full bg-card border border-card-border rounded-lg pl-7 pr-7 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent"
+              autoFocus
+            />
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-1.5" />
+            {searchFilter && (
+              <button
+                onClick={() => setSearchFilter('')}
+                className="absolute right-2 top-1.5 text-slate-500 hover:text-slate-300"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Tab Switcher Icons */}
-      <div className="grid grid-cols-5 border-b border-card-border bg-panel p-1 gap-0.5">
-        <button
-          onClick={() => setActiveTab('chats')}
-          className={`py-1.5 rounded flex items-center justify-center text-xs transition-all ${
-            activeTab === 'chats'
-              ? 'bg-card text-accent-light font-medium shadow-sm'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Histórico de Conversas"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-        </button>
+      <div className="grid grid-cols-4 border-b border-card-border bg-panel p-1 gap-0.5">
         <button
           onClick={() => setActiveTab('projects')}
           className={`py-1.5 rounded flex items-center justify-center text-xs transition-all ${
@@ -176,7 +288,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'bg-card text-accent-light font-medium shadow-sm'
               : 'text-slate-400 hover:text-slate-200'
           }`}
-          title="Projetos Abertos"
+          title="Projetos & Chats"
         >
           <FolderGit2 className="w-3.5 h-3.5" />
         </button>
@@ -216,169 +328,180 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto p-3 scrollbar-thin scrollbar-thumb-card-border">
-        {/* TAB 1: CHATS HISTORY & SESSIONS */}
-        {activeTab === 'chats' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
-                Conversas ({sessions.length})
-              </span>
-              <button
-                onClick={onNewSession}
-                className="px-2 py-1 rounded-md bg-accent/20 hover:bg-accent hover:text-white text-accent-light text-[11px] font-medium flex items-center space-x-1 transition-all"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Novo Chat</span>
-              </button>
-            </div>
-
-            <div className="space-y-1.5 pt-1">
-              {sessions.length === 0 ? (
-                <div className="p-4 text-center text-slate-500 text-xs space-y-2">
-                  <p>Nenhuma conversa salva ainda.</p>
-                  <button
-                    type="button"
-                    onClick={onNewSession}
-                    className="px-3 py-1.5 rounded-lg bg-accent/20 hover:bg-accent hover:text-white text-accent-light text-xs font-medium inline-flex items-center space-x-1.5 transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Iniciar Novo Chat</span>
-                  </button>
-                </div>
-              ) : (
-                sessions.map((s) => {
-                  const isActive = activeSessionId === s.id;
-                  return (
-                    <div
-                      key={s.id}
-                      className={`group rounded-xl p-2.5 transition-all flex items-start justify-between cursor-pointer border ${
-                        isActive
-                          ? 'bg-accent/15 border-accent text-white shadow-sm'
-                          : 'bg-card border-card-border text-slate-300 hover:bg-card-border/40'
-                      }`}
-                      onClick={() => onSelectSession(s.id)}
-                    >
-                      <div className="overflow-hidden pr-2 flex-1">
-                        <div className="flex items-center space-x-1.5 truncate">
-                          {s.isLiveVoice && (
-                            <span 
-                              className="text-xs shrink-0" 
-                              title={`Live Voice (${s.liveVoiceMode === 'voice_only' ? 'Somente Voz' : s.liveVoiceMode === 'voice_output_only' ? 'Retorno em Voz' : 'Misto'})`}
-                            >
-                              🎙️
-                            </span>
-                          )}
-                          <span className="font-semibold text-xs truncate text-slate-100">
-                            {s.title}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 truncate block mt-0.5 font-mono">
-                          {s.preview}
-                        </span>
-                        <div className="flex items-center space-x-2 text-[9px] text-slate-500 mt-1 font-mono">
-                          <span>{new Date(s.updatedAt).toLocaleDateString()}</span>
-                          <span>• {s.messageCount} msgs</span>
-                          {s.isLiveVoice && (
-                            <span className="text-red-400 font-medium">
-                              • {s.liveVoiceMode === 'voice_only' ? 'Voz' : s.liveVoiceMode === 'voice_output_only' ? 'Retorno Voz' : 'Misto'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm('Deseja excluir este chat?')) {
-                            onDeleteSession(s.id);
-                          }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 text-slate-500 transition-opacity"
-                        title="Excluir chat"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: PROJETOS ABERTOS (MULTI-PROJECT WORKSPACE) */}
+      <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-card-border">
+        {/* TAB 1: PROJECTS WITH CHATS NESTED INSIDE (REFERENCE UI) */}
         {activeTab === 'projects' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
-                Projetos Abertos ({openProjects.length})
-              </span>
-              <button
-                onClick={onOpenProjectModal}
-                className="px-2 py-1 rounded-md bg-accent/20 hover:bg-accent hover:text-white text-accent-light text-[11px] font-medium flex items-center space-x-1 transition-all"
-                title="Abrir outro projeto e adicionar à lista"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Abrir Pasta</span>
-              </button>
-            </div>
+          <div className="space-y-1.5">
+            {projectGroups.length === 0 ? (
+              <div className="p-4 text-center text-slate-500 text-xs space-y-2">
+                <p>Nenhum projeto aberto.</p>
+                <button
+                  type="button"
+                  onClick={onOpenProjectModal}
+                  className="px-3 py-1.5 rounded-lg bg-accent/20 hover:bg-accent hover:text-white text-accent-light text-xs font-medium inline-flex items-center space-x-1.5 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Abrir Projeto</span>
+                </button>
+              </div>
+            ) : (
+              projectGroups
+                .filter(group => {
+                  if (!searchFilter.trim()) return true;
+                  const q = searchFilter.toLowerCase();
+                  const matchesName = group.name.toLowerCase().includes(q) || group.path.toLowerCase().includes(q);
+                  const matchesChat = group.sessions.some(s => s.title.toLowerCase().includes(q) || (s.preview && s.preview.toLowerCase().includes(q)));
+                  return matchesName || matchesChat;
+                })
+                .map((group) => {
+                  const isExpanded = !collapsedProjects[group.path];
+                  const filteredSessions = group.sessions.filter(s => {
+                    if (!searchFilter.trim()) return true;
+                    const q = searchFilter.toLowerCase();
+                    return group.name.toLowerCase().includes(q) || s.title.toLowerCase().includes(q) || (s.preview && s.preview.toLowerCase().includes(q));
+                  });
 
-            <div className="space-y-1.5 pt-1">
-              {openProjects.length === 0 ? (
-                <div className="p-4 text-center text-slate-500 text-xs">
-                  Nenhum projeto aberto.
-                </div>
-              ) : (
-                openProjects.map((p) => {
-                  const isActive = currentProject?.path === p.path;
                   return (
-                    <div
-                      key={p.path}
-                      onClick={() => onSwitchProject(p.path)}
-                      className={`group rounded-xl p-2.5 transition-all flex items-start justify-between cursor-pointer border ${
-                        isActive
-                          ? 'bg-accent/15 border-accent text-white shadow-sm'
-                          : 'bg-card border-card-border text-slate-300 hover:bg-card-border/40'
-                      }`}
-                    >
-                      <div className="overflow-hidden pr-2 flex-1">
-                        <div className="flex items-center space-x-1.5">
-                          <FolderGit2 className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-accent-light' : 'text-slate-400'}`} />
-                          <span className="font-semibold text-xs truncate text-slate-100">
-                            {p.name}
+                    <div key={group.path} className="space-y-0.5">
+                      {/* Project Header Row (Folder + Project Name) */}
+                      <div
+                        onClick={() => toggleProject(group.path)}
+                        className={`group flex items-center justify-between py-1 px-2 rounded-lg cursor-pointer text-xs transition-colors ${
+                          group.isCurrent 
+                            ? 'hover:bg-card-border/40' 
+                            : 'hover:bg-card-border/30'
+                        }`}
+                        title={group.path}
+                      >
+                        <div className="flex items-center space-x-2 overflow-hidden flex-1">
+                          <Folder className={`w-3.5 h-3.5 shrink-0 ${group.isCurrent ? 'text-sky-400' : 'text-slate-400'}`} />
+                          <span className={`truncate font-medium ${group.isCurrent ? 'text-sky-400 font-semibold' : 'text-slate-300 group-hover:text-white'}`}>
+                            {group.name}
                           </span>
                         </div>
-                        <span className="text-[10px] text-slate-400 truncate block mt-0.5 font-mono">
-                          {p.path}
-                        </span>
-                        {isActive && (
-                          <span className="inline-block mt-1 text-[9px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-800/40 px-1.5 py-0.5 rounded">
-                            ● Ativo Agora
+
+                        <div className="flex items-center space-x-1 shrink-0">
+                          {/* Quick New Chat Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (group.isCurrent) {
+                                onNewSession();
+                              } else {
+                                onSwitchProject(group.path);
+                                setTimeout(() => onNewSession(), 120);
+                              }
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-card-border text-slate-400 hover:text-white transition-opacity"
+                            title={`Novo Chat em ${group.name}`}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          
+                          {/* Close/Remove project from open list (if not current) */}
+                          {!group.isCurrent && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onCloseOpenProject(group.path);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-card-border text-slate-500 hover:text-rose-400 transition-opacity"
+                              title="Remover projeto dos abertos"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+
+                          <span className="text-slate-500">
+                            {isExpanded ? (
+                              <ChevronDown className="w-3 h-3" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3" />
+                            )}
                           </span>
-                        )}
+                        </div>
                       </div>
 
-                      {/* Close Project Button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCloseOpenProject(p.path);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 text-slate-500 transition-opacity"
-                        title="Fechar e remover este projeto dos abertos"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      {/* Indented Chat Sessions Underneath Project */}
+                      {isExpanded && (
+                        <div className="pl-5 space-y-0.5">
+                          {filteredSessions.length === 0 ? (
+                            <div className="py-1 px-2 text-[11px] text-slate-500 italic flex items-center justify-between">
+                              <span>Sem chats recentes</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!group.isCurrent) onSwitchProject(group.path);
+                                  setTimeout(() => onNewSession(), 100);
+                                }}
+                                className="text-[10px] text-accent-light hover:underline font-sans not-italic"
+                              >
+                                + Iniciar
+                              </button>
+                            </div>
+                          ) : (
+                            filteredSessions.map((s) => {
+                              const isActive = activeSessionId === s.id;
+                              return (
+                                <div
+                                  key={s.id}
+                                  onClick={() => {
+                                    if (!group.isCurrent) {
+                                      onSwitchProject(group.path);
+                                    }
+                                    onSelectSession(s.id);
+                                  }}
+                                  className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-all ${
+                                    isActive
+                                      ? 'bg-[#282a2e] text-white font-semibold shadow-xs border border-white/10'
+                                      : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/30'
+                                  }`}
+                                  title={`${s.title}\n${s.preview}`}
+                                >
+                                  <div className="overflow-hidden pr-2 flex-1 flex items-center space-x-1.5">
+                                    {s.isLiveVoice && (
+                                      <span className="text-[10px] shrink-0" title="Live Voice">🎙️</span>
+                                    )}
+                                    <span className="truncate">
+                                      {s.title}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center space-x-1.5 shrink-0">
+                                    <span className="text-[10px] text-slate-500 font-mono">
+                                      {formatRelativeTime(s.updatedAt)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm('Deseja excluir esta conversa?')) {
+                                          onDeleteSession(s.id);
+                                        }
+                                      }}
+                                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-rose-400 text-slate-500 transition-opacity"
+                                      title="Excluir chat"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })
-              )}
-            </div>
+            )}
           </div>
         )}
 
-        {/* TAB 3: FILES EXPLORER */}
+        {/* TAB 2: FILES EXPLORER */}
         {activeTab === 'files' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
@@ -394,7 +517,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* TAB 4: MEMORY WIKI (ai-memory) */}
+        {/* TAB 3: MEMORY WIKI (ai-memory) */}
         {activeTab === 'memory' && (
           <div className="space-y-4">
             <div className="p-2.5 rounded-lg bg-brand-cyan/10 border border-brand-cyan/20 text-xs text-brand-cyan space-y-1">
@@ -467,7 +590,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* TAB 5: SPECIALIST ROUTINES */}
+        {/* TAB 4: SPECIALIST ROUTINES */}
         {activeTab === 'routines' && (
           <div className="space-y-3">
             <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold px-1">
