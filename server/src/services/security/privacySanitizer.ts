@@ -93,6 +93,12 @@ export class PrivacySanitizer {
       name: 'Stripe API Key',
       regex: /(?:sk|pk)_(?:test|live)_[0-9a-zA-Z]{24,}/g,
       redactedPlaceholder: '[REDACTED_STRIPE_KEY]'
+    },
+    {
+      id: 'password_assignment',
+      name: 'Password Credential',
+      regex: /(?:password|passwd|pwd|db_password)\s*[:=]\s*["'][^"'\s]{6,}["']/gi,
+      redactedPlaceholder: '[REDACTED_PASSWORD]'
     }
   ];
 
@@ -144,6 +150,13 @@ export class PrivacySanitizer {
         details: 'Arquivo .gitignore não foi encontrado na raiz do projeto.'
       });
     } else {
+      items.push({
+        category: 'gitignore',
+        name: 'Presença do .gitignore',
+        passed: true,
+        severity: 'info',
+        details: 'Arquivo .gitignore presente na raiz do projeto.'
+      });
       const gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8');
       const requiredPatterns = [
         { pattern: '.env', label: 'Bloqueio de arquivos .env' },

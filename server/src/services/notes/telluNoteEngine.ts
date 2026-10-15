@@ -109,10 +109,10 @@ export class TelluNoteEngine {
     };
   }
 
-  // Extract [[Wikilinks]] from markdown content
+  // Extract [[Wikilinks]] from markdown content (supporting aliases [[Target|Alias]])
   private static extractWikilinks(content: string): string[] {
     const matches = content.match(/\[\[(.*?)\]\]/g) || [];
-    return Array.from(new Set(matches.map(m => m.replace(/\[\[|\]\]/g, '').trim())));
+    return Array.from(new Set(matches.map(m => m.replace(/\[\[|\]\]/g, '').split('|')[0].trim())));
   }
 
   // Extract #tags from markdown content

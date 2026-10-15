@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { PrivacySanitizer } from '../security/privacySanitizer.js';
-import { FrankNoteEngine } from '../notes/frankNoteEngine.js';
+import { TelluNoteEngine } from '../notes/telluNoteEngine.js';
+import { MemoryPalace } from './memoryPalace.js';
 
 export interface MemoryPage {
   category: 'decisions' | 'procedures' | 'gotchas' | 'handoffs' | 'general';
@@ -37,6 +38,7 @@ export class MemoryEngine {
   }
 
   public static initProjectMemory(projectPath: string) {
+    MemoryPalace.initPalace(projectPath);
     const memoryDir = this.getMemoryDir(projectPath);
     const subdirs = ['decisions', 'procedures', 'gotchas', 'handoffs'];
 
@@ -237,9 +239,9 @@ ${openQuestions.length > 0 ? openQuestions.map(q => `- ${q}`).join('\n') : '- Ne
 
     const page = this.writeMemoryPage(projectPath, 'handoffs', filename, title, content, ['handoff', fromModel]);
 
-    // Mirror to Obsidian Vault under "Handoffs" folder so it's accessible in Tellus Notes and Knowledge Graph
+    // Mirror to Vault under "Handoffs" folder so it's accessible in Tellus Notes and Knowledge Graph
     try {
-      FrankNoteEngine.saveNote({
+      TelluNoteEngine.saveNote({
         title,
         folder: 'Handoffs',
         subject: 'Handoffs',
@@ -247,7 +249,7 @@ ${openQuestions.length > 0 ? openQuestions.map(q => `- ${q}`).join('\n') : '- Ne
         isProjectSpecific: false
       }, projectPath);
     } catch (err) {
-      console.warn('[MemoryEngine] Warning: Could not mirror handoff to Obsidian Vault:', err);
+      console.warn('[MemoryEngine] Warning: Could not mirror handoff to Tellus Vault:', err);
     }
 
     return page;

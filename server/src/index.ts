@@ -7,6 +7,7 @@ import { ConfigManager } from './services/configManager.js';
 import { OpenRouterService } from './services/providers/openrouter.js';
 import { ProjectManager } from './services/projectManager.js';
 import { MemoryEngine } from './services/memory/memoryEngine.js';
+import { MemoryPalace } from './services/memory/memoryPalace.js';
 import { FileTools } from './services/tools/fileTools.js';
 import { FileParser } from './services/tools/fileParser.js';
 import { ScreenCapture } from './services/tools/screenCapture.js';
@@ -245,6 +246,88 @@ app.post('/api/memory/handoff', (req, res) => {
     const { fromModel, summary, nextSteps, openQuestions } = req.body;
     const page = MemoryEngine.createHandoff(currentPath, fromModel || 'User', summary, nextSteps, openQuestions);
     res.json(page);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5.1 Palácio de Memória (Memory Palace: Builds, Commits, Test Runs & Context)
+app.get('/api/palace/overview', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const overview = MemoryPalace.getPalaceOverview(targetPath);
+    res.json(overview);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/palace/builds', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const builds = MemoryPalace.listBuilds(targetPath);
+    res.json(builds);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/palace/builds', (req, res) => {
+  try {
+    const targetPath = (req.body.projectPath as string) || ProjectManager.getCurrentProject();
+    const record = MemoryPalace.recordBuild(targetPath, req.body);
+    res.json(record);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/palace/commits', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const sync = req.query.sync === 'true';
+    const commits = sync ? MemoryPalace.syncGitHistory(targetPath) : MemoryPalace.listCommits(targetPath);
+    res.json(commits);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/palace/commits', (req, res) => {
+  try {
+    const targetPath = (req.body.projectPath as string) || ProjectManager.getCurrentProject();
+    const record = MemoryPalace.recordCommit(targetPath, req.body);
+    res.json(record);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/palace/test-runs', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const testRuns = MemoryPalace.listTestRuns(targetPath);
+    res.json(testRuns);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/palace/test-runs', (req, res) => {
+  try {
+    const targetPath = (req.body.projectPath as string) || ProjectManager.getCurrentProject();
+    const record = MemoryPalace.recordTestRun(targetPath, req.body);
+    res.json(record);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/palace/export-markdown', (req, res) => {
+  try {
+    const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const markdown = MemoryPalace.exportPalaceMarkdown(targetPath);
+    res.json({ markdown });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
