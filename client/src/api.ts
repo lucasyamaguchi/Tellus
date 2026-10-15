@@ -1,6 +1,8 @@
 import { 
   AppConfig, 
   OpenRouterModel, 
+  ModelsResponse,
+  RefreshModelsResponse,
   ProjectOverview, 
   FileTreeItem, 
   MemoryPage, 
@@ -47,8 +49,15 @@ export const api = {
   },
 
   // Models
-  async getModels(): Promise<{ curated: OpenRouterModel[]; all: OpenRouterModel[] }> {
+  async getModels(): Promise<ModelsResponse> {
     const res = await fetch(`${API_BASE}/models`);
+    return res.json();
+  },
+
+  async refreshModels(): Promise<RefreshModelsResponse> {
+    const res = await fetch(`${API_BASE}/models/refresh`, {
+      method: 'POST'
+    });
     return res.json();
   },
 

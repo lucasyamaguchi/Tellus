@@ -103,9 +103,74 @@ app.get('/api/models', async (req, res) => {
       }
     ];
 
+    const cached = OpenRouterService.getCachedModels();
     res.json({
       curated: curatedProviders,
-      all: openRouterModels
+      all: openRouterModels.length > 0 ? openRouterModels : cached.models,
+      lastUpdated: cached.lastUpdated,
+      newModels: cached.newModels || []
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/models/refresh', async (req, res) => {
+  try {
+    const config = ConfigManager.getConfig();
+    const result = await OpenRouterService.refreshModels(config.keys.openrouter);
+
+    const curatedProviders = [
+      {
+        id: 'anthropic/claude-3.7-sonnet',
+        name: 'Claude 3.7 Sonnet',
+        provider: 'Anthropic',
+        description: 'Capacidade de raciocínio híbrido e excelência em engenharia de software.',
+        context_length: 200000,
+        pricing: { prompt: '0.000003', completion: '0.000015' }
+      },
+      {
+        id: 'deepseek/deepseek-r1',
+        name: 'DeepSeek R1',
+        provider: 'DeepSeek',
+        description: 'Modelo de raciocínio de alta performance para lógica complexa e debugging.',
+        context_length: 128000,
+        pricing: { prompt: '0.00000055', completion: '0.00000219' }
+      },
+      {
+        id: 'google/gemini-2.0-flash-001',
+        name: 'Gemini 2.0 Flash',
+        provider: 'Google',
+        description: 'Velocidade extrema e janela de contexto gigantesca de 1 milhão de tokens.',
+        context_length: 1048576,
+        pricing: { prompt: '0.0000001', completion: '0.0000004' }
+      },
+      {
+        id: 'openai/gpt-4o',
+        name: 'GPT-4o',
+        provider: 'OpenAI',
+        description: 'Modelo multimodal flagship da OpenAI com forte capacidade de codificação.',
+        context_length: 128000,
+        pricing: { prompt: '0.0000025', completion: '0.00001' }
+      },
+      {
+        id: 'openai/o3-mini',
+        name: 'o3-mini',
+        provider: 'OpenAI',
+        description: 'Raciocínio avançado rápido para matemática, código e ciências.',
+        context_length: 200000,
+        pricing: { prompt: '0.0000011', completion: '0.0000044' }
+      }
+    ];
+
+    res.json({
+      success: true,
+      totalCount: result.totalCount,
+      newCount: result.newCount,
+      newModels: result.newModels,
+      updatedAt: result.updatedAt,
+      curated: curatedProviders,
+      all: result.models
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

@@ -13,6 +13,23 @@ export interface OpenRouterModel {
   };
 }
 
+export interface ModelsResponse {
+  curated: OpenRouterModel[];
+  all: OpenRouterModel[];
+  lastUpdated?: number;
+  newModels?: string[];
+}
+
+export interface RefreshModelsResponse {
+  success: boolean;
+  totalCount: number;
+  newCount: number;
+  newModels: string[];
+  updatedAt: number;
+  curated: OpenRouterModel[];
+  all: OpenRouterModel[];
+}
+
 export interface AgentPipelineConfig {
   primaryModel: string;
   plannerModel?: string;

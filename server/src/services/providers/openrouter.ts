@@ -1,3 +1,7 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
 export interface OpenRouterModel {
   id: string;
   name: string;
@@ -46,6 +50,30 @@ export interface ToolDefinition {
 export class OpenRouterService {
   private static baseUrl = 'https://openrouter.ai/api/v1';
 
+  public static getCachePath(): string {
+    const dir = path.join(os.homedir(), '.tellus');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return path.join(dir, 'openrouter_models_cache.json');
+  }
+
+  public static getCachedModels(): {
+    models: OpenRouterModel[];
+    knownModelIds: string[];
+    newModels: OpenRouterModel[];
+    lastUpdated: number;
+  } {
+    const cachePath = this.getCachePath();
+    if (fs.existsSync(cachePath)) {
+      try {
+        const raw = fs.readFileSync(cachePath, 'utf-8');
+        return JSON.parse(raw);
+      } catch {
+        // ignore
+      }
+    }
+    return { models: [], knownModelIds: [], newModels: [], lastUpdated: 0 };
+  }
+
   public static async listModels(apiKey?: string): Promise<OpenRouterModel[]> {
     const headers: Record<string, string> = {};
     if (apiKey) {
@@ -58,7 +86,71 @@ export class OpenRouterService {
     const data = (await res.json()) as any;
     const rawList: OpenRouterModel[] = data.data || [];
     // Filter out asynchronous batch models that only work with offline Batch API
-    return rawList.filter(m => !m.id.endsWith(':batch') && !m.id.includes(':batch'));
+    const filtered = rawList.filter(m => !m.id.endsWith(':batch') && !m.id.includes(':batch'));
+
+    // If cache doesn't exist, populate initial known models
+    const cachePath = this.getCachePath();
+    if (!fs.existsSync(cachePath)) {
+      try {
+        fs.writeFileSync(cachePath, JSON.stringify({
+          models: filtered,
+          knownModelIds: filtered.map(m => m.id),
+          newModels: [],
+          lastUpdated: Date.now()
+        }, null, 2), 'utf-8');
+      } catch {
+        // ignore
+      }
+    }
+
+    return filtered;
+  }
+
+  public static async refreshModels(apiKey?: string): Promise<{
+    totalCount: number;
+    newCount: number;
+    newModels: OpenRouterModel[];
+    updatedAt: number;
+    models: OpenRouterModel[];
+  }> {
+    const previous = this.getCachedModels();
+    const freshModels = await this.listModels(apiKey);
+
+    const prevKnownSet = new Set(
+      previous.knownModelIds && previous.knownModelIds.length > 0 
+        ? previous.knownModelIds 
+        : previous.models?.map(m => m.id) || []
+    );
+
+    // Detect newly added models compared to the previous known catalog
+    let newlyAdded: OpenRouterModel[] = [];
+    if (prevKnownSet.size > 0) {
+      newlyAdded = freshModels.filter(m => !prevKnownSet.has(m.id));
+    }
+
+    const currentKnownIds = freshModels.map(m => m.id);
+    const updatedAt = Date.now();
+
+    const cacheData = {
+      models: freshModels,
+      knownModelIds: currentKnownIds,
+      newModels: newlyAdded,
+      lastUpdated: updatedAt
+    };
+
+    try {
+      fs.writeFileSync(this.getCachePath(), JSON.stringify(cacheData, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[OpenRouterService] Erro ao gravar cache de modelos:', err);
+    }
+
+    return {
+      totalCount: freshModels.length,
+      newCount: newlyAdded.length,
+      newModels: newlyAdded,
+      updatedAt,
+      models: freshModels
+    };
   }
 
   public static async getCredits(apiKey: string): Promise<{ totalCredits: number; totalUsage: number; remainingCredits: number }> {
