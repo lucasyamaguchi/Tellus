@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, nativeImage, desktopCapturer, ipcMain, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import http from 'http';
 import fs from 'fs';
 
@@ -46,10 +46,41 @@ let serverProcess = null;
 
 const SERVER_PORT = 3001;
 
+function killPortProcess(port) {
+  if (process.platform === 'win32') {
+    try {
+      const output = execSync(`netstat -ano | findstr :${port}`).toString();
+      const lines = output.trim().split('\n');
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && pid !== '0' && pid !== String(process.pid)) {
+          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+        }
+      }
+    } catch {}
+  }
+}
+
+function killServerProcess() {
+  if (serverProcess && serverProcess.pid) {
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /pid ${serverProcess.pid} /f /t`, { stdio: 'ignore' });
+      } else {
+        serverProcess.kill('SIGTERM');
+      }
+    } catch {}
+  }
+}
+
 function startBackendServer() {
   const rootDir = path.resolve(__dirname, '..');
   const serverDir = path.join(rootDir, 'server');
   const serverDistScript = path.join(serverDir, 'dist', 'index.js');
+
+  // Terminate any stale orphan server holding the port
+  killPortProcess(SERVER_PORT);
 
   const hasBuiltServer = fs.existsSync(serverDistScript);
   const execPath = 'node';
@@ -193,12 +224,12 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (serverProcess) {
-    try {
-      serverProcess.kill();
-    } catch {}
-  }
+  killServerProcess();
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  killServerProcess();
 });

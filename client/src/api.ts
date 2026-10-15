@@ -53,6 +53,15 @@ export const api = {
   // Models
   async getModels(): Promise<ModelsResponse> {
     const res = await fetch(`${API_BASE}/models`);
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = `Erro ${res.status}: ${res.statusText}`;
+      try {
+        const json = JSON.parse(text);
+        if (json.error) msg = json.error;
+      } catch {}
+      throw new Error(msg);
+    }
     return res.json();
   },
 
@@ -60,6 +69,19 @@ export const api = {
     const res = await fetch(`${API_BASE}/models/refresh`, {
       method: 'POST'
     });
+    if (!res.ok) {
+      const text = await res.text();
+      let errorMsg = `Erro ${res.status}: ${res.statusText}`;
+      try {
+        const json = JSON.parse(text);
+        if (json.error) errorMsg = json.error;
+      } catch {
+        if (text.includes('Cannot POST') || text.includes('Cannot GET')) {
+          errorMsg = 'O servidor backend precisa ser reiniciado para carregar a rota mais recente de modelos.';
+        }
+      }
+      throw new Error(errorMsg);
+    }
     return res.json();
   },
 

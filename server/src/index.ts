@@ -116,7 +116,7 @@ app.get('/api/models', async (req, res) => {
   }
 });
 
-app.post('/api/models/refresh', async (req, res) => {
+const handleModelsRefresh = async (req: express.Request, res: express.Response) => {
   try {
     const config = ConfigManager.getConfig();
     const result = await OpenRouterService.refreshModels(config.keys.openrouter);
@@ -174,9 +174,12 @@ app.post('/api/models/refresh', async (req, res) => {
       all: result.models
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+app.post('/api/models/refresh', handleModelsRefresh);
+app.get('/api/models/refresh', handleModelsRefresh);
 
 // 3. Projects Endpoints
 app.get('/api/projects/current', (req, res) => {
