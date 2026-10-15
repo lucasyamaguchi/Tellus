@@ -134,6 +134,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const lastPasteTimestampRef = useRef<number>(0);
+  const isPastingRef = useRef<boolean>(false);
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [expandedToolGroups, setExpandedToolGroups] = useState<Record<string, boolean>>({});
@@ -587,13 +589,22 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     if (!clipboardData) return;
 
     const imageFiles: File[] = [];
+    const seenFileKeys = new Set<string>();
+
+    const addImageFile = (file: File) => {
+      const key = `${file.name}-${file.size}-${file.type}`;
+      if (!seenFileKeys.has(key)) {
+        seenFileKeys.add(key);
+        imageFiles.push(file);
+      }
+    };
 
     // Check files in clipboard
     if (clipboardData.files && clipboardData.files.length > 0) {
       for (let i = 0; i < clipboardData.files.length; i++) {
         const file = clipboardData.files[i];
         if (file.type && file.type.startsWith('image/')) {
-          imageFiles.push(file);
+          addImageFile(file);
         }
       }
     }
@@ -605,7 +616,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         if (item.type && item.type.startsWith('image/')) {
           const file = item.getAsFile();
           if (file) {
-            imageFiles.push(file);
+            addImageFile(file);
           }
         }
       }
@@ -616,8 +627,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       return;
     }
 
-    // Contains image from clipboard: prevent default binary text injection
+    // Contains image from clipboard: prevent default binary text injection and stop bubbling
     e.preventDefault();
+    e.stopPropagation();
+
+    // Guard against duplicate bubbling or rapid consecutive paste events
+    const now = Date.now();
+    if (now - lastPasteTimestampRef.current < 600 || isPastingRef.current) {
+      return;
+    }
+    lastPasteTimestampRef.current = now;
+    isPastingRef.current = true;
 
     // If there is also text in clipboard, append to input
     const textData = clipboardData.getData('text');
@@ -656,12 +676,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       }
 
       const uploaded = await api.uploadFiles(filesPayload);
-      setAttachments(prev => [...prev, ...uploaded]);
+      setAttachments(prev => {
+        const existingSignatures = new Set(prev.map(a => `${a.name}-${a.size}`));
+        const uniqueUploaded = uploaded.filter(a => !existingSignatures.has(`${a.name}-${a.size}`));
+        return [...prev, ...uniqueUploaded];
+      });
     } catch (err: any) {
       console.error('[ChatArea] Erro ao colar imagem da área de transferência:', err);
       alert(`Erro ao anexar imagem da área de transferência: ${err.message}`);
     } finally {
       setIsUploading(false);
+      isPastingRef.current = false;
     }
   };
 
