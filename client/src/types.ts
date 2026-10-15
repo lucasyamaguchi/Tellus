@@ -47,6 +47,8 @@ export interface AppConfig {
   language?: string;
   country?: string;
   enforceStrictLanguage?: boolean;
+  defaultSecurityPreset?: 'request_review' | 'default' | 'turbo';
+  defaultPlanReviewPolicy?: PlanReviewPolicy;
 }
 
 export interface DeletedNoteItem {
@@ -287,6 +289,7 @@ export interface ChatSessionMetadata {
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
   projectPath?: string;
   projectName?: string;
+  executionMode?: ExecutionSecurityPreset;
 }
 
 export interface ChatSession {
@@ -303,7 +306,61 @@ export interface ChatSession {
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
   projectPath?: string;
   projectName?: string;
+  executionMode?: ExecutionSecurityPreset;
 }
+
+export type ExecutionSecurityPreset = 'request_review' | 'default' | 'turbo' | 'inherit';
+export type PlanReviewPolicy = 'always_proceed' | 'always_review';
+
+export interface FileAccessRules {
+  readAllowed: boolean;
+  writeAllowed: boolean;
+  deniedPaths: string[];
+}
+
+export interface NetworkAccessRules {
+  allowed: boolean;
+}
+
+export interface TerminalExecutionRules {
+  allowed: boolean;
+  deniedCommands: string[];
+}
+
+export interface SandboxAndMcpRules {
+  allowOutsideSandbox: boolean;
+  enableMcp: boolean;
+}
+
+export interface ProjectSettings {
+  securityPreset: ExecutionSecurityPreset;
+  planReviewPolicy: PlanReviewPolicy;
+  fileAccess: FileAccessRules;
+  network: NetworkAccessRules;
+  terminal: TerminalExecutionRules;
+  sandboxAndMcp: SandboxAndMcpRules;
+}
+
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  securityPreset: 'default',
+  planReviewPolicy: 'always_review',
+  fileAccess: {
+    readAllowed: true,
+    writeAllowed: true,
+    deniedPaths: ['.env', '.git', 'node_modules', '*.pem', '*.key']
+  },
+  network: {
+    allowed: true
+  },
+  terminal: {
+    allowed: true,
+    deniedCommands: ['rm -rf /', 'format', 'mkfs', 'dd if=', ':(){ :|:& };:']
+  },
+  sandboxAndMcp: {
+    allowOutsideSandbox: false,
+    enableMcp: true
+  }
+};
 
 export interface TerminalTask {
   id: string;

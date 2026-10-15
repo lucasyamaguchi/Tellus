@@ -17,6 +17,7 @@ import { PipelineMindMapModal } from './components/PipelineMindMapModal';
 import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { CreditsModal } from './components/CreditsModal';
 import { SelfHealingModal } from './components/SelfHealingModal';
+import { ProjectSettingsModal } from './components/ProjectSettingsModal';
 import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
@@ -32,7 +33,9 @@ import {
   QuotedMessage,
   Attachment,
   TelluNote,
-  AgentPipelineConfig
+  AgentPipelineConfig,
+  ExecutionSecurityPreset,
+  ProjectSettings
 } from './types';
 import { api } from './api';
 import { voiceService } from './services/voiceService';
@@ -88,8 +91,26 @@ export const App: React.FC = () => {
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
   const [isCreditsModalOpen, setIsCreditsModalOpen] = useState<boolean>(false);
   const [isSelfHealingModalOpen, setIsSelfHealingModalOpen] = useState<boolean>(false);
+  const [isProjectSettingsModalOpen, setIsProjectSettingsModalOpen] = useState<boolean>(false);
+  const [chatExecutionMode, setChatExecutionMode] = useState<ExecutionSecurityPreset>('inherit');
+  const [effectiveSecurityPreset, setEffectiveSecurityPreset] = useState<'request_review' | 'default' | 'turbo'>('default');
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings | null>(null);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
   const [openProjects, setOpenProjects] = useState<ProjectOverview[]>([]);
+
+  // Sync Effective Security Preset when chatExecutionMode or currentProject changes
+  useEffect(() => {
+    let isMounted = true;
+    api.getEffectiveSecurity(chatExecutionMode, currentProject?.path)
+      .then(res => {
+        if (isMounted) {
+          setEffectiveSecurityPreset(res.preset);
+          setProjectSettings(res.settings);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, [chatExecutionMode, currentProject?.path]);
 
   // Token Efficiency & Multi-Agent Pipeline State
   const [tokenEfficiency, setTokenEfficiency] = useState<boolean>(false);
@@ -220,6 +241,7 @@ export const App: React.FC = () => {
       fastToolsModel: ''
     };
     setAgentPipeline(pipeline);
+    setChatExecutionMode('inherit');
     try {
       await api.saveSession({
         id: newId,
@@ -234,7 +256,8 @@ export const App: React.FC = () => {
         isLiveVoice: false,
         liveVoiceMode: 'mixed',
         projectPath: currentProject?.path,
-        projectName: currentProject?.name
+        projectName: currentProject?.name,
+        executionMode: 'inherit'
       });
       const list = await api.listSessions(true);
       setSessions(list);
@@ -280,7 +303,8 @@ export const App: React.FC = () => {
         isLiveVoice: true,
         liveVoiceMode: mode,
         projectPath: currentProject?.path,
-        projectName: currentProject?.name
+        projectName: currentProject?.name,
+        executionMode: chatExecutionMode
       });
       api.listSessions(true).then(list => setSessions(list));
       if (initialPrompt) {
@@ -341,6 +365,7 @@ export const App: React.FC = () => {
         setMessages(session.messages || []);
         setIsLiveVoiceActiveInChat(!!session.isLiveVoice);
         setChatLiveVoiceMode(session.liveVoiceMode || 'mixed');
+        setChatExecutionMode(session.executionMode || 'inherit');
 
         if (session.model) {
           const cleanModel = session.model.replace(/:batch$/i, '').trim();
@@ -397,13 +422,15 @@ export const App: React.FC = () => {
   const saveCurrentSession = async (
     currentMsgs: Message[],
     overrideLiveVoice?: boolean,
-    overrideMode?: 'voice_only' | 'mixed' | 'voice_output_only'
+    overrideMode?: 'voice_only' | 'mixed' | 'voice_output_only',
+    overrideExecutionMode?: ExecutionSecurityPreset
   ) => {
     const currentId = activeSessionId || ('session_' + Math.random().toString(36).substring(2, 9));
     if (!activeSessionId) setActiveSessionId(currentId);
 
     const isVoice = overrideLiveVoice !== undefined ? overrideLiveVoice : isLiveVoiceActiveInChat;
     const vMode = overrideMode !== undefined ? overrideMode : chatLiveVoiceMode;
+    const execMode = overrideExecutionMode !== undefined ? overrideExecutionMode : chatExecutionMode;
 
     const firstUserMsg = currentMsgs.find(m => m.role === 'user');
     const defaultTitle = isVoice ? `🎙️ Live Voice (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : 'Novo Chat';
@@ -426,12 +453,20 @@ export const App: React.FC = () => {
         isLiveVoice: isVoice,
         liveVoiceMode: vMode,
         projectPath: currentProject?.path,
-        projectName: currentProject?.name
+        projectName: currentProject?.name,
+        executionMode: execMode
       });
 
       api.listSessions(true).then(list => setSessions(list));
     } catch {
       // ignore
+    }
+  };
+
+  const handleChangeExecutionMode = (mode: ExecutionSecurityPreset) => {
+    setChatExecutionMode(mode);
+    if (activeSessionId) {
+      saveCurrentSession(messages, isLiveVoiceActiveInChat, chatLiveVoiceMode, mode);
     }
   };
 
@@ -582,7 +617,8 @@ export const App: React.FC = () => {
           return finalMsgs;
         });
       },
-      isLiveVoiceActiveInChatRef.current || isLiveVoiceOpen
+      isLiveVoiceActiveInChatRef.current || isLiveVoiceOpen,
+      chatExecutionMode
     );
 
     stopStreamRef.current = cancelFn;
@@ -759,6 +795,7 @@ export const App: React.FC = () => {
         onSelectLanguage={handleSelectLanguage}
         onNewChat={handleNewSession}
         onOpenSelfHealing={() => setIsSelfHealingModalOpen(true)}
+        onOpenProjectSettings={() => setIsProjectSettingsModalOpen(true)}
       />
 
       {/* MODE 1: DEDICATED NOTION-STYLE TELLUSMD NOTES & VAULT */}
@@ -904,6 +941,11 @@ export const App: React.FC = () => {
                 onRegenerateResponse={handleRegenerateResponse}
                 tokenEfficiency={tokenEfficiency}
                 onToggleTokenEfficiency={() => setTokenEfficiency(!tokenEfficiency)}
+                executionMode={chatExecutionMode}
+                effectiveSecurityPreset={effectiveSecurityPreset}
+                globalSecurityPreset={config?.defaultSecurityPreset || 'default'}
+                onChangeExecutionMode={handleChangeExecutionMode}
+                onOpenProjectSettings={() => setIsProjectSettingsModalOpen(true)}
               />
             </div>
           )}
@@ -1080,6 +1122,20 @@ export const App: React.FC = () => {
         currentViewMode={mainViewMode}
         activeNoteTitle={targetNoteIdOrTitle}
         onTriggerSelfHealing={handleTriggerSelfHealing}
+      />
+
+      {/* Antigravity Project Settings & Security Presets Modal */}
+      <ProjectSettingsModal
+        isOpen={isProjectSettingsModalOpen}
+        onClose={() => setIsProjectSettingsModalOpen(false)}
+        projectPath={currentProject?.path}
+        projectName={currentProject?.name}
+        onSettingsSaved={(newSettings) => {
+          setProjectSettings(newSettings);
+          api.getEffectiveSecurity(chatExecutionMode, currentProject?.path)
+            .then(res => setEffectiveSecurityPreset(res.preset))
+            .catch(() => {});
+        }}
       />
     </div>
   );

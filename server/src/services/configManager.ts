@@ -44,6 +44,8 @@ export interface AppConfig {
   language?: string;
   country?: string;
   enforceStrictLanguage?: boolean;
+  defaultSecurityPreset?: 'request_review' | 'default' | 'turbo';
+  defaultPlanReviewPolicy?: 'always_proceed' | 'always_review';
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.tellus');
@@ -53,6 +55,8 @@ const DEFAULT_CONFIG: AppConfig = {
   keys: {},
   defaultModel: 'deepseek/deepseek-r1',
   defaultProvider: 'openrouter',
+  defaultSecurityPreset: 'default',
+  defaultPlanReviewPolicy: 'always_review',
   recentProjects: [],
   openProjects: [],
   theme: 'dark',
