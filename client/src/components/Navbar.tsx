@@ -57,7 +57,7 @@ interface NavbarProps {
   activeRoutine: Routine | null;
   mainViewMode: 'agent' | 'notes' | 'skills';
   isRightPanelOpen: boolean;
-  rightPanelTab: 'code' | 'memory' | 'terminal';
+  rightPanelTab: 'code' | 'history' | 'memory' | 'terminal';
   isOverlayActive: boolean;
   tokenEfficiency: boolean;
   hasCustomPipeline?: boolean;
@@ -69,7 +69,7 @@ interface NavbarProps {
   onToggleOverlay: () => void;
   onToggleTokenEfficiency: () => void;
   onOpenPipelineModal: () => void;
-  onSetRightPanelTab: (tab: 'code' | 'memory' | 'terminal') => void;
+  onSetRightPanelTab: (tab: 'code' | 'history' | 'memory' | 'terminal') => void;
   onOpenModelModal: () => void;
   onOpenSettingsModal: () => void;
   onOpenProjectModal: () => void;
@@ -354,6 +354,20 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Editor de Código"
             >
               Código
+            </button>
+            <button
+              onClick={() => {
+                onSetRightPanelTab('history');
+                if (!isRightPanelOpen) onToggleRightPanel();
+              }}
+              className={`px-2 py-1 rounded-md transition-all text-[11px] ${
+                isRightPanelOpen && rightPanelTab === 'history'
+                  ? 'bg-accent text-white font-medium shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Histórico de Arquivos Modificados & Diffs"
+            >
+              Histórico
             </button>
             <button
               onClick={() => {

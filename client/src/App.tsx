@@ -3,6 +3,7 @@ import { Navbar, LanguageOption } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { CodeViewer } from './components/CodeViewer';
+import { FileHistoryViewer } from './components/FileHistoryViewer';
 import { MemoryInspector } from './components/MemoryInspector';
 import { TerminalView } from './components/TerminalView';
 import { TelluNoteView } from './components/TelluNoteView';
@@ -18,7 +19,7 @@ import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { CreditsModal } from './components/CreditsModal';
 import { SelfHealingModal } from './components/SelfHealingModal';
 import { ProjectSettingsModal } from './components/ProjectSettingsModal';
-import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
+import { Maximize2, Minimize2, X, Minus, History, Code2 } from 'lucide-react';
 import { 
   AppConfig, 
   OpenRouterModel, 
@@ -80,7 +81,7 @@ export const App: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [activeMemoryPage, setActiveMemoryPage] = useState<MemoryPage | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'memory' | 'terminal'>('code');
+  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'history' | 'memory' | 'terminal'>('code');
 
   // Modals & Overlay Mode
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
@@ -948,6 +949,10 @@ export const App: React.FC = () => {
                 globalSecurityPreset={config?.defaultSecurityPreset || 'default'}
                 onChangeExecutionMode={handleChangeExecutionMode}
                 onOpenProjectSettings={() => setIsProjectSettingsModalOpen(true)}
+                onOpenFileHistory={(_fp) => {
+                  setIsRightPanelOpen(true);
+                  setRightPanelTab('history');
+                }}
               />
             </div>
           )}
@@ -963,7 +968,7 @@ export const App: React.FC = () => {
             />
           )}
 
-          {/* Right Split Panel (Code / Memory / Terminal) with Maximize/Minimize Controls */}
+          {/* Right Split Panel (Code / History / Memory / Terminal) with Maximize/Minimize Controls */}
           {isRightPanelOpen && (
             <aside 
               style={{ width: isRightPanelMaximized ? '100%' : `${rightPanelWidth}px` }} 
@@ -973,10 +978,42 @@ export const App: React.FC = () => {
             >
               {/* Window Controls Top Bar */}
               <div className="h-10 border-b border-card-border bg-[#0b0d13] px-3 flex items-center justify-between shrink-0 select-none">
-                <div className="flex items-center space-x-1">
-                  <span className="text-xs font-bold text-slate-200 capitalize">
-                    {rightPanelTab === 'code' ? 'Editor de Código' : rightPanelTab === 'memory' ? 'Memória do Projeto' : 'Terminal Integrado'}
-                  </span>
+                <div className="flex items-center space-x-1.5">
+                  {/* Tab switchers: Editor vs Histórico */}
+                  <div className="flex items-center p-0.5 rounded-lg bg-panel border border-card-border/60">
+                    <button
+                      onClick={() => setRightPanelTab('code')}
+                      className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                        rightPanelTab === 'code'
+                          ? 'bg-accent text-white shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <Code2 className="w-3.5 h-3.5" />
+                      <span>Editor</span>
+                    </button>
+                    <button
+                      onClick={() => setRightPanelTab('history')}
+                      className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                        rightPanelTab === 'history'
+                          ? 'bg-accent text-white shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      <span>Histórico & Diffs</span>
+                    </button>
+                  </div>
+                  {rightPanelTab === 'memory' && (
+                    <span className="text-xs font-bold text-accent-light px-2 py-0.5 rounded bg-accent/10 border border-accent/20">
+                      Memória do Projeto
+                    </span>
+                  )}
+                  {rightPanelTab === 'terminal' && (
+                    <span className="text-xs font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                      Terminal Integrado
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center space-x-1">
@@ -1013,6 +1050,36 @@ export const App: React.FC = () => {
                   <CodeViewer
                     filePath={selectedFile}
                     onFileSaved={loadProjectOverview}
+                    onOpenHistory={() => setRightPanelTab('history')}
+                  />
+                )}
+
+                {rightPanelTab === 'history' && (
+                  <FileHistoryViewer
+                    activeSessionId={activeSessionId}
+                    activeSessionTitle={sessions.find(s => s.id === activeSessionId)?.title}
+                    onOpenFileInEditor={(fp) => {
+                      setSelectedFile(fp);
+                      setRightPanelTab('code');
+                    }}
+                    onNavigateToChat={(targetSessionId, targetMessageId) => {
+                      if (targetSessionId && targetSessionId !== activeSessionId) {
+                        handleSelectSession(targetSessionId);
+                      }
+                      if (mainViewMode !== 'agent') {
+                        setMainViewMode('agent');
+                      }
+                      if (targetMessageId) {
+                        setTimeout(() => {
+                          const el = document.getElementById(`msg-${targetMessageId}`);
+                          if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el.classList.add('ring-2', 'ring-accent', 'transition-all');
+                            setTimeout(() => el.classList.remove('ring-2', 'ring-accent'), 2500);
+                          }
+                        }, 350);
+                      }
+                    }}
                   />
                 )}
 

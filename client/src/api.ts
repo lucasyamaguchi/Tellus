@@ -27,7 +27,9 @@ import {
   ObsidianPluginInfo,
   RecommendedObsidianPlugin,
   ProjectSettings,
-  ExecutionSecurityPreset
+  ExecutionSecurityPreset,
+  FileChangeEntry,
+  GitDiffReport
 } from './types';
 
 const API_BASE = '/api';
@@ -665,14 +667,16 @@ export const api = {
     onDone?: () => void,
     onError?: (err: any) => void,
     isLiveVoice?: boolean,
-    executionMode?: ExecutionSecurityPreset
+    executionMode?: ExecutionSecurityPreset,
+    sessionId?: string,
+    sessionTitle?: string
   ) {
     const controller = new AbortController();
 
     fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode }),
+      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode, sessionId, sessionTitle }),
       signal: controller.signal
     })
       .then(async (response) => {
@@ -733,6 +737,34 @@ export const api = {
       });
 
     return () => controller.abort();
+  },
+
+  // File Change History & Live Git Diff
+  async getFileChanges(sessionId?: string): Promise<FileChangeEntry[]> {
+    const url = sessionId 
+      ? `${API_BASE}/history/changes?sessionId=${encodeURIComponent(sessionId)}` 
+      : `${API_BASE}/history/changes`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  async getChangeById(changeId: string): Promise<FileChangeEntry> {
+    const res = await fetch(`${API_BASE}/history/changes/${encodeURIComponent(changeId)}`);
+    return res.json();
+  },
+
+  async revertFileChange(changeId: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/history/revert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changeId })
+    });
+    return res.json();
+  },
+
+  async getGitDiff(): Promise<GitDiffReport> {
+    const res = await fetch(`${API_BASE}/history/git-diff`);
+    return res.json();
   },
 
   // Voice & Whisper API
