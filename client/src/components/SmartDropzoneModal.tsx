@@ -33,6 +33,8 @@ interface SmartDropzoneModalProps {
   onOpenNote?: (noteTitle: string) => void;
   onRefreshNotes?: () => void;
   initialFiles?: File[] | null;
+  targetProjectPath?: string;
+  onOpenSkills?: () => void;
 }
 
 export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
@@ -40,10 +42,14 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
   onClose,
   onOpenNote,
   onRefreshNotes,
-  initialFiles
+  initialFiles,
+  targetProjectPath,
+  onOpenSkills
 }) => {
   const [textDump, setTextDump] = useState<string>('');
   const [selectedFiles, setSelectedFiles] = useState<IncomingDropzoneFile[]>([]);
+  const [defaultSkillScope, setDefaultSkillScope] = useState<'project' | 'global' | 'situational'>(targetProjectPath ? 'project' : 'global');
+  const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processingStep, setProcessingStep] = useState<string>('');
@@ -175,7 +181,9 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
     try {
       const res = await api.organizeDropzoneFiles({
         files: selectedFiles,
-        textDump: textDump.trim()
+        textDump: textDump.trim(),
+        targetProjectPath,
+        defaultSkillScope
       });
       setReport(res);
       onRefreshNotes?.();
@@ -189,6 +197,13 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
 
   const getFileBadge = (item: OrganizedFileResult) => {
     switch (item.fileType) {
+      case 'skill':
+        return (
+          <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono flex items-center gap-1 font-semibold">
+            <Sparkles className="w-3 h-3 text-cyan-400" />
+            <span>Skill do Agente</span>
+          </span>
+        );
       case 'whatsapp':
         return (
           <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono flex items-center gap-1">
@@ -347,19 +362,129 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const targetTitle = item.noteTitle || item.savedName.replace(/\.md$/i, '');
-                            onOpenNote?.(targetTitle);
-                            onClose();
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent border border-accent/30 hover:border-accent text-accent-light hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all shrink-0 cursor-pointer"
-                        >
-                          <BookOpen className="w-3 h-3" />
-                          <span>Abrir no Vault</span>
-                        </button>
+                        <div className="flex items-center space-x-1.5 shrink-0">
+                          {item.fileType === 'skill' && onOpenSkills && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onOpenSkills();
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500 border border-cyan-500/40 hover:border-cyan-400 text-cyan-300 hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
+                            >
+                              <Sparkles className="w-3 h-3 text-cyan-400" />
+                              <span>Ver na Aba de Skills</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetTitle = item.noteTitle || item.savedName.replace(/\.md$/i, '');
+                              onOpenNote?.(targetTitle);
+                              onClose();
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent border border-accent/30 hover:border-accent text-accent-light hover:text-white text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
+                          >
+                            <BookOpen className="w-3 h-3" />
+                            <span>Abrir no Vault</span>
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Skill Scope Selector (Project vs Global vs Situational) */}
+                      {item.fileType === 'skill' && (
+                        <div className="p-2.5 rounded-xl bg-cyan-950/25 border border-cyan-500/30 text-[11px] space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-bold uppercase text-cyan-300 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" />
+                              <span>Escopo da Skill no Tellus:</span>
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {item.skillScope === 'project' ? '📌 Focada no Projeto Atual' : item.skillScope === 'situational' ? '⚡ Sob Demanda / Situacional' : '🌐 Global na Raiz'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              disabled={updatingSkillId === item.id}
+                              onClick={async () => {
+                                setUpdatingSkillId(item.id);
+                                try {
+                                  await api.saveSkill({
+                                    id: item.skillId || item.savedName.replace(/\.md$/i, ''),
+                                    name: item.skillName || item.savedName.replace(/\.md$/i, ''),
+                                    scope: 'project',
+                                    isProjectSpecific: true,
+                                    targetProjectPath
+                                  });
+                                  item.skillScope = 'project';
+                                } finally {
+                                  setUpdatingSkillId(null);
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
+                                item.skillScope === 'project'
+                                  ? 'bg-cyan-500 text-white border-cyan-400 shadow-xs'
+                                  : 'bg-card border-card-border text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              📌 Focada no Projeto Atual
+                            </button>
+                            <button
+                              type="button"
+                              disabled={updatingSkillId === item.id}
+                              onClick={async () => {
+                                setUpdatingSkillId(item.id);
+                                try {
+                                  await api.saveSkill({
+                                    id: item.skillId || item.savedName.replace(/\.md$/i, ''),
+                                    name: item.skillName || item.savedName.replace(/\.md$/i, ''),
+                                    scope: 'global',
+                                    isProjectSpecific: false
+                                  });
+                                  item.skillScope = 'global';
+                                } finally {
+                                  setUpdatingSkillId(null);
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
+                                item.skillScope === 'global'
+                                  ? 'bg-cyan-500 text-white border-cyan-400 shadow-xs'
+                                  : 'bg-card border-card-border text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              🌐 Global na Raiz
+                            </button>
+                            <button
+                              type="button"
+                              disabled={updatingSkillId === item.id}
+                              onClick={async () => {
+                                setUpdatingSkillId(item.id);
+                                try {
+                                  await api.saveSkill({
+                                    id: item.skillId || item.savedName.replace(/\.md$/i, ''),
+                                    name: item.skillName || item.savedName.replace(/\.md$/i, ''),
+                                    scope: 'situational',
+                                    isProjectSpecific: false,
+                                    isActive: false
+                                  });
+                                  item.skillScope = 'situational';
+                                } finally {
+                                  setUpdatingSkillId(null);
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
+                                item.skillScope === 'situational'
+                                  ? 'bg-amber-500 text-white border-amber-400 shadow-xs'
+                                  : 'bg-card border-card-border text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              ⚡ Somente Situacional
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Reason & Context */}
                       <div className="p-2.5 rounded-xl bg-panel/70 border border-card-border/60 text-[11px] text-slate-300 space-y-1">
@@ -518,6 +643,59 @@ export const SmartDropzoneModal: React.FC<SmartDropzoneModalProps> = ({
                       </div>
                     ))}
                   </div>
+
+                  {/* Skill Scope Default Selector if .md files are staged */}
+                  {selectedFiles.some(f => /\.(md|markdown)$/i.test(f.name)) && (
+                    <div className="p-3 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 flex items-center justify-between flex-wrap gap-2 text-xs mt-2">
+                      <div className="flex items-center space-x-2">
+                        <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+                        <div>
+                          <span className="font-semibold text-slate-200 block text-[11px]">
+                            Arquivo(s) Markdown / Skill detectado(s)
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Caso contenham estrutura de skill de IA, definir escopo inicial:
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setDefaultSkillScope('project')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                            defaultSkillScope === 'project'
+                              ? 'bg-cyan-500 text-white border-cyan-400 shadow-xs'
+                              : 'bg-card border-card-border text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          📌 Projeto Atual
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDefaultSkillScope('global')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                            defaultSkillScope === 'global'
+                              ? 'bg-cyan-500 text-white border-cyan-400 shadow-xs'
+                              : 'bg-card border-card-border text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          🌐 Global Raiz
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDefaultSkillScope('situational')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                            defaultSkillScope === 'situational'
+                              ? 'bg-amber-500 text-white border-amber-400 shadow-xs'
+                              : 'bg-card border-card-border text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          ⚡ Situacional
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

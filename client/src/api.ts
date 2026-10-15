@@ -21,7 +21,9 @@ import {
   DropzoneOrganizeReport,
   NoteSearchResult,
   GitSafeAuditReport,
-  SanitizationResult
+  SanitizationResult,
+  ObsidianPluginInfo,
+  RecommendedObsidianPlugin
 } from './types';
 
 const API_BASE = '/api';
@@ -364,7 +366,13 @@ export const api = {
   },
 
   async organizeDropzoneFiles(
-    input: IncomingDropzoneFile[] | { files?: IncomingDropzoneFile[]; textDump?: string; customVaultDir?: string },
+    input: IncomingDropzoneFile[] | { 
+      files?: IncomingDropzoneFile[]; 
+      textDump?: string; 
+      customVaultDir?: string;
+      targetProjectPath?: string;
+      defaultSkillScope?: 'project' | 'global' | 'situational';
+    },
     customVaultDir?: string
   ): Promise<DropzoneOrganizeReport> {
     const payload = Array.isArray(input)
@@ -398,7 +406,7 @@ export const api = {
     return res.json();
   },
 
-  async importMarkdownSkill(data: { filename: string; content: string; isProjectSpecific?: boolean; targetProjectPath?: string }): Promise<TellusSkill> {
+  async importMarkdownSkill(data: { filename: string; content: string; isProjectSpecific?: boolean; targetProjectPath?: string; scope?: 'project' | 'global' | 'situational' }): Promise<TellusSkill> {
     const res = await fetch(`${API_BASE}/skills/import-markdown`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -427,6 +435,57 @@ export const api = {
     const res = await fetch(url, {
       method: 'DELETE'
     });
+    return res.json();
+  },
+
+  // Obsidian Plugins
+  async getObsidianPlugins(customVaultDir?: string): Promise<ObsidianPluginInfo[]> {
+    const url = customVaultDir ? `${API_BASE}/obsidian/plugins?customVaultDir=${encodeURIComponent(customVaultDir)}` : `${API_BASE}/obsidian/plugins`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Falha ao listar plugins do Obsidian');
+    return res.json();
+  },
+
+  async getObsidianRecommendations(customVaultDir?: string): Promise<RecommendedObsidianPlugin[]> {
+    const url = customVaultDir ? `${API_BASE}/obsidian/plugins/recommendations?customVaultDir=${encodeURIComponent(customVaultDir)}` : `${API_BASE}/obsidian/plugins/recommendations`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Falha ao listar recomendações de plugins');
+    return res.json();
+  },
+
+  async toggleObsidianPlugin(pluginId: string, enabled: boolean, customVaultDir?: string): Promise<{ success: boolean; pluginId: string; enabled: boolean }> {
+    const res = await fetch(`${API_BASE}/obsidian/plugins/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pluginId, enabled, customVaultDir })
+    });
+    if (!res.ok) throw new Error('Falha ao alterar estado do plugin');
+    return res.json();
+  },
+
+  async importObsidianPlugin(sourceDir: string, customVaultDir?: string): Promise<{ success: boolean; plugin: ObsidianPluginInfo }> {
+    const res = await fetch(`${API_BASE}/obsidian/plugins/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceDir, customVaultDir })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao importar plugin' }));
+      throw new Error(err.error || 'Falha ao importar plugin');
+    }
+    return res.json();
+  },
+
+  async installObsidianPluginFromGitHub(repo: string, customVaultDir?: string): Promise<{ success: boolean; plugin: ObsidianPluginInfo }> {
+    const res = await fetch(`${API_BASE}/obsidian/plugins/install-github`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, customVaultDir })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao instalar plugin via GitHub' }));
+      throw new Error(err.error || 'Falha ao instalar plugin via GitHub');
+    }
     return res.json();
   },
 
