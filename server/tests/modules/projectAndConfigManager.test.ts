@@ -9,8 +9,16 @@ import { ConfigManager } from '../../src/services/configManager.js';
 describe('📁 Módulo 8: ProjectManager & ConfigManager Multi-Projeto', () => {
   let projectA: string;
   let projectB: string;
+  let configBackup: string | null = null;
+  const configPath = path.join(os.homedir(), '.tellus', 'config.json');
 
   before(() => {
+    try {
+      if (fs.existsSync(configPath)) {
+        configBackup = fs.readFileSync(configPath, 'utf-8');
+      }
+    } catch {}
+
     projectA = fs.mkdtempSync(path.join(os.tmpdir(), 'tellus_pm_a_'));
     projectB = fs.mkdtempSync(path.join(os.tmpdir(), 'tellus_pm_b_'));
     // Criar arquivos de exemplo
@@ -22,6 +30,13 @@ describe('📁 Módulo 8: ProjectManager & ConfigManager Multi-Projeto', () => {
     try {
       if (fs.existsSync(projectA)) fs.rmSync(projectA, { recursive: true, force: true });
       if (fs.existsSync(projectB)) fs.rmSync(projectB, { recursive: true, force: true });
+    } catch {}
+
+    // Restaura a configuração original do usuário para não poluir o Tellus com projetos temporários
+    try {
+      if (configBackup !== null) {
+        fs.writeFileSync(configPath, configBackup, 'utf-8');
+      }
     } catch {}
   });
 
