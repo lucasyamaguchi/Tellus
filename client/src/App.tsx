@@ -22,6 +22,7 @@ import { Maximize2, Minimize2, X, Minus } from 'lucide-react';
 import { 
   AppConfig, 
   OpenRouterModel, 
+  ModelsResponse,
   ProjectOverview, 
   FileTreeItem, 
   MemoryPage, 
@@ -46,7 +47,7 @@ import { stripVoiceTags } from './utils/voiceVocabulary';
 export const App: React.FC = () => {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [currentProject, setCurrentProject] = useState<ProjectOverview | null>(null);
-  const [models, setModels] = useState<{ curated: OpenRouterModel[]; all: OpenRouterModel[] }>({ curated: [], all: [] });
+  const [models, setModels] = useState<ModelsResponse>({ curated: [], all: [] });
   const [activeModel, setActiveModel] = useState<string>('deepseek/deepseek-r1');
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
 
@@ -908,6 +909,7 @@ export const App: React.FC = () => {
             <div className="flex-1 flex flex-col min-w-[320px] overflow-hidden">
               <ChatArea
                 key={activeSessionId || 'default'}
+                currentProject={currentProject}
                 activeSessionId={activeSessionId}
                 activeSessionTitle={sessions.find(s => s.id === activeSessionId)?.title}
                 onQuoteSnippet={(quoted) => setQuotedMessage(quoted)}
@@ -1051,6 +1053,13 @@ export const App: React.FC = () => {
         onClose={() => setIsModelModalOpen(false)}
         curatedModels={models.curated}
         allModels={models.all}
+        lastUpdated={models.lastUpdated}
+        newModels={models.newModels}
+        onModelsUpdated={(updated) => {
+          if (updated) {
+            setModels(prev => ({ ...prev, ...updated }));
+          }
+        }}
         activeModel={activeModel}
         onSelectModel={handleSelectModel}
       />

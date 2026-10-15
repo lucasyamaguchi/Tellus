@@ -16,9 +16,14 @@ import {
   TrendingDown,
   TrendingUp,
   Gift,
-  Flame
+  Flame,
+  RefreshCw,
+  Clock,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { OpenRouterModel } from '../types';
+import { api } from '../api';
 
 interface ModelSelectorModalProps {
   isOpen: boolean;
@@ -29,6 +34,9 @@ interface ModelSelectorModalProps {
   onSelectModel: (modelId: string) => void;
   title?: string;
   subtitle?: string;
+  lastUpdated?: number;
+  newModels?: string[];
+  onModelsUpdated?: (data: { curated: OpenRouterModel[]; all: OpenRouterModel[]; lastUpdated?: number; newModels?: string[] }) => void;
 }
 
 export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
@@ -39,15 +47,64 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
   activeModel,
   onSelectModel,
   title,
-  subtitle
+  subtitle,
+  lastUpdated,
+  newModels,
+  onModelsUpdated
 }) => {
   const [search, setSearch] = useState('');
   const [customModelInput, setCustomModelInput] = useState('');
   const [selectedProviderFilter, setSelectedProviderFilter] = useState<string>('all');
   const [selectedPriceTier, setSelectedPriceTier] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'price-asc' | 'price-desc' | 'context-desc' | 'name-asc'>('price-asc');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    newCount: number;
+  } | null>(null);
+  const [filterOnlyNew, setFilterOnlyNew] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setRefreshStatus(null);
+    try {
+      const res = await api.refreshModels();
+      if (res.success) {
+        if (res.newCount > 0) {
+          setRefreshStatus({
+            type: 'success',
+            message: `🎉 ${res.newCount} novos modelos adicionados ao catálogo!`,
+            newCount: res.newCount
+          });
+        } else {
+          setRefreshStatus({
+            type: 'success',
+            message: '✅ Catálogo verificado e 100% atualizado. Nenhum novo modelo no momento.',
+            newCount: 0
+          });
+        }
+        if (onModelsUpdated) {
+          onModelsUpdated({
+            curated: res.curated,
+            all: res.all,
+            lastUpdated: res.updatedAt,
+            newModels: res.newModels
+          });
+        }
+      }
+    } catch (err: any) {
+      setRefreshStatus({
+        type: 'error',
+        message: 'Falha ao sincronizar com OpenRouter: ' + (err.message || 'Erro de conexão'),
+        newCount: 0
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleUseCustomModel = () => {
     let cleanId = customModelInput.trim();
@@ -86,6 +143,11 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
 
   const filterAndSortModels = () => {
     let list = [...modelsPool].filter(m => !m.id.endsWith(':batch') && !m.id.includes(':batch'));
+
+    // 0. Filter Only New (if active)
+    if (filterOnlyNew && newModels && newModels.length > 0) {
+      list = list.filter(m => newModels.includes(m.id));
+    }
 
     // 1. Provider Filter
     if (selectedProviderFilter !== 'all') {
@@ -183,10 +245,80 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-card-border text-slate-400 hover:text-white transition-colors">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="px-2.5 py-1.5 rounded-xl bg-card border border-card-border hover:border-accent text-slate-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+              title="Buscar atualizações e novos modelos adicionados no OpenRouter"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-accent-light ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Consultando...' : 'Atualizar Modelos'}</span>
+            </button>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-card-border text-slate-400 hover:text-white transition-colors cursor-pointer">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
+        {/* Sync & Model Update Status Bar */}
+        <div className="px-4 py-1.5 bg-[#0b0d13] border-b border-card-border flex items-center justify-between text-[11px] text-slate-400">
+          <div className="flex items-center space-x-2 truncate">
+            <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <span>
+              {lastUpdated
+                ? `Última sincronização: ${new Date(lastUpdated).toLocaleString('pt-BR')}`
+                : 'Catálogo sincronizado'}
+            </span>
+            {newModels && newModels.length > 0 && (
+              <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                +{newModels.length} novos detectados
+              </span>
+            )}
+          </div>
+
+          {newModels && newModels.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterOnlyNew(!filterOnlyNew)}
+              className={`text-[10px] px-2 py-0.5 rounded font-medium transition-all cursor-pointer ${
+                filterOnlyNew
+                  ? 'bg-emerald-500 text-black font-bold'
+                  : 'text-emerald-400 hover:underline'
+              }`}
+            >
+              {filterOnlyNew ? 'Mostrando Todos' : `Filtrar apenas novos (${newModels.length})`}
+            </button>
+          )}
+        </div>
+
+        {/* Refresh Feedback Alert */}
+        {refreshStatus && (
+          <div className={`px-4 py-2 text-xs flex items-center justify-between border-b animate-in fade-in ${
+            refreshStatus.type === 'success'
+              ? 'bg-emerald-950/40 border-emerald-800/40 text-emerald-300'
+              : 'bg-rose-950/40 border-rose-800/40 text-rose-300'
+          }`}>
+            <div className="flex items-center space-x-2">
+              {refreshStatus.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              )}
+              <span>{refreshStatus.message}</span>
+            </div>
+            {refreshStatus.newCount > 0 && !filterOnlyNew && (
+              <button
+                type="button"
+                onClick={() => setFilterOnlyNew(true)}
+                className="text-[11px] font-bold underline hover:text-white cursor-pointer ml-2 shrink-0"
+              >
+                Ver novidades
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Custom Model Input Box */}
         <div className="p-3 border-b border-card-border bg-[#0f1117] flex items-center space-x-2">
@@ -314,6 +446,14 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
                       <span className="font-mono text-[10px] text-brand-cyan bg-panel px-2 py-0.5 rounded border border-card-border">
                         {m.id}
                       </span>
+
+                      {/* Newly Discovered Model Badge */}
+                      {newModels && newModels.includes(m.id) && (
+                        <span className="text-[10px] font-bold bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 px-2 py-0.5 rounded-full shadow-xs flex items-center space-x-1 animate-pulse">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>NOVO</span>
+                        </span>
+                      )}
 
                       {/* Price Badge */}
                       {isFree ? (

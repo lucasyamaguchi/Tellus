@@ -38,11 +38,12 @@ import {
   Volume2,
   VolumeX,
   Radio,
-  Plus
+  Plus,
+  FolderGit2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, ToolCallItem, Routine, Attachment, QuotedMessage, ExecutionSecurityPreset } from '../types';
+import { Message, ToolCallItem, Routine, Attachment, QuotedMessage, ExecutionSecurityPreset, ProjectOverview } from '../types';
 import { api } from '../api';
 import { voiceService, generateThinkingAcknowledgement } from '../services/voiceService';
 import { voiceToneAnalyzer } from '../services/voiceToneAnalyzer';
@@ -51,6 +52,7 @@ import { stripVoiceTags, normalizeVoiceVocabulary } from '../utils/voiceVocabula
 import { ExecutionModeDropdown } from './ExecutionModeDropdown';
 
 interface ChatAreaProps {
+  currentProject?: ProjectOverview | null;
   messages: Message[];
   isStreaming: boolean;
   activeModel: string;
@@ -89,6 +91,7 @@ interface ChatAreaProps {
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
+  currentProject,
   messages,
   isStreaming,
   activeModel,
@@ -730,6 +733,44 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
+  const getActiveStreamingToolInfo = () => {
+    if (!isStreaming || messages.length === 0) return null;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role !== 'assistant' || !lastMsg.toolCalls || lastMsg.toolCalls.length === 0) return null;
+
+    const runningTc = [...lastMsg.toolCalls].reverse().find(tc => tc.status === 'running') 
+      || lastMsg.toolCalls[lastMsg.toolCalls.length - 1];
+
+    if (!runningTc) return null;
+
+    const cleanName = runningTc.name.replace(/^(frank_|tellus_)/, '');
+    let actionDetail = '';
+    try {
+      const args = typeof runningTc.arguments === 'string' ? JSON.parse(runningTc.arguments) : runningTc.arguments;
+      if (args) {
+        if (args.path || args.filePath || args.targetPath || args.TargetFile) {
+          actionDetail = args.path || args.filePath || args.targetPath || args.TargetFile;
+        } else if (args.command || args.cmd || args.CommandLine) {
+          actionDetail = args.command || args.cmd || args.CommandLine;
+        } else if (args.query || args.pattern) {
+          actionDetail = args.query || args.pattern;
+        } else if (args.title) {
+          actionDetail = args.title;
+        }
+      }
+    } catch {
+      if (typeof runningTc.arguments === 'string' && runningTc.arguments.length < 80) {
+        actionDetail = runningTc.arguments;
+      }
+    }
+
+    return {
+      name: cleanName,
+      status: runningTc.status,
+      detail: actionDetail
+    };
+  };
+
   return (
     <div 
       onClick={handleChatContainerClick}
@@ -744,6 +785,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
               <span className="font-semibold text-[11px] tracking-wide">LIVE VOICE</span>
             </div>
+
+            {currentProject && (
+              <div
+                className="hidden lg:flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-black/40 border border-white/10 text-[10px] font-mono text-slate-300 shadow-xs"
+                title={`Diretório de Trabalho Ativo: ${currentProject.path}`}
+              >
+                <FolderGit2 className="w-3 h-3 text-red-400" />
+                <span className="font-semibold text-white truncate max-w-[140px]">{currentProject.name}</span>
+              </div>
+            )}
 
             {/* 3 Modes Switcher */}
             <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10 text-xs">
@@ -877,10 +928,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         </div>
       ) : (
-        <div className="border-b border-card-border/50 px-3.5 py-1 flex items-center justify-between text-xs text-slate-400 bg-sidebar/30 shrink-0">
-          <div className="flex items-center space-x-2 text-[11px] text-slate-400">
+        <div className="border-b border-card-border/50 px-3.5 py-1.5 flex items-center justify-between text-xs text-slate-400 bg-sidebar/30 shrink-0 gap-2">
+          <div className="flex items-center space-x-2 text-[11px] text-slate-400 min-w-0">
+            {currentProject && (
+              <div
+                className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-lg bg-panel/90 border border-card-border text-[11px] font-mono text-slate-300 shadow-xs shrink-0"
+                title={`Diretório Ativo de Trabalho:\n${currentProject.path}\n\nO Tellus executa ferramentas, cria/edita arquivos e roda comandos neste diretório.`}
+              >
+                <FolderGit2 className="w-3.5 h-3.5 text-accent-light shrink-0" />
+                <span className="font-semibold text-white truncate max-w-[120px] sm:max-w-[160px]">
+                  {currentProject.name}
+                </span>
+                <span className="text-slate-500 hidden xl:inline truncate max-w-[220px]">
+                  ({currentProject.path})
+                </span>
+              </div>
+            )}
             {activeSessionTitle && (
-              <span className="font-semibold text-slate-300 truncate max-w-[280px]">
+              <span className="font-semibold text-slate-300 truncate max-w-[180px] sm:max-w-[240px]">
                 {activeSessionTitle}
               </span>
             )}
@@ -895,7 +960,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               />
             )}
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 shrink-0">
             {onNewChat && (
               <button
                 type="button"
@@ -923,25 +988,54 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       )}
 
       {/* Streaming / Background Processing Safety Banner */}
-      {isStreaming && (
-        <div className="bg-amber-500/10 border-b border-amber-500/25 px-4 py-1.5 flex items-center justify-between text-xs text-amber-300 shrink-0 select-none animate-in fade-in">
-          <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-            <span className="text-[11px] font-medium text-amber-200">
-              Assistente respondendo ou executando tarefas...
-            </span>
+      {isStreaming && (() => {
+        const activeTool = getActiveStreamingToolInfo();
+        return (
+          <div className="bg-amber-500/10 border-b border-amber-500/25 px-4 py-1.5 flex items-center justify-between text-xs text-amber-300 shrink-0 select-none animate-in fade-in">
+            <div className="flex items-center space-x-2.5 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+              {activeTool ? (
+                <div className="flex items-center space-x-1.5 truncate">
+                  <span className="font-semibold text-amber-200">
+                    {activeTool.name.includes('write') || activeTool.name.includes('replace') || activeTool.name.includes('create')
+                      ? '✍️ Gravando arquivo:'
+                      : activeTool.name.includes('read') || activeTool.name.includes('view')
+                      ? '📖 Lendo arquivo:'
+                      : activeTool.name.includes('command') || activeTool.name.includes('terminal')
+                      ? '⚡ Executando comando:'
+                      : activeTool.name.includes('search') || activeTool.name.includes('find')
+                      ? '🔍 Pesquisando:'
+                      : `⚙️ Executando ${activeTool.name}:`}
+                  </span>
+                  {activeTool.detail && (
+                    <span className="font-mono text-[11px] bg-black/40 px-2 py-0.5 rounded text-amber-100 border border-amber-500/30 truncate max-w-[360px]">
+                      {activeTool.detail}
+                    </span>
+                  )}
+                  {currentProject && (
+                    <span className="text-[10px] text-amber-400/80 hidden lg:inline">
+                      em <span className="font-semibold text-amber-300">{currentProject.name}</span>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span className="text-[11px] font-medium text-amber-200">
+                  Tellus gerando resposta com <strong className="text-white">{activeModel.split('/').pop()}</strong>...
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onStopStreaming}
+              className="px-2.5 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white text-[11px] font-semibold transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer shrink-0 ml-2"
+              title="Interromper geração e desbloquear o chat para digitação imediata"
+            >
+              <Square className="w-2.5 h-2.5 fill-current" />
+              <span>Interromper & Desbloquear</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onStopStreaming}
-            className="px-2.5 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white text-[11px] font-semibold transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer"
-            title="Interromper geração e desbloquear o chat para digitação imediata"
-          >
-            <Square className="w-2.5 h-2.5 fill-current" />
-            <span>Interromper & Desbloquear</span>
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Messages Scroll Area */}
       <div 
