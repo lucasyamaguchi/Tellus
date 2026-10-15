@@ -450,8 +450,14 @@ export const api = {
     });
     return res.json();
   },
-  async listSessions(): Promise<ChatSessionMetadata[]> {
-    const res = await fetch(`${API_BASE}/sessions`);
+  async listSessions(all = true, projectPath?: string): Promise<ChatSessionMetadata[]> {
+    let url = `${API_BASE}/sessions`;
+    const params = new URLSearchParams();
+    if (all) params.set('all', 'true');
+    if (projectPath) params.set('projectPath', projectPath);
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
+    const res = await fetch(url);
     return res.json();
   },
 

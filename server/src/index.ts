@@ -937,7 +937,27 @@ app.get('/api/attachments/:filename', (req, res) => {
 // 7. Chat Sessions & Cross-Chat Mentions
 app.get('/api/sessions', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
+    const requestedPath = req.query.projectPath as string;
+    const all = req.query.all === 'true';
+
+    if (all) {
+      const config = ConfigManager.getConfig();
+      const currentPath = ProjectManager.getCurrentProject();
+      const allPaths = Array.from(new Set([
+        currentPath,
+        ...(config.openProjects || []),
+        ...(config.recentProjects || [])
+      ])).filter(p => fs.existsSync(p));
+
+      const allSessions: any[] = [];
+      for (const p of allPaths) {
+        const sessions = SessionManager.listSessions(p);
+        allSessions.push(...sessions);
+      }
+      return res.json(allSessions);
+    }
+
+    const currentPath = requestedPath || ProjectManager.getCurrentProject();
     const sessions = SessionManager.listSessions(currentPath);
     res.json(sessions);
   } catch (err: any) {
@@ -947,8 +967,23 @@ app.get('/api/sessions', (req, res) => {
 
 app.get('/api/sessions/:id', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
-    const session = SessionManager.getSession(currentPath, req.params.id);
+    const requestedPath = req.query.projectPath as string;
+    const currentPath = requestedPath || ProjectManager.getCurrentProject();
+    let session = SessionManager.getSession(currentPath, req.params.id);
+
+    if (!session) {
+      const config = ConfigManager.getConfig();
+      const allPaths = Array.from(new Set([
+        ...(config.openProjects || []),
+        ...(config.recentProjects || [])
+      ])).filter(p => fs.existsSync(p) && p !== currentPath);
+
+      for (const p of allPaths) {
+        session = SessionManager.getSession(p, req.params.id);
+        if (session) break;
+      }
+    }
+
     if (!session) return res.status(404).json({ error: 'Sessão não encontrada' });
     res.json(session);
   } catch (err: any) {
@@ -958,7 +993,8 @@ app.get('/api/sessions/:id', (req, res) => {
 
 app.post('/api/sessions', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
+    const requestedPath = (req.body.projectPath as string) || (req.query.projectPath as string);
+    const currentPath = requestedPath || ProjectManager.getCurrentProject();
     const session = SessionManager.saveSession(currentPath, req.body);
     res.json(session);
   } catch (err: any) {
@@ -968,8 +1004,23 @@ app.post('/api/sessions', (req, res) => {
 
 app.delete('/api/sessions/:id', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
-    const success = SessionManager.deleteSession(currentPath, req.params.id);
+    const requestedPath = req.query.projectPath as string;
+    const currentPath = requestedPath || ProjectManager.getCurrentProject();
+    let success = SessionManager.deleteSession(currentPath, req.params.id);
+
+    if (!success) {
+      const config = ConfigManager.getConfig();
+      const allPaths = Array.from(new Set([
+        ...(config.openProjects || []),
+        ...(config.recentProjects || [])
+      ])).filter(p => fs.existsSync(p) && p !== currentPath);
+
+      for (const p of allPaths) {
+        success = SessionManager.deleteSession(p, req.params.id);
+        if (success) break;
+      }
+    }
+
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
