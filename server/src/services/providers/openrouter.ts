@@ -75,15 +75,23 @@ export class OpenRouterService {
   }
 
   public static async listModels(apiKey?: string): Promise<OpenRouterModel[]> {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      'HTTP-Referer': 'https://github.com/lucasyamaguchi/Tellus',
+      'X-Title': 'Tellus AI Hub'
+    };
     if (apiKey) {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
     const res = await fetch(`${this.baseUrl}/models`, { headers });
     if (!res.ok) {
-      throw new Error(`Falha ao listar modelos da OpenRouter: ${res.statusText}`);
+      throw new Error(`Falha ao listar modelos da OpenRouter: ${res.statusText || res.status}`);
     }
-    const data = (await res.json()) as any;
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error('Resposta inválida recebida da API da OpenRouter.');
+    }
     const rawList: OpenRouterModel[] = data.data || [];
     // Filter out asynchronous batch models that only work with offline Batch API
     const filtered = rawList.filter(m => !m.id.endsWith(':batch') && !m.id.includes(':batch'));
@@ -114,7 +122,22 @@ export class OpenRouterService {
     models: OpenRouterModel[];
   }> {
     const previous = this.getCachedModels();
-    const freshModels = await this.listModels(apiKey);
+    let freshModels: OpenRouterModel[];
+    try {
+      freshModels = await this.listModels(apiKey);
+    } catch (err: any) {
+      // If network fails but we have cached models, gracefully fallback
+      if (previous.models && previous.models.length > 0) {
+        return {
+          totalCount: previous.models.length,
+          newCount: 0,
+          newModels: [],
+          updatedAt: previous.lastUpdated,
+          models: previous.models
+        };
+      }
+      throw err;
+    }
 
     const prevKnownSet = new Set(
       previous.knownModelIds && previous.knownModelIds.length > 0 
