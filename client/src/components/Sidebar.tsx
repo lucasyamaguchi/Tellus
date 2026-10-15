@@ -93,6 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
+  const [showInactive, setShowInactive] = useState<boolean>(false);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => ({ ...prev, [path]: !prev[path] }));
@@ -101,6 +102,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const toggleProject = (path: string) => {
     setCollapsedProjects(prev => ({ ...prev, [path]: !prev[path] }));
   };
+
+  const normKey = (p: string) => (p || '').replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
 
   // Build Project Groups containing their respective chat sessions
   interface ProjectGroup {
@@ -114,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // 1. Current Project
   if (currentProject) {
-    projectMap.set(currentProject.path, {
+    projectMap.set(normKey(currentProject.path), {
       path: currentProject.path,
       name: currentProject.name || pathBasename(currentProject.path),
       isCurrent: true,
@@ -122,47 +125,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
     });
   }
 
-  // 2. Open Projects
+  // 2. Open / Active Projects
   for (const p of openProjects) {
-    if (!projectMap.has(p.path)) {
-      projectMap.set(p.path, {
+    const k = normKey(p.path);
+    if (!projectMap.has(k)) {
+      projectMap.set(k, {
         path: p.path,
         name: p.name || pathBasename(p.path),
-        isCurrent: currentProject?.path === p.path,
+        isCurrent: currentProject ? normKey(currentProject.path) === k : false,
         sessions: []
       });
     }
   }
 
-  // 3. Recent Projects
-  for (const rPath of recentProjects) {
-    if (!projectMap.has(rPath)) {
-      projectMap.set(rPath, {
-        path: rPath,
-        name: pathBasename(rPath),
-        isCurrent: currentProject?.path === rPath,
-        sessions: []
-      });
-    }
-  }
+  // Calculate Inactive Projects (recent projects not currently in open/active projects)
+  const inactiveProjects = recentProjects.filter(rPath => {
+    const nR = normKey(rPath);
+    const isOpen = openProjects.some(op => normKey(op.path) === nR);
+    const isCur = currentProject ? normKey(currentProject.path) === nR : false;
+    return !isOpen && !isCur;
+  });
 
-  // 4. Distribute sessions into projects
+  // 3. Distribute sessions into projects with path normalization
   for (const s of sessions) {
     const targetProjPath = s.projectPath || currentProject?.path;
     if (targetProjPath) {
-      let group = projectMap.get(targetProjPath);
+      const k = normKey(targetProjPath);
+      let group = projectMap.get(k);
       if (!group) {
+        // Only if project is active or has chats, register it
         group = {
           path: targetProjPath,
           name: s.projectName || pathBasename(targetProjPath),
-          isCurrent: currentProject?.path === targetProjPath,
+          isCurrent: currentProject ? normKey(currentProject.path) === k : false,
           sessions: []
         };
-        projectMap.set(targetProjPath, group);
+        projectMap.set(k, group);
       }
       group.sessions.push(s);
     } else if (currentProject) {
-      projectMap.get(currentProject.path)?.sessions.push(s);
+      projectMap.get(normKey(currentProject.path))?.sessions.push(s);
     }
   }
 
@@ -399,7 +401,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <Plus className="w-3 h-3" />
                           </button>
                           
-                          {/* Close/Remove project from open list (if not current) */}
+                          {/* Close/Inactivate project from open list (if not current) */}
                           {!group.isCurrent && (
                             <button
                               type="button"
@@ -407,8 +409,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 e.stopPropagation();
                                 onCloseOpenProject(group.path);
                               }}
-                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-card-border text-slate-500 hover:text-rose-400 transition-opacity"
-                              title="Remover projeto dos abertos"
+                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-card-border text-slate-500 hover:text-amber-400 transition-opacity"
+                              title="Inativar projeto (remover da barra lateral)"
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -497,6 +499,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                   );
                 })
+            )}
+
+            {/* INACTIVE PROJECTS SECTION (Brings back projects anytime) */}
+            {inactiveProjects.length > 0 && (
+              <div className="pt-2 mt-2 border-t border-card-border/60">
+                <button
+                  type="button"
+                  onClick={() => setShowInactive(!showInactive)}
+                  className="w-full flex items-center justify-between px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-card-border/30 rounded-lg transition-colors group"
+                >
+                  <span className="flex items-center space-x-1.5 font-medium">
+                    <FolderGit2 className="w-3.5 h-3.5 text-slate-500 group-hover:text-sky-400 transition-colors" />
+                    <span>Projetos Inativos ({inactiveProjects.length})</span>
+                  </span>
+                  {showInactive ? (
+                    <ChevronDown className="w-3 h-3 text-slate-500" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3 text-slate-500" />
+                  )}
+                </button>
+
+                {showInactive && (
+                  <div className="pl-2 pt-1 space-y-1">
+                    {inactiveProjects.map(inPath => (
+                      <div
+                        key={inPath}
+                        className="flex items-center justify-between py-1 px-2 rounded-lg bg-card-border/20 hover:bg-card-border/40 text-xs transition-colors"
+                      >
+                        <span className="truncate text-slate-300 font-medium text-[11px]" title={inPath}>
+                          {pathBasename(inPath)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onSwitchProject(inPath)}
+                          className="px-2 py-0.5 text-[10px] bg-accent/20 hover:bg-accent text-accent-light hover:text-white rounded font-medium transition-all ml-2 shrink-0 flex items-center space-x-1"
+                          title="Reativar projeto na barra lateral"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>Reativar</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}

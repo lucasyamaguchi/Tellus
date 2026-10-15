@@ -800,6 +800,8 @@ export const App: React.FC = () => {
                 : `Olá! Quero conversar e estudar por voz sobre o tema: ${topic}`;
               handleStartLiveVoiceChat('mixed', `🎙️ Live Voice: ${topic.slice(0, 25)}`, prompt);
             }}
+            onOpenSkills={() => setMainViewMode('skills')}
+            currentProjectPath={currentProject?.path}
           />
         </div>
       )}

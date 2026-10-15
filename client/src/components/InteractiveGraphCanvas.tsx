@@ -43,12 +43,12 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchFilter, setSearchFilter] = useState<string>('');
-  const [chargeStrength, setChargeStrength] = useState<number>(300);
+  const [chargeStrength, setChargeStrength] = useState<number>(450);
 
   // Filters state
-  const [showSubNodes1, setShowSubNodes1] = useState<boolean>(true); // folders / categories / modules
-  const [showSubNodes2, setShowSubNodes2] = useState<boolean>(true); // tags / agents / memories
-  const [showLinks, setShowLinks] = useState<boolean>(true);         // wikilinks / synergies / routines
+  const [showSubNodes1, setShowSubNodes1] = useState<boolean>(true);  // folders / categories / modules
+  const [showSubNodes2, setShowSubNodes2] = useState<boolean>(false); // tags / agents / memories (off by default to prevent clutter)
+  const [showLinks, setShowLinks] = useState<boolean>(true);          // wikilinks / synergies / routines
 
   const [hoveredNode, setHoveredNode] = useState<{
     id: string;
@@ -239,11 +239,11 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       if (ticks > maxTicks) return;
       ticks++;
 
-      // Calibrated, stable force constants
-      const kRepulsion = chargeStrength * 5;
-      const kAttraction = 0.035;
-      const damping = 0.85;
-      const maxSpeed = 6;
+      // Calibrated, stable force constants (Obsidian-style)
+      const kRepulsion = chargeStrength * 12;
+      const kAttraction = 0.025;
+      const damping = 0.88;
+      const maxSpeed = 7;
 
       // 1. Repulsion between all node pairs with distance clamp
       for (let i = 0; i < simNodes.length; i++) {
@@ -253,12 +253,12 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
           const dx = n2.x - n1.x;
           const dy = n2.y - n1.y;
           // Clamp minimum distance to prevent singularity / explosive repulsion
-          const distSq = Math.max(dx * dx + dy * dy, 900);
+          const distSq = Math.max(dx * dx + dy * dy, 1600);
           const dist = Math.sqrt(distSq);
 
-          if (dist < 450) {
+          if (dist < 600) {
             // Soft-capped repulsive force
-            const force = Math.min(kRepulsion / distSq, 10);
+            const force = Math.min(kRepulsion / distSq, 14);
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
 
@@ -268,12 +268,31 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
         }
       }
 
-      // 2. Spring Attraction along links
+      // 1.1 Collision separation to prevent overlapping nodes
+      for (let i = 0; i < simNodes.length; i++) {
+        const n1 = simNodes[i];
+        for (let j = i + 1; j < simNodes.length; j++) {
+          const n2 = simNodes[j];
+          const dx = n2.x - n1.x;
+          const dy = n2.y - n1.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const minDist = n1.radius + n2.radius + 28;
+          if (dist < minDist) {
+            const overlap = (minDist - dist) * 0.45;
+            const ox = (dx / dist) * overlap;
+            const oy = (dy / dist) * overlap;
+            if (!n1.isPinned) { n1.vx -= ox; n1.vy -= oy; }
+            if (!n2.isPinned) { n2.vx += ox; n2.vy += oy; }
+          }
+        }
+      }
+
+      // 2. Spring Attraction along links (180px distance for clear visual hierarchy)
       for (const link of simLinks) {
         const dx = link.target.x - link.source.x;
         const dy = link.target.y - link.source.y;
         const dist = Math.hypot(dx, dy) || 1;
-        const targetDist = 70;
+        const targetDist = 180;
         const displacement = dist - targetDist;
         const force = Math.min(Math.max(displacement * kAttraction, -15), 15);
 
@@ -370,6 +389,7 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       for (const link of simLinks) {
         const isHovered = activeHoverNode && 
           (activeHoverNode.id === link.source.id || activeHoverNode.id === link.target.id);
+        const isDimmed = activeHoverNode && !isHovered;
 
         ctx.beginPath();
         ctx.moveTo(link.source.x, link.source.y);
@@ -377,10 +397,16 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
 
         if (isHovered) {
           ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 2.2;
+          ctx.lineWidth = 2.4;
+          ctx.globalAlpha = 0.95;
+        } else if (isDimmed) {
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.05)';
+          ctx.lineWidth = 0.8;
+          ctx.globalAlpha = 0.12;
         } else {
-          ctx.strokeStyle = link.type === 'synergy' ? 'rgba(56, 189, 248, 0.35)' : 'rgba(148, 163, 184, 0.18)';
-          ctx.lineWidth = link.type === 'synergy' ? 1.5 : 1;
+          ctx.strokeStyle = link.type === 'synergy' ? 'rgba(56, 189, 248, 0.45)' : 'rgba(148, 163, 184, 0.22)';
+          ctx.lineWidth = link.type === 'synergy' ? 1.6 : 1.1;
+          ctx.globalAlpha = 0.55;
         }
 
         ctx.stroke();
@@ -393,12 +419,15 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
           l => (l.source.id === activeHoverNode?.id && l.target.id === node.id) ||
                (l.target.id === activeHoverNode?.id && l.source.id === node.id)
         );
+        const isDimmed = activeHoverNode && !isHovered && !isConnectedToHover;
+
+        ctx.globalAlpha = isDimmed ? 0.22 : 1.0;
 
         // Glow ring for hovered/connected
         if (isHovered || isConnectedToHover) {
           ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius + 6, 0, 2 * Math.PI);
-          ctx.fillStyle = isHovered ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.15)';
+          ctx.arc(node.x, node.y, node.radius + 7, 0, 2 * Math.PI);
+          ctx.fillStyle = isHovered ? 'rgba(56, 189, 248, 0.4)' : 'rgba(56, 189, 248, 0.18)';
           ctx.fill();
         }
 
@@ -407,32 +436,39 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
         ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
         ctx.fillStyle = node.color;
         ctx.shadowColor = node.color;
-        ctx.shadowBlur = isHovered ? 14 : 4;
+        ctx.shadowBlur = isHovered ? 16 : 4;
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // Label
-        const shouldShowLabel = isHovered || isConnectedToHover || zoom > 0.8 || node.radius > 13;
-        if (shouldShowLabel) {
-          ctx.font = `${isHovered ? 'bold 12px' : '10px'} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        // Label thresholding (Hubs always visible, notes visible on hover/connections or zoom in, tags only zoomed in)
+        const isHub = node.type === 'subject' || node.type === 'category' || node.type === 'project';
+        const isTag = node.type === 'tag';
+        const shouldShowLabel = isHovered || isConnectedToHover || isHub || (isTag ? zoom > 1.35 : zoom > 1.05);
+
+        if (shouldShowLabel && !isDimmed) {
+          ctx.font = `${isHovered ? 'bold 12px' : (isHub ? 'bold 11px' : '10px')} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
           // Label Shadow / Background Box
-          const text = node.label.length > 24 ? node.label.slice(0, 22) + '...' : node.label;
+          const text = node.label.length > 28 ? node.label.slice(0, 26) + '...' : node.label;
           const textMetrics = ctx.measureText(text);
-          const bgPadding = 3;
+          const bgPaddingX = 5;
+          const bgPaddingY = 3;
 
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(
-            node.x - textMetrics.width / 2 - bgPadding,
-            node.y + node.radius + 4,
-            textMetrics.width + bgPadding * 2,
-            14
-          );
+          const boxX = node.x - textMetrics.width / 2 - bgPaddingX;
+          const boxY = node.y + node.radius + 5;
+          const boxW = textMetrics.width + bgPaddingX * 2;
+          const boxH = 14 + bgPaddingY * 2;
 
-          ctx.fillStyle = isHovered ? '#ffffff' : '#cbd5e1';
-          ctx.fillText(text, node.x, node.y + node.radius + 11);
+          ctx.fillStyle = 'rgba(11, 15, 25, 0.9)';
+          ctx.fillRect(boxX, boxY, boxW, boxH);
+          ctx.strokeStyle = isHovered ? '#38bdf8' : 'rgba(255, 255, 255, 0.12)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+          ctx.fillStyle = isHovered ? '#ffffff' : (isHub ? '#fde68a' : (isTag ? '#6ee7b7' : '#cbd5e1'));
+          ctx.fillText(text, node.x, boxY + boxH / 2);
         }
       }
 

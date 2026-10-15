@@ -42,7 +42,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   
   // Scope Filters
-  const [skillScopeFilter, setSkillScopeFilter] = useState<'all' | 'global' | 'project'>('all');
+  const [skillScopeFilter, setSkillScopeFilter] = useState<'all' | 'global' | 'project' | 'situational'>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -59,7 +59,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const [importSkillParsedDesc, setImportSkillParsedDesc] = useState<string>('');
   const [importSkillParsedCat, setImportSkillParsedCat] = useState<string>('Custom');
   const [importSkillParsedPrompt, setImportSkillParsedPrompt] = useState<string>('');
-  const [importSkillScope, setImportSkillScope] = useState<'global' | 'project'>('global');
+  const [importSkillScope, setImportSkillScope] = useState<'global' | 'project' | 'situational'>('global');
   const [importSkillTargetProject, setImportSkillTargetProject] = useState<string>('');
   const [isImportingSkillLoading, setIsImportingSkillLoading] = useState<boolean>(false);
 
@@ -206,7 +206,8 @@ export const SkillsAndArtifactsView: React.FC = () => {
         promptInstructions: importSkillParsedPrompt.trim(),
         isProjectSpecific: isProj,
         targetProjectPath: targetProject,
-        isActive: true
+        scope: importSkillScope,
+        isActive: importSkillScope !== 'situational'
       });
 
       setIsImportModalOpen(false);
@@ -278,8 +279,9 @@ export const SkillsAndArtifactsView: React.FC = () => {
 
   const filteredSkills = skills.filter(s => {
     // 1. Scope filter
-    if (skillScopeFilter === 'global' && s.isProjectSpecific) return false;
-    if (skillScopeFilter === 'project' && !s.isProjectSpecific) return false;
+    if (skillScopeFilter === 'global' && (s.isProjectSpecific || s.scope === 'situational')) return false;
+    if (skillScopeFilter === 'project' && (!s.isProjectSpecific || s.scope === 'situational')) return false;
+    if (skillScopeFilter === 'situational' && s.scope !== 'situational') return false;
 
     // 2. Category filter
     if (selectedCategoryFilter !== 'all' && s.category !== selectedCategoryFilter) return false;
@@ -344,11 +346,11 @@ export const SkillsAndArtifactsView: React.FC = () => {
               {/* Destination Scope & Project Selector */}
               <div className="p-3 rounded-xl bg-panel border border-card-border space-y-2">
                 <label className="text-[10px] uppercase font-bold text-slate-400 font-mono block">Onde salvar esta Skill:</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setImportSkillScope('global')}
-                    className={`p-2.5 rounded-xl border flex items-center space-x-2 text-left transition-all ${
+                    className={`p-2 rounded-xl border flex items-center space-x-2 text-left transition-all cursor-pointer ${
                       importSkillScope === 'global'
                         ? 'bg-accent/20 border-accent text-white font-semibold'
                         : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
@@ -356,15 +358,15 @@ export const SkillsAndArtifactsView: React.FC = () => {
                   >
                     <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
                     <div>
-                      <span className="block text-xs">🌐 Global Padrão</span>
-                      <span className="text-[10px] text-slate-400 block font-normal">Disponível em todos os projetos</span>
+                      <span className="block text-xs">🌐 Global</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">Todos os projetos</span>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setImportSkillScope('project')}
-                    className={`p-2.5 rounded-xl border flex items-center space-x-2 text-left transition-all ${
+                    className={`p-2 rounded-xl border flex items-center space-x-2 text-left transition-all cursor-pointer ${
                       importSkillScope === 'project'
                         ? 'bg-accent/20 border-accent text-white font-semibold'
                         : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
@@ -372,8 +374,24 @@ export const SkillsAndArtifactsView: React.FC = () => {
                   >
                     <FolderGit2 className="w-4 h-4 text-amber-400 shrink-0" />
                     <div>
-                      <span className="block text-xs">📁 Por Projeto</span>
-                      <span className="text-[10px] text-slate-400 block font-normal">Exclusiva para um projeto</span>
+                      <span className="block text-xs">📁 Projeto</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">Exclusiva deste projeto</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setImportSkillScope('situational')}
+                    className={`p-2 rounded-xl border flex items-center space-x-2 text-left transition-all cursor-pointer ${
+                      importSkillScope === 'situational'
+                        ? 'bg-amber-500/20 border-amber-400 text-white font-semibold'
+                        : 'bg-card border-card-border text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <span className="block text-xs">⚡ Situacional</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">Ativada sob demanda</span>
                     </div>
                   </button>
                 </div>
@@ -576,12 +594,12 @@ export const SkillsAndArtifactsView: React.FC = () => {
                 <Globe className="w-3 h-3 text-cyan-400" />
                 <span>🌐 Globais Padrão</span>
                 <span className="text-[10px] opacity-75">
-                  ({skills.filter(s => !s.isProjectSpecific).length})
+                  ({skills.filter(s => !s.isProjectSpecific && s.scope !== 'situational').length})
                 </span>
               </button>
               <button
                 onClick={() => setSkillScopeFilter('project')}
-                className={`px-2.5 py-1 rounded-lg transition-all font-medium flex items-center space-x-1.5 ${
+                className={`px-2.5 py-1 rounded-lg transition-all font-medium flex items-center space-x-1.5 cursor-pointer ${
                   skillScopeFilter === 'project'
                     ? 'bg-accent text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -591,7 +609,22 @@ export const SkillsAndArtifactsView: React.FC = () => {
                 <FolderGit2 className="w-3 h-3 text-amber-400" />
                 <span>📁 Por Projeto</span>
                 <span className="text-[10px] opacity-75">
-                  ({skills.filter(s => s.isProjectSpecific).length})
+                  ({skills.filter(s => s.isProjectSpecific && s.scope !== 'situational').length})
+                </span>
+              </button>
+              <button
+                onClick={() => setSkillScopeFilter('situational')}
+                className={`px-2.5 py-1 rounded-lg transition-all font-medium flex items-center space-x-1.5 cursor-pointer ${
+                  skillScopeFilter === 'situational'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Skills ativadas sob demanda/situacionais"
+              >
+                <Sparkles className="w-3 h-3 text-amber-300" />
+                <span>⚡ Situacionais</span>
+                <span className="text-[10px] opacity-75">
+                  ({skills.filter(s => s.scope === 'situational').length})
                 </span>
               </button>
             </div>
@@ -859,8 +892,13 @@ export const SkillsAndArtifactsView: React.FC = () => {
 
                         {/* Scope Badge & Active Toggle */}
                         <div className="flex items-center space-x-1.5 shrink-0">
-                          {skill.isProjectSpecific ? (
+                          {skill.scope === 'situational' ? (
                             <span className="text-[9px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center space-x-1">
+                              <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                              <span>Situacional</span>
+                            </span>
+                          ) : skill.isProjectSpecific ? (
+                            <span className="text-[9px] font-mono font-semibold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 flex items-center space-x-1">
                               <FolderGit2 className="w-2.5 h-2.5" />
                               <span>Projeto</span>
                             </span>

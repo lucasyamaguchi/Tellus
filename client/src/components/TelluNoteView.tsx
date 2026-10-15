@@ -87,7 +87,8 @@ import {
   MoreHorizontal,
   MoreVertical,
   BookMarked,
-  Wrench
+  Wrench,
+  Puzzle
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -96,6 +97,7 @@ import { TelluNote, TellusNote, FrankNote, GraphData, DeletedNoteItem, GitSafeAu
 import { api } from '../api';
 import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
 import { SmartDropzoneModal } from './SmartDropzoneModal';
+import { ObsidianPluginsModal } from './ObsidianPluginsModal';
 import { CreditsModal } from './CreditsModal';
 import { downloadNoteInFormat, downloadFormattedNotebook, ExportFormat, markdownToEditorHtml, editorHtmlToMarkdown } from '../utils/noteFormatter';
 import { 
@@ -142,6 +144,8 @@ export interface TelluNoteViewProps {
   onStartLiveVoice?: (topic: string, initialContent?: string) => void;
   onSearchInNewChat?: (query: string) => void;
   onOpenSelfHealing?: () => void;
+  onOpenSkills?: () => void;
+  currentProjectPath?: string;
 }
 
 export type FrankNoteViewProps = TelluNoteViewProps;
@@ -154,7 +158,9 @@ export const TelluNoteView: React.FC<TelluNoteViewProps> = ({
   targetNoteIdOrTitle,
   onStartLiveVoice,
   onSearchInNewChat,
-  onOpenSelfHealing
+  onOpenSelfHealing,
+  onOpenSkills,
+  currentProjectPath
 }) => {
   const [notes, setNotes] = useState<TelluNote[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -667,6 +673,9 @@ export const TelluNoteView: React.FC<TelluNoteViewProps> = ({
   const [isDropzoneOpen, setIsDropzoneOpen] = useState<boolean>(false);
   const [initialHomeDropFiles, setInitialHomeDropFiles] = useState<File[] | null>(null);
   const [isHomeDraggingOver, setIsHomeDraggingOver] = useState<boolean>(false);
+
+  // Obsidian Plugins Modal State
+  const [isObsidianPluginsOpen, setIsObsidianPluginsOpen] = useState<boolean>(false);
 
   // GitSafe Core Security Modal State
   const [isGitSafeModalOpen, setIsGitSafeModalOpen] = useState<boolean>(false);
@@ -3791,11 +3800,21 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           {/* Smart Dropzone Button */}
           <button
             onClick={() => setIsDropzoneOpen(true)}
-            className="px-3 py-1 rounded-lg bg-gradient-to-r from-brand-cyan/20 to-accent/20 hover:from-brand-cyan/30 hover:to-accent/30 border border-brand-cyan/40 text-brand-cyan text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm"
+            className="px-3 py-1 rounded-lg bg-gradient-to-r from-brand-cyan/20 to-accent/20 hover:from-brand-cyan/30 hover:to-accent/30 border border-brand-cyan/40 text-brand-cyan text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer"
             title="Soltar arquivos diversos para auto-organização inteligente e emissão de relatório"
           >
             <Upload className="w-3.5 h-3.5 text-brand-cyan" />
             <span>Smart Dropzone</span>
+          </button>
+
+          {/* Obsidian Plugins Button */}
+          <button
+            onClick={() => setIsObsidianPluginsOpen(true)}
+            className="px-3 py-1 rounded-lg bg-panel hover:bg-card-border border border-card-border text-slate-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer"
+            title="Plugins Comunitários do Obsidian (.obsidian/plugins) e Recomendações"
+          >
+            <Puzzle className="w-3.5 h-3.5 text-accent-light" />
+            <span>Plugins do Obsidian</span>
           </button>
 
           <button
@@ -6720,7 +6739,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                             </div>
 
                             {/* Embedded Mini Graph Canvas */}
-                            <div className="h-[230px] w-full rounded-2xl overflow-hidden border border-card-border/80 bg-[#050608] relative">
+                            <div className="h-[420px] w-full rounded-2xl overflow-hidden border border-card-border/80 bg-[#050608] relative shadow-xl">
                               <InteractiveGraphCanvas
                                 initialType="notes"
                                 embeddedMode={true}
@@ -7152,6 +7171,8 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
       <SmartDropzoneModal
         isOpen={isDropzoneOpen}
         initialFiles={initialHomeDropFiles}
+        targetProjectPath={currentProjectPath}
+        onOpenSkills={onOpenSkills}
         onClose={() => {
           setIsDropzoneOpen(false);
           setInitialHomeDropFiles(null);
@@ -7165,6 +7186,12 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
           }
         }}
         onRefreshNotes={fetchNotesAndFolders}
+      />
+
+      {/* Obsidian Plugins Modal */}
+      <ObsidianPluginsModal
+        isOpen={isObsidianPluginsOpen}
+        onClose={() => setIsObsidianPluginsOpen(false)}
       />
 
       {/* Export Toast Notification */}

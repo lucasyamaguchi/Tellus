@@ -181,7 +181,7 @@ export interface OrganizedFileResult {
   savedName: string;
   targetFolder: string;
   fullRelativePath: string;
-  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'note' | 'idea' | 'whatsapp' | 'transcript' | 'other';
+  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'note' | 'idea' | 'whatsapp' | 'transcript' | 'skill' | 'other';
   size: number;
   reason: string;
   summary: string;
@@ -189,6 +189,9 @@ export interface OrganizedFileResult {
   success: boolean;
   error?: string;
   noteTitle?: string;
+  skillId?: string;
+  skillName?: string;
+  skillScope?: 'project' | 'global' | 'situational';
 }
 
 export interface DropzoneOrganizeReport {
@@ -211,7 +214,32 @@ export interface TellusSkill {
   promptInstructions: string;
   isProjectSpecific?: boolean;
   isActive?: boolean;
+  scope?: 'project' | 'global' | 'situational';
   updatedAt: number;
+}
+
+export interface ObsidianPluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  enabled: boolean;
+  dirPath: string;
+  hasMainJs: boolean;
+  hasStylesCss: boolean;
+  hasDataJson: boolean;
+  isCustomTellus: boolean;
+}
+
+export interface RecommendedObsidianPlugin {
+  id: string;
+  name: string;
+  repo: string;
+  description: string;
+  category: 'queries' | 'diagrams' | 'git' | 'ai' | 'tables' | 'organization';
+  installed: boolean;
+  whyUsefulForTellus: string;
 }
 
 export interface TellusArtifact {

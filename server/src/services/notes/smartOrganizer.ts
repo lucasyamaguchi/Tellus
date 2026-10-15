@@ -4,6 +4,7 @@ import pdfParse from 'pdf-parse';
 import { ProviderHub } from '../providers/providerHub.js';
 import { ConfigManager } from '../configManager.js';
 import { TelluNoteEngine } from './telluNoteEngine.js';
+import { SkillManager } from '../skills/skillManager.js';
 
 const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
 
@@ -20,7 +21,7 @@ export interface OrganizedFileResult {
   savedName: string;
   targetFolder: string;
   fullRelativePath: string;
-  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'note' | 'idea' | 'whatsapp' | 'transcript' | 'other';
+  fileType: 'pdf' | 'image' | 'text' | 'code' | 'spreadsheet' | 'note' | 'idea' | 'whatsapp' | 'transcript' | 'skill' | 'other';
   size: number;
   reason: string;
   summary: string;
@@ -28,6 +29,9 @@ export interface OrganizedFileResult {
   success: boolean;
   error?: string;
   noteTitle?: string;
+  skillId?: string;
+  skillName?: string;
+  skillScope?: 'project' | 'global' | 'situational';
 }
 
 export interface DropzoneOrganizeReport {
@@ -45,6 +49,8 @@ export interface OrganizeRequestParams {
   files?: IncomingDropzoneFile[];
   textDump?: string;
   customVaultDir?: string;
+  targetProjectPath?: string;
+  defaultSkillScope?: 'project' | 'global' | 'situational';
 }
 
 export class SmartOrganizer {
@@ -114,6 +120,35 @@ export class SmartOrganizer {
         excerpt: `[Imagem ${file.name} - Tamanho: ${(file.size / 1024).toFixed(1)} KB, Formato: ${file.type || path.extname(file.name)}]`,
         detectedType: 'image'
       };
+    }
+
+    const isMarkdown = /\.(md|markdown)$/i.test(lowerName);
+
+    if (isMarkdown) {
+      try {
+        const str = buffer.toString('utf-8');
+        const preview = str.slice(0, 4000).replace(/\r/g, '');
+        const isSkillFile = lowerName === 'skill.md' || lowerName.endsWith('.skill.md') || lowerName.includes('skill');
+        const hasFrontmatterSkill = /^---\r?\n[\s\S]*?(?:name:|description:|category:|scope:)[\s\S]*?\r?\n---/i.test(preview);
+        const hasPromptInstructions = /#+\s*(?:Prompt Instructions|Gatilhos|Instruções|Instructions|Skill:|Diretrizes de Execução)/i.test(preview);
+
+        if (isSkillFile || hasFrontmatterSkill || hasPromptInstructions) {
+          return {
+            excerpt: `[Skill de Agente]: ${preview.slice(0, 3500)}`,
+            detectedType: 'skill'
+          };
+        }
+
+        return {
+          excerpt: preview,
+          detectedType: 'note'
+        };
+      } catch {
+        return {
+          excerpt: `[Nota Markdown]: ${file.name}`,
+          detectedType: 'note'
+        };
+      }
     }
 
     if (isSpreadsheet || isText || isCode) {
@@ -413,8 +448,34 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO:
         let summary = decision?.summary || '';
         let tags = decision?.tags || [];
 
+        // Scope resolution for skills
+        const initialSkillScope: 'project' | 'global' | 'situational' = params.defaultSkillScope || (params.targetProjectPath ? 'project' : 'global');
+        let importedSkill: any = null;
+
+        if (pf.detectedType === 'skill') {
+          try {
+            const rawContent = pf.buffer.toString('utf-8');
+            importedSkill = SkillManager.importMarkdownSkill(
+              pf.file.name,
+              rawContent,
+              initialSkillScope === 'project',
+              params.targetProjectPath,
+              initialSkillScope
+            );
+          } catch (err: any) {
+            console.warn('[SmartOrganizer] Failed to import markdown skill:', err);
+          }
+        }
+
         if (!targetFolder || !reason) {
-          if (pf.detectedType === 'image') {
+          if (pf.detectedType === 'skill') {
+            targetFolder = 'Estudos/Skills';
+            const scopeLabel = initialSkillScope === 'project' ? 'Focada no Projeto Atual' : initialSkillScope === 'situational' ? 'Situacional' : 'Global na Raiz';
+            reason = `Identificada como Skill de Agente do Tellus (${scopeLabel}); registrada na aba de Skills e catalogada no acervo do Vault.`;
+          } else if (pf.detectedType === 'note') {
+            targetFolder = 'Estudos';
+            reason = 'Nota de estudo em formato Markdown; arquivada diretamente no acervo do Vault.';
+          } else if (pf.detectedType === 'image') {
             targetFolder = 'Imagens';
             reason = 'Identificado como arquivo de imagem visual; alocado no repositório de mídias e imagens do Vault.';
           } else if (pf.detectedType === 'pdf') {
@@ -489,6 +550,9 @@ ${summary ? `**Resumo:** ${summary}` : ''}
             summary,
             tags,
             noteTitle: path.basename(cleanedFilename, path.extname(cleanedFilename)),
+            skillId: importedSkill?.id,
+            skillName: importedSkill?.name,
+            skillScope: importedSkill?.scope || (pf.detectedType === 'skill' ? initialSkillScope : undefined),
             success: true
           });
         } catch (err: any) {

@@ -11,6 +11,7 @@ export interface TellusSkill {
   promptInstructions: string;
   isProjectSpecific?: boolean;
   isActive?: boolean; // Active state in the current project context
+  scope?: 'project' | 'global' | 'situational'; // Scope decision: project only, global root, or situational
   updatedAt: number;
 }
 
@@ -261,7 +262,8 @@ export class SkillManager {
 
   public static saveSkill(skill: TellusSkill, projectPath?: string): TellusSkill {
     this.ensureDirs(projectPath);
-    const isProj = !!skill.isProjectSpecific && !!projectPath;
+    const scope = skill.scope || (skill.isProjectSpecific ? 'project' : 'global');
+    const isProj = scope === 'project' && !!projectPath;
     const targetDir = isProj
       ? path.join(projectPath!, '.agentic', 'skills')
       : GLOBAL_SKILLS_DIR;
@@ -272,6 +274,7 @@ export class SkillManager {
       id,
       isProjectSpecific: isProj,
       isActive: skill.isActive !== false,
+      scope,
       updatedAt: Date.now()
     };
 
@@ -289,12 +292,14 @@ export class SkillManager {
     filename: string,
     content: string,
     isProjectSpecific?: boolean,
-    projectPath?: string
+    projectPath?: string,
+    explicitScope?: 'project' | 'global' | 'situational'
   ): TellusSkill {
     let name = filename.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
     let description = '';
     let category = 'General';
     let promptInstructions = content;
+    let detectedScope: 'project' | 'global' | 'situational' | undefined = explicitScope;
 
     // 1. Check for YAML frontmatter
     const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
@@ -310,6 +315,11 @@ export class SkillManager {
 
       const catMatch = yamlContent.match(/^category:\s*(.+)$/m);
       if (catMatch) category = catMatch[1].trim().replace(/^["']|["']$/g, '');
+
+      const scopeMatch = yamlContent.match(/^scope:\s*(project|global|situational)/im);
+      if (scopeMatch && !detectedScope) {
+        detectedScope = scopeMatch[1].toLowerCase() as any;
+      }
     } else {
       // 2. Check for # Heading 1
       const titleMatch = content.match(/^#\s+(.+)$/m);
@@ -324,6 +334,7 @@ export class SkillManager {
       }
     }
 
+    const finalScope: 'project' | 'global' | 'situational' = detectedScope || (isProjectSpecific ? 'project' : 'global');
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 40) || 'imported-skill';
 
     const skillData: TellusSkill = {
@@ -333,8 +344,9 @@ export class SkillManager {
       category: category || 'General',
       agentAssigned: 'all',
       promptInstructions,
-      isProjectSpecific: !!isProjectSpecific,
-      isActive: true,
+      isProjectSpecific: finalScope === 'project',
+      isActive: finalScope !== 'situational', // situational skills inactive by default until activated
+      scope: finalScope,
       updatedAt: Date.now()
     };
 

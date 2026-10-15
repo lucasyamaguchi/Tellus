@@ -19,6 +19,7 @@ import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
 import { PrivacySanitizer } from './services/security/privacySanitizer.js';
+import { ObsidianPluginManager } from './services/obsidian/obsidianPluginManager.js';
 import { normalizeVoiceVocabulary } from './utils/voiceVocabulary.js';
 
 const app = express();
@@ -333,6 +334,66 @@ app.get('/api/palace/export-markdown', (req, res) => {
   }
 });
 
+// 5.2 Plugins do Obsidian (Compatibilidade, Importação e Gerenciamento)
+app.get('/api/obsidian/plugins', (req, res) => {
+  try {
+    const customVaultDir = req.query.customVaultDir as string;
+    const plugins = ObsidianPluginManager.listInstalledPlugins(customVaultDir);
+    res.json(plugins);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/obsidian/plugins/recommendations', (req, res) => {
+  try {
+    const customVaultDir = req.query.customVaultDir as string;
+    const recs = ObsidianPluginManager.listCuratedRecommendations(customVaultDir);
+    res.json(recs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/obsidian/plugins/toggle', (req, res) => {
+  try {
+    const { pluginId, enabled, customVaultDir } = req.body;
+    if (!pluginId || typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'pluginId e enabled são obrigatórios' });
+    }
+    ObsidianPluginManager.togglePlugin(pluginId, enabled, customVaultDir);
+    res.json({ success: true, pluginId, enabled });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/obsidian/plugins/import', (req, res) => {
+  try {
+    const { sourceDir, customVaultDir } = req.body;
+    if (!sourceDir) {
+      return res.status(400).json({ error: 'sourceDir é obrigatório' });
+    }
+    const plugin = ObsidianPluginManager.importPluginFromDir(sourceDir, customVaultDir);
+    res.json({ success: true, plugin });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/obsidian/plugins/install-github', async (req, res) => {
+  try {
+    const { repo, customVaultDir } = req.body;
+    if (!repo) {
+      return res.status(400).json({ error: 'repo (ex: blacksmithgu/obsidian-dataview) é obrigatório' });
+    }
+    const plugin = await ObsidianPluginManager.installPluginFromGitHub(repo, customVaultDir);
+    res.json({ success: true, plugin });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GitSafe Privacy & Secrets Sanitization Core
 app.get('/api/security/audit', (req, res) => {
   try {
@@ -631,14 +692,21 @@ app.get('/api/notes/graph', (req, res) => {
 // Dropzone Smart Auto-Organizer Endpoint (Multimodal & Brain Dump)
 app.post('/api/vault/dropzone-organize', async (req, res) => {
   try {
-    const { files, textDump, customVaultDir } = req.body;
+    const { files, textDump, customVaultDir, targetProjectPath, defaultSkillScope } = req.body;
     const hasFiles = Array.isArray(files) && files.length > 0;
     const hasText = typeof textDump === 'string' && textDump.trim().length > 0;
 
     if (!hasFiles && !hasText) {
       return res.status(400).json({ error: 'Nenhum arquivo ou texto enviado para organização.' });
     }
-    const report = await SmartOrganizer.organize({ files: hasFiles ? files : [], textDump: hasText ? textDump : '', customVaultDir });
+    const currentProject = targetProjectPath || ProjectManager.getCurrentProject();
+    const report = await SmartOrganizer.organize({ 
+      files: hasFiles ? files : [], 
+      textDump: hasText ? textDump : '', 
+      customVaultDir,
+      targetProjectPath: currentProject,
+      defaultSkillScope
+    });
     res.json(report);
   } catch (err: any) {
     console.error('[Dropzone Organize Error]', err);
@@ -932,7 +1000,7 @@ app.post('/api/skills', (req, res) => {
 
 app.post('/api/skills/import-markdown', (req, res) => {
   try {
-    const { filename, content, isProjectSpecific, targetProjectPath } = req.body;
+    const { filename, content, isProjectSpecific, targetProjectPath, scope } = req.body;
     const targetPath = targetProjectPath || ProjectManager.getCurrentProject();
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'Conteúdo da skill é obrigatório' });
@@ -941,7 +1009,8 @@ app.post('/api/skills/import-markdown', (req, res) => {
       filename || 'imported_skill.md',
       content,
       isProjectSpecific,
-      targetPath
+      targetPath,
+      scope
     );
     res.json(skill);
   } catch (err: any) {
