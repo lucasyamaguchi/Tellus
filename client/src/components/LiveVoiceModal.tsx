@@ -876,7 +876,7 @@ export const LiveVoiceModal: React.FC<LiveVoiceModalProps> = ({
           </div>
           <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none text-[10px]">
             <span className="text-slate-500 shrink-0 font-mono">Sugestões:</span>
-            {['Segurança de Web App', 'Arquitetura de Dados', 'Treino de Entrevista', 'Revisão de Código', 'Concurso SPREGULA'].map(p => (
+            {['Segurança de Web App', 'Arquitetura de Dados', 'Treino de Entrevista', 'Revisão de Código', 'Algoritmos & Estruturas de Dados'].map(p => (
               <button
                 key={p}
                 onClick={() => setTopic(p)}

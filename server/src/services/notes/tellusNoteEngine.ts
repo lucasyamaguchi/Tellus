@@ -7,7 +7,7 @@ import { SecurityShield } from '../sync/securityShield.js';
 
 // Diretório padrão do cofre Obsidian usado pelo TellusMD.
 // Caso não exista na máquina atual (ex: outro notebook), utiliza Documents/Tellus Vault ou o caminho escolhido nas Configurações.
-const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
+const OBSIDIAN_VAULT_DIR = path.join(os.homedir(), 'Documents', 'Tellus Vault');
 
 export interface InkPoint {
   x: number;
@@ -380,7 +380,7 @@ export class TellusNoteEngine {
         title: 'Bem-vindo ao TellusMD Vault',
         folder: 'Início',
         subject: 'Início',
-        content: `# Bem-vindo ao TellusMD Vault\n\nSistema de anotações seguras TellusMD (fundamentado no conceito **Frank MD** e na arquitetura **AI-Memory**) com suporte ao grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian (\`E:\\Die-Sonne\\Vault\`).\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n- Seus dados permanecem 100% locais e protegidos com sanitização de segredos antes da gravação.\n`,
+        content: `# Bem-vindo ao TellusMD Vault\n\nSistema de anotações seguras TellusMD (fundamentado no conceito **Frank MD** e na arquitetura **AI-Memory**) com suporte ao grafo de conhecimento do Obsidian.\n\n## 🛡️ Pastas e Organização\n- Arquivos organizados em pastas e subpastas no seu cofre Obsidian (\`~/Documents/Tellus Vault\`).\n- Conexões com wikilinks: use \`[[Nome da Nota]]\` para criar ligações automáticas.\n- Use tags como #arquitetura, #estudos, #ideias.\n- Seus dados permanecem 100% locais e protegidos com sanitização de segredos antes da gravação.\n`,
         isProjectSpecific: false
       });
       return this.listNotes(projectPath);

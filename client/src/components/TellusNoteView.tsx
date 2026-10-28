@@ -2662,7 +2662,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
   // Notebook styling and visual details
   const getNotebookDetails = (notebookName: string) => {
     const lower = notebookName.toLowerCase();
-    if (lower.includes('carreira') || lower.includes('vaga') || lower.includes('nestle') || lower.includes('candidatura')) {
+    if (lower.includes('carreira') || lower.includes('vaga') || lower.includes('emprego') || lower.includes('oportunidade')) {
       return {
         label: notebookName,
         icon: Briefcase,
@@ -2673,7 +2673,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
         category: 'Carreira'
       };
     }
-    if (lower.includes('estudo') || lower.includes('concurso') || lower.includes('prova') || lower.includes('spregula')) {
+    if (lower.includes('estudo') || lower.includes('concurso') || lower.includes('prova') || lower.includes('certificacao')) {
       return {
         label: notebookName,
         icon: GraduationCap,
@@ -4384,7 +4384,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                         type="text"
                         required
                         autoFocus
-                        placeholder="Nome da pasta (ex: Estudos/SPREGULA, Carreira/Nestle)..."
+                        placeholder="Nome da pasta (ex: Estudos/Cloud, Carreira/Processos Seletivos)..."
                         value={newFolderName}
                         onChange={(e) => setNewFolderName(e.target.value)}
                         className="w-full bg-panel border border-card-border rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-accent font-mono"

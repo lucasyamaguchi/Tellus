@@ -45,7 +45,7 @@ export function cleanMarkdownForFluidReading(rawContent: string, noteTitle?: str
     // 5. Remove dedicated "Tags:" or "🏷️ Tags:" lines
     text = text.replace(/^[ \t]*(?:Tags|🏷️\s*Tags|Categorias)\s*:[ \t]*[^\r\n]*$/gim, '');
 
-    // 6. Strip out hashtag tags (e.g. #estudos #javascript #vaga-nestle),
+    // 6. Strip out hashtag tags (e.g. #estudos #javascript #carreira-tech),
     // but strictly preserve Markdown Headings (# Heading, ## Subheading, ### Topic)
     text = text.replace(/(^|[ \t])#([a-zA-Z0-9_\-\/]+)(?=[ \t\r\n]|$)/g, (match, prefix, tag) => {
       if (/^\d+$/.test(tag)) return `${prefix}#${tag}`;

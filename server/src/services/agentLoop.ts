@@ -273,7 +273,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Título claro da nota em português (sem espanhol)' },
-          folder: { type: 'string', description: 'Caminho hierárquico do Caderno e Subpasta no cofre usando barras (ex: "Estudos/Arquitetura de Software", "Carreira/Nestle"). NUNCA use hífen como separador de pasta!' },
+          folder: { type: 'string', description: 'Caminho hierárquico do Caderno e Subpasta no cofre usando barras (ex: "Estudos/Arquitetura de Software", "Carreira/Engenharia de Software"). NUNCA use hífen como separador de pasta!' },
           subject: { type: 'string', description: 'Assunto ou tema principal da nota' },
           content: { type: 'string', description: 'Conteúdo em Markdown com wikilinks [[Outra Nota]] e #tags' },
           is_project_specific: { type: 'boolean', description: 'Se true salva no projeto atual, se false salva no cofre global' }
@@ -641,7 +641,7 @@ ${isTargetPortuguese ? `- DIRETRIZ CRÍTICA PARA MODELOS DEEPSEEK (V3, V4, R1) E
     // Notebooks & Subfolders System Guidelines
     const notebooksPolicy = `[📓 SISTEMA DE CADERNOS (NOTEBOOKS) E SUBPASTAS DO NOTES MODULE VAULT]
 - O cofre é organizado na hierarquia: CADERNO (Pasta Principal) ➔ SUBPASTA ➔ NOTA.
-- Sempre que criar notas com 'note_save', defina o parâmetro 'folder' com a estrutura "Caderno/Subpasta" (ex: "Carreira/Vaga Nestle", "Estudos/Arquitetura de Software", "Caderno de Anotações/Manuscritos").`;
+- Sempre que criar notas com 'note_save', defina o parâmetro 'folder' com a estrutura "Caderno/Subpasta" (ex: "Carreira/Engenharia de Software", "Estudos/Arquitetura de Software", "Caderno de Anotações/Manuscritos").`;
 
     // Strict Deleted Notes & Live Vault State Guidelines with Real Vault Inspection
     const activeNotes = TellusNoteEngine.listNotes(projectPath);
