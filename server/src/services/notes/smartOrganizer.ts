@@ -1,12 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 import { ProviderHub } from '../providers/providerHub.js';
 import { ConfigManager } from '../configManager.js';
-import { TelluNoteEngine } from './telluNoteEngine.js';
+import { TellusNoteEngine } from './tellusNoteEngine.js';
 import { SkillManager } from '../skills/skillManager.js';
-
-const OBSIDIAN_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
 
 export interface IncomingDropzoneFile {
   name: string;
@@ -55,15 +55,7 @@ export interface OrganizeRequestParams {
 
 export class SmartOrganizer {
   private static getVaultDir(): string {
-    const dir = process.env.TELLUS_VAULT_DIR || process.env.OBSIDIAN_VAULT_DIR || OBSIDIAN_VAULT_DIR;
-    if (!fs.existsSync(dir)) {
-      try {
-        fs.mkdirSync(dir, { recursive: true });
-      } catch {
-        return path.resolve('./Vault');
-      }
-    }
-    return dir;
+    return TellusNoteEngine.VAULT_DIR;
   }
 
   public static listExistingFolders(baseDir: string = this.getVaultDir()): string[] {
@@ -185,7 +177,7 @@ export class SmartOrganizer {
     const { files = [], textDump = '', customVaultDir } = params;
     const vaultDir = customVaultDir && fs.existsSync(customVaultDir) ? customVaultDir : this.getVaultDir();
     const existingFolders = this.listExistingFolders(vaultDir);
-    const existingNotes = TelluNoteEngine.listNotes(vaultDir).slice(0, 40).map(n => ({
+    const existingNotes = TellusNoteEngine.listNotes(vaultDir).slice(0, 40).map(n => ({
       title: n.title,
       folder: n.folder
     }));
@@ -304,11 +296,11 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO (sem markdown ou com \`\`\`jso
       // Save each parsed topic note into the Vault
       for (let i = 0; i < parsedTextDecisions.length; i++) {
         const decision = parsedTextDecisions[i];
-        const cleanTitle = TelluNoteEngine.sanitizeName(decision.title || `Ideia_${i + 1}`);
-        const cleanFolder = TelluNoteEngine.sanitizePath(decision.targetFolder || 'Geral/Ideias');
+        const cleanTitle = TellusNoteEngine.sanitizeName(decision.title || `Ideia_${i + 1}`);
+        const cleanFolder = TellusNoteEngine.sanitizePath(decision.targetFolder || 'Geral/Ideias');
 
         try {
-          const savedNote = TelluNoteEngine.saveNote({
+          const savedNote = TellusNoteEngine.saveNote({
             title: cleanTitle,
             folder: cleanFolder,
             subject: cleanFolder,
@@ -442,8 +434,8 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO:
         const pf = preparedFiles[i];
         const decision = parsedFileDecisions.find(d => d.index === (i + 1)) || parsedFileDecisions[i];
 
-        let targetFolder = decision?.targetFolder ? TelluNoteEngine.sanitizePath(decision.targetFolder) : '';
-        let cleanedFilename = decision?.cleanedFilename ? TelluNoteEngine.sanitizeName(decision.cleanedFilename) : '';
+        let targetFolder = decision?.targetFolder ? TellusNoteEngine.sanitizePath(decision.targetFolder) : '';
+        let cleanedFilename = decision?.cleanedFilename ? TellusNoteEngine.sanitizeName(decision.cleanedFilename) : '';
         let reason = decision?.reason || '';
         let summary = decision?.summary || '';
         let tags = decision?.tags || [];
@@ -494,7 +486,7 @@ RESPONDA EXCLUSIVAMENTE COM UM ARRAY JSON VÁLIDO:
         }
 
         if (!cleanedFilename) {
-          cleanedFilename = TelluNoteEngine.sanitizeName(pf.file.name);
+          cleanedFilename = TellusNoteEngine.sanitizeName(pf.file.name);
         }
 
         const originalExt = path.extname(pf.file.name);

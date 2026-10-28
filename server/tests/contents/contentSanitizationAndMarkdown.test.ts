@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { TelluNoteEngine } from '../../src/services/notes/telluNoteEngine.js';
+import { TellusNoteEngine } from '../../src/services/notes/tellusNoteEngine.js';
 import { sanitizePortugueseText } from '../../src/services/agentLoop.js';
 
 describe('📝 Classificação por Conteúdos: Integridade do Markdown, Português & Wikilinks', () => {
@@ -11,6 +11,7 @@ describe('📝 Classificação por Conteúdos: Integridade do Markdown, Portugu�
 
   before(() => {
     tempProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tellus_content_test_'));
+    process.env.TELLUS_VAULT_DIR = tempProjectDir;
   });
 
   after(() => {
@@ -19,6 +20,7 @@ describe('📝 Classificação por Conteúdos: Integridade do Markdown, Portugu�
         fs.rmSync(tempProjectDir, { recursive: true, force: true });
       }
     } catch {}
+    delete process.env.TELLUS_VAULT_DIR;
   });
 
   test('1. Preservação de Acentuação e Caracteres Especiais em Português', () => {
@@ -26,14 +28,14 @@ describe('📝 Classificação por Conteúdos: Integridade do Markdown, Portugu�
     const sanitized = sanitizePortugueseText(rawPortuguese);
     assert.equal(sanitized, rawPortuguese);
 
-    const note = TelluNoteEngine.saveNote({
+    const note = TellusNoteEngine.saveNote({
       title: 'Segurança e Proteção de Aplicações',
       subject: 'Segurança',
       content: '# Segurança e Proteção de Aplicações\n\nAplicações com autenticação multifator são essenciais.',
       isProjectSpecific: true
     }, tempProjectDir);
 
-    const allNotes = TelluNoteEngine.listNotes();
+    const allNotes = TellusNoteEngine.listNotes();
     const readNote = allNotes.find(n => n.id === note.id);
     assert.ok(readNote);
     assert.equal(readNote?.title, 'Segurança e Proteção de Aplicações');
@@ -41,14 +43,14 @@ describe('📝 Classificação por Conteúdos: Integridade do Markdown, Portugu�
   });
 
   test('2. Parsing e Resolução de Wikilinks com Aliases ([[Alvo|Alias]])', () => {
-    const noteTarget = TelluNoteEngine.saveNote({
+    const noteTarget = TellusNoteEngine.saveNote({
       title: 'Banco de Dados',
       subject: 'Infra',
       content: '# Banco de Dados\nConfiguração do PostgreSQL e índices.',
       isProjectSpecific: true
     }, tempProjectDir);
 
-    const noteSource = TelluNoteEngine.saveNote({
+    const noteSource = TellusNoteEngine.saveNote({
       title: 'API Backend',
       subject: 'Backend',
       content: '# API Backend\nConsulte a documentação do [[Banco de Dados]] e também [[Banco de Dados|Postgres Local]].',
@@ -58,7 +60,7 @@ describe('📝 Classificação por Conteúdos: Integridade do Markdown, Portugu�
     assert.ok(noteSource.links.includes('Banco de Dados'));
 
     // Verifica backlinks recíprocos
-    const allNotes = TelluNoteEngine.listNotes();
+    const allNotes = TellusNoteEngine.listNotes();
     const updatedTarget = allNotes.find(n => n.id === noteTarget.id);
     assert.ok(updatedTarget?.backlinks.includes('API Backend') || updatedTarget?.backlinks.includes(noteSource.id));
   });
@@ -85,14 +87,14 @@ $$
 $$
 `;
 
-    const note = TelluNoteEngine.saveNote({
+    const note = TellusNoteEngine.saveNote({
       title: 'Métricas de Sistema',
       subject: 'Engenharia',
       content: complexContent,
       isProjectSpecific: true
     }, tempProjectDir);
 
-    const allNotes = TelluNoteEngine.listNotes();
+    const allNotes = TellusNoteEngine.listNotes();
     const reloaded = allNotes.find(n => n.id === note.id);
     assert.ok(reloaded?.content.includes('| Módulo | Latência | Status |'));
     assert.ok(reloaded?.content.includes('interface Metric'));
@@ -105,7 +107,7 @@ Para autenticar na nuvem use:
 sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890_ABCD-1234567890
 Conteúdo legítimo com **negrito** e [links](https://github.com).`;
 
-    const note = TelluNoteEngine.saveNote({
+    const note = TellusNoteEngine.saveNote({
       title: 'Notas com Segredos',
       subject: 'Segurança',
       content: contentWithSecret,

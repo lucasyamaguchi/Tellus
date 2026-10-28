@@ -63,7 +63,7 @@ export const TerminalView: React.FC = () => {
   const activeTask = tasks.find(t => t.id === activeTaskId) || tasks[tasks.length - 1];
 
   return (
-    <div className="h-full flex flex-col bg-[#0c0e14] text-slate-200">
+    <div className="h-full w-full flex flex-col bg-[#0c0e14] text-slate-200">
       {/* Terminal Header & Quick Launchers */}
       <div className="h-11 border-b border-card-border bg-sidebar px-3 flex items-center justify-between select-none shrink-0">
         <div className="flex items-center space-x-2">

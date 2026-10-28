@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { SecurityShield } from './sync/securityShield.js';
 
 export interface AgentPipelineConfig {
   primaryModel: string;
@@ -8,6 +9,56 @@ export interface AgentPipelineConfig {
   codingModel?: string;
   reasoningModel?: string;
   fastToolsModel?: string;
+}
+
+export type CloudProviderId = 'google_drive' | 'microsoft_onedrive' | 'dropbox' | 'custom_cloud';
+
+export interface GoogleAccountProfile {
+  email: string;
+  name: string;
+  provider?: CloudProviderId;
+  picture?: string;
+  sub?: string;
+  accountHash?: string;
+  authMethod?:
+    | 'google_oauth_pkce'
+    | 'microsoft_oauth_pkce'
+    | 'google_token_verified'
+    | 'microsoft_token_verified'
+    | 'cloud_desktop_verified'
+    | 'google_browser_vault_key';
+  verifiedByGoogle?: boolean;
+  verifiedByPlatform?: boolean;
+  twoFactorUnlocked?: boolean;
+  keyVerifier?: string;
+  encryptedVaultKey?: string;
+  encryptedCloudAccessToken?: string;
+  connectedAt: number;
+}
+
+export interface CloudSyncConfig {
+  enabled: boolean;
+  autoSync: boolean;
+  deviceName: string;
+  deviceId: string;
+  cloudProvider?: CloudProviderId;
+  googleAccount?: GoogleAccountProfile | null;
+  savedAccounts?: GoogleAccountProfile[];
+  vaultViewScope?: 'all_accessible' | 'account_only' | 'local_only';
+  googleOAuthClientId?: string;
+  microsoftOAuthClientId?: string;
+  cloudMirrorPath?: string;
+  peerSyncUrl?: string;
+  peerSyncEnabled?: boolean;
+  lastSyncedAt?: number;
+  syncNotes?: boolean;
+  syncInk?: boolean;
+  syncChats?: boolean;
+  syncConfigs?: boolean;
+  syncAiConfig?: boolean;
+  e2eeEnabled?: boolean;
+  isolateAccountNotes?: boolean;
+  encryptedSessionVaultKey?: string;
 }
 
 export interface AppConfig {
@@ -23,6 +74,8 @@ export interface AppConfig {
     fishAudioVoiceId?: string;
     fishAudioModel?: string;
   };
+  vaultPath?: string;
+  syncConfig?: CloudSyncConfig;
   defaultModel: string;
   defaultProvider: 'openrouter' | 'google' | 'anthropic' | 'openai';
   recentProjects: string[];
@@ -51,8 +104,30 @@ export interface AppConfig {
 const CONFIG_DIR = path.join(os.homedir(), '.tellus');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
+function resolveDefaultVaultPath(): string {
+  if (process.env.TELLUS_VAULT_DIR) {
+    return process.env.TELLUS_VAULT_DIR;
+  }
+  return path.join(os.homedir(), 'Documents', 'Tellus Vault');
+}
+
 const DEFAULT_CONFIG: AppConfig = {
   keys: {},
+  vaultPath: resolveDefaultVaultPath(),
+  syncConfig: {
+    enabled: false,
+    autoSync: true,
+    deviceName: os.hostname() || 'Tellus-PC',
+    deviceId: 'dev_' + os.hostname().toLowerCase().replace(/[^a-z0-9]/g, '_'),
+    googleAccount: null,
+    syncNotes: true,
+    syncInk: true,
+    syncChats: true,
+    syncConfigs: true,
+    syncAiConfig: true,
+    e2eeEnabled: true,
+    isolateAccountNotes: true
+  },
   defaultModel: 'deepseek/deepseek-r1',
   defaultProvider: 'openrouter',
   defaultSecurityPreset: 'default',
@@ -118,7 +193,28 @@ export class ConfigManager {
     try {
       const data = fs.readFileSync(CONFIG_PATH, 'utf-8');
       const parsed = JSON.parse(data);
-      return { ...DEFAULT_CONFIG, ...parsed, keys: { ...DEFAULT_CONFIG.keys, ...parsed.keys } };
+      const rawKeys = { ...DEFAULT_CONFIG.keys, ...(parsed.keys || {}) };
+      const decryptedKeys = {
+        openrouter: SecurityShield.decryptAtRest(rawKeys.openrouter),
+        google: SecurityShield.decryptAtRest(rawKeys.google),
+        anthropic: SecurityShield.decryptAtRest(rawKeys.anthropic),
+        openai: SecurityShield.decryptAtRest(rawKeys.openai),
+        fishAudio: SecurityShield.decryptAtRest(rawKeys.fishAudio),
+      };
+      const syncCfg: CloudSyncConfig = { ...DEFAULT_CONFIG.syncConfig!, ...(parsed.syncConfig || {}) };
+
+      // Restore active Vault E2EE key in memory if user is logged in on this trusted PC
+      if (syncCfg.googleAccount?.accountHash && syncCfg.encryptedSessionVaultKey && !SecurityShield.isVaultUnlocked()) {
+        SecurityShield.restoreSessionFromEncryptedKey(syncCfg.googleAccount.accountHash, syncCfg.encryptedSessionVaultKey);
+      }
+
+      return {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        vaultPath: parsed.vaultPath || DEFAULT_CONFIG.vaultPath,
+        syncConfig: syncCfg,
+        keys: decryptedKeys
+      };
     } catch {
       return DEFAULT_CONFIG;
     }
@@ -126,15 +222,32 @@ export class ConfigManager {
 
   public static updateConfig(updates: Partial<AppConfig>): AppConfig {
     const current = this.getConfig();
+    const mergedKeys = { ...current.keys, ...(updates.keys || {}) };
     const merged: AppConfig = {
       ...current,
       ...updates,
-      keys: { ...current.keys, ...(updates.keys || {}) },
+      vaultPath: updates.vaultPath !== undefined ? updates.vaultPath : current.vaultPath,
+      syncConfig: updates.syncConfig
+        ? { ...current.syncConfig!, ...updates.syncConfig }
+        : current.syncConfig,
+      keys: mergedKeys,
       customRoutines: updates.customRoutines || current.customRoutines
     };
 
+    // Persist to disk with AES-256-GCM At-Rest encryption for all API keys
+    const diskPayload: AppConfig = {
+      ...merged,
+      keys: {
+        openrouter: SecurityShield.encryptAtRest(mergedKeys.openrouter),
+        google: SecurityShield.encryptAtRest(mergedKeys.google),
+        anthropic: SecurityShield.encryptAtRest(mergedKeys.anthropic),
+        openai: SecurityShield.encryptAtRest(mergedKeys.openai),
+        fishAudio: SecurityShield.encryptAtRest(mergedKeys.fishAudio),
+      }
+    };
+
     this.ensureDir();
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf-8');
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(diskPayload, null, 2), 'utf-8');
     return merged;
   }
 

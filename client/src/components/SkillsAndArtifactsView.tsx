@@ -14,6 +14,7 @@ import {
   FileCode, 
   ExternalLink,
   Shield,
+  ShieldCheck,
   Search,
   Globe,
   FolderGit2,
@@ -301,7 +302,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
   const categories = ['all', 'Architecture', 'Debugging', 'Security', 'Frontend', 'Backend', 'Testing', 'Custom'];
 
   return (
-    <div className="h-full flex flex-col bg-background text-slate-200 overflow-hidden font-sans select-none">
+    <div className="h-full w-full flex-1 flex flex-col bg-background text-slate-200 overflow-hidden font-sans select-none">
       {/* Import Skill Markdown Modal */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in select-none">
@@ -493,7 +494,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
       )}
 
       {/* Top Bar Tabs */}
-      <div className="h-12 border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
+      <div className="h-12 w-full border-b border-card-border bg-sidebar px-4 flex items-center justify-between shrink-0 select-none">
         <div className="flex items-center space-x-2 bg-card rounded-lg p-0.5 border border-card-border text-xs">
           <button
             onClick={() => setActiveTab('skills')}
@@ -566,7 +567,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
 
       {/* TAB 1: SKILLS MANAGEMENT */}
       {activeTab === 'skills' && (
-        <div className="flex-1 flex flex-col p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-card-border space-y-3">
+        <div className="flex-1 w-full min-w-0 flex flex-col p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-card-border space-y-3">
           {/* Header Controls: Scope Filter, Search */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-card border border-card-border shrink-0">
             {/* Scope Selector: All vs Global vs Por Projeto */}
@@ -944,7 +945,16 @@ export const SkillsAndArtifactsView: React.FC = () => {
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-card-border/50 text-[10px] text-slate-500">
-                      <span>Categoria: <strong className="text-slate-300 font-medium">{skill.category}</strong></span>
+                      <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                        <span>Categoria: <strong className="text-slate-300 font-medium">{skill.category}</strong></span>
+                        <span className="px-1.5 py-0.2 rounded font-mono bg-panel border border-card-border text-[9px] text-accent-light">
+                          v{skill.version || '1.0.0'}
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded font-mono bg-emerald-500/15 border border-emerald-500/30 text-[9px] text-emerald-300 flex items-center space-x-0.5" title="Auditado & Seguro pelo GitSafe Shield">
+                          <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                          <span>GitSafe</span>
+                        </span>
+                      </div>
                       
                       <div className="flex items-center space-x-1">
                         <button
@@ -973,7 +983,7 @@ export const SkillsAndArtifactsView: React.FC = () => {
 
       {/* TAB 2: ARTIFACTS GALLERY & BLUEPRINTS */}
       {activeTab === 'artifacts' && (
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 w-full min-w-0 flex overflow-hidden">
           {/* Artifacts List Sidebar */}
           <div className="w-80 border-r border-card-border bg-sidebar flex flex-col shrink-0">
             <div className="p-3 border-b border-card-border flex items-center justify-between">

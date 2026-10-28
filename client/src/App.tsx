@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Navbar, LanguageOption } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
-import { CodeViewer } from './components/CodeViewer';
+import { TellusCodeStudio, CodeViewer } from './components/TellusCodeStudio';
 import { FileHistoryViewer } from './components/FileHistoryViewer';
 import { MemoryInspector } from './components/MemoryInspector';
 import { TerminalView } from './components/TerminalView';
-import { TelluNoteView } from './components/TelluNoteView';
+import { TellusNoteView } from './components/TellusNoteView';
 import { SkillsAndArtifactsView } from './components/SkillsAndArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -18,6 +18,8 @@ import { PipelineMindMapModal } from './components/PipelineMindMapModal';
 import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { CreditsModal } from './components/CreditsModal';
 import { SelfHealingModal } from './components/SelfHealingModal';
+import { PatchNotesModal } from './components/PatchNotesModal';
+import { OnboardingModal } from './components/OnboardingModal';
 import { ProjectSettingsModal } from './components/ProjectSettingsModal';
 import { Maximize2, Minimize2, X, Minus, History, Code2 } from 'lucide-react';
 import { 
@@ -34,7 +36,7 @@ import {
   ChatSession,
   QuotedMessage,
   Attachment,
-  TelluNote,
+  TellusNote,
   AgentPipelineConfig,
   ExecutionSecurityPreset,
   ProjectSettings
@@ -79,6 +81,7 @@ export const App: React.FC = () => {
   const [isRightPanelMaximized, setIsRightPanelMaximized] = useState<boolean>(false);
 
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [openEditorFiles, setOpenEditorFiles] = useState<string[]>([]);
   const [activeMemoryPage, setActiveMemoryPage] = useState<MemoryPage | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const [rightPanelTab, setRightPanelTab] = useState<'code' | 'history' | 'memory' | 'terminal'>('code');
@@ -93,6 +96,8 @@ export const App: React.FC = () => {
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState<boolean>(false);
   const [isCreditsModalOpen, setIsCreditsModalOpen] = useState<boolean>(false);
   const [isSelfHealingModalOpen, setIsSelfHealingModalOpen] = useState<boolean>(false);
+  const [isPatchNotesModalOpen, setIsPatchNotesModalOpen] = useState<boolean>(false);
+  const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(false);
   const [isProjectSettingsModalOpen, setIsProjectSettingsModalOpen] = useState<boolean>(false);
   const [chatExecutionMode, setChatExecutionMode] = useState<ExecutionSecurityPreset>('inherit');
   const [effectiveSecurityPreset, setEffectiveSecurityPreset] = useState<'request_review' | 'default' | 'turbo'>('default');
@@ -154,6 +159,11 @@ export const App: React.FC = () => {
       if (cfg.pipeline) setAgentPipeline(cfg.pipeline);
       if (cfg.customRoutines && cfg.customRoutines.length > 0) {
         setActiveRoutine(cfg.customRoutines[0]);
+      }
+      // Verificar se é primeiro uso sem chave configurada
+      const onboardingCompleted = localStorage.getItem('tellus_onboarding_completed');
+      if (!onboardingCompleted && !cfg.keys?.openrouter && !cfg.keys?.google && !cfg.keys?.anthropic) {
+        setIsOnboardingModalOpen(true);
       }
     });
 
@@ -727,6 +737,32 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleOpenFileInStudio = (filePath: string) => {
+    setSelectedFile(filePath);
+    setOpenEditorFiles(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
+    setRightPanelTab('code');
+    if (!isRightPanelOpen) setIsRightPanelOpen(true);
+  };
+
+  const handleCloseEditorFile = (filePath: string) => {
+    setOpenEditorFiles(prev => {
+      const next = prev.filter(f => f !== filePath);
+      if (selectedFile === filePath) {
+        const idx = prev.indexOf(filePath);
+        const nextActive = next[idx] || next[idx - 1] || null;
+        setSelectedFile(nextActive);
+      }
+      return next;
+    });
+  };
+
+  const handleAskAIAboutFile = (prompt: string, filePath?: string) => {
+    if (mainViewMode !== 'agent') {
+      setMainViewMode('agent');
+    }
+    handleSendMessage(prompt);
+  };
+
   const handleSelectWindowForCapture = async (windowId: string, windowName: string) => {
     try {
       const attachment = await api.captureScreen(windowId);
@@ -800,13 +836,19 @@ export const App: React.FC = () => {
         onSelectLanguage={handleSelectLanguage}
         onNewChat={handleNewSession}
         onOpenSelfHealing={() => setIsSelfHealingModalOpen(true)}
+        onOpenPatchNotes={() => setIsPatchNotesModalOpen(true)}
+        onOpenOnboarding={() => setIsOnboardingModalOpen(true)}
         onOpenProjectSettings={() => setIsProjectSettingsModalOpen(true)}
+        onConfigUpdated={(c) => {
+          setConfig(c);
+          window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+        }}
       />
 
       {/* MODE 1: DEDICATED NOTION-STYLE TELLUSMD NOTES & VAULT */}
       {mainViewMode === 'notes' && (
-        <div className="flex-1 flex overflow-hidden">
-          <TelluNoteView
+        <div className="flex-1 flex flex-col w-full min-h-0 overflow-hidden">
+          <TellusNoteView
             targetNoteIdOrTitle={targetNoteIdOrTitle}
             onOpenSelfHealing={() => setIsSelfHealingModalOpen(true)}
             onMentionInChat={async (note) => {
@@ -850,18 +892,18 @@ export const App: React.FC = () => {
 
       {/* MODE 2: DEDICATED SKILLS & ARTIFACTS GALLERY */}
       {mainViewMode === 'skills' && (
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col w-full min-h-0 overflow-hidden">
           <SkillsAndArtifactsView />
         </div>
       )}
 
       {/* MODE 3: AGENTIC IDE WORKSPACE */}
       {mainViewMode === 'agent' && (
-        <div className="flex-1 flex overflow-hidden relative">
+        <div className="flex-1 flex w-full min-h-0 overflow-hidden relative">
           {/* Left Sidebar with Dynamic Width (Hidden when right panel is maximized) */}
           {!isRightPanelMaximized && (
-            <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 flex">
-              <div className="w-full">
+            <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 flex h-full">
+              <div className="w-full h-full">
                 <Sidebar
                   currentProject={currentProject}
                   openProjects={openProjects}
@@ -871,11 +913,9 @@ export const App: React.FC = () => {
                   routines={config?.customRoutines || []}
                   activeRoutine={activeRoutine}
                   selectedFile={selectedFile}
-                  onSelectFile={(filePath) => {
-                    setSelectedFile(filePath);
-                    setRightPanelTab('code');
-                    if (!isRightPanelOpen) setIsRightPanelOpen(true);
-                  }}
+                  onSelectFile={handleOpenFileInStudio}
+                  onAskAI={handleAskAIAboutFile}
+                  onRefreshFileTree={loadProjectOverview}
                   onSelectMemoryPage={(page) => {
                     setActiveMemoryPage(page);
                     setRightPanelTab('memory');
@@ -975,7 +1015,7 @@ export const App: React.FC = () => {
           {isRightPanelOpen && (
             <aside 
               style={{ width: isRightPanelMaximized ? '100%' : `${rightPanelWidth}px` }} 
-              className={`border-l border-card-border bg-sidebar flex flex-col h-[calc(100vh-3.5rem)] shadow-2xl relative ${
+              className={`border-l border-card-border bg-sidebar flex flex-col h-full shadow-2xl relative ${
                 isRightPanelMaximized ? 'flex-1 z-30' : 'shrink-0'
               }`}
             >
@@ -1050,10 +1090,14 @@ export const App: React.FC = () => {
               {/* Panel Views */}
               <div className="flex-1 flex flex-col overflow-hidden">
                 {rightPanelTab === 'code' && (
-                  <CodeViewer
+                  <TellusCodeStudio
                     filePath={selectedFile}
+                    openFiles={openEditorFiles}
+                    onSelectFile={handleOpenFileInStudio}
+                    onCloseFile={handleCloseEditorFile}
                     onFileSaved={loadProjectOverview}
                     onOpenHistory={() => setRightPanelTab('history')}
+                    onAskAI={handleAskAIAboutFile}
                   />
                 )}
 
@@ -1061,10 +1105,7 @@ export const App: React.FC = () => {
                   <FileHistoryViewer
                     activeSessionId={activeSessionId}
                     activeSessionTitle={sessions.find(s => s.id === activeSessionId)?.title}
-                    onOpenFileInEditor={(fp) => {
-                      setSelectedFile(fp);
-                      setRightPanelTab('code');
-                    }}
+                    onOpenFileInEditor={handleOpenFileInStudio}
                     onNavigateToChat={(targetSessionId, targetMessageId) => {
                       if (targetSessionId && targetSessionId !== activeSessionId) {
                         handleSelectSession(targetSessionId);
@@ -1172,6 +1213,7 @@ export const App: React.FC = () => {
         config={config}
         onConfigUpdated={(c) => {
           setConfig(c);
+          window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
           api.getModels().then((m) => setModels(m)).catch(() => {});
         }}
         onOpenCredits={() => setIsCreditsModalOpen(true)}
@@ -1222,6 +1264,20 @@ export const App: React.FC = () => {
         currentViewMode={mainViewMode}
         activeNoteTitle={targetNoteIdOrTitle}
         onTriggerSelfHealing={handleTriggerSelfHealing}
+      />
+
+      {/* Tellus v1.0.0 Patch Notes & Capabilities Modal */}
+      <PatchNotesModal
+        isOpen={isPatchNotesModalOpen}
+        onClose={() => setIsPatchNotesModalOpen(false)}
+      />
+
+      {/* Tellus First-Use Onboarding & Setup Wizard */}
+      <OnboardingModal
+        isOpen={isOnboardingModalOpen}
+        onClose={() => setIsOnboardingModalOpen(false)}
+        config={config}
+        onConfigUpdated={(newConfig) => setConfig(newConfig)}
       />
 
       {/* Antigravity Project Settings & Security Presets Modal */}

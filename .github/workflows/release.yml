@@ -1,0 +1,72 @@
+name: Build & Release Tellus Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Root Dependencies
+        run: npm install
+
+      - name: Install Server Dependencies & Build Server
+        run: |
+          cd server
+          npm install
+          npm run build
+          cd ..
+
+      - name: Install Client Dependencies & Build Client
+        run: |
+          cd client
+          npm install
+          npm run build
+          cd ..
+
+      - name: Run Quality Verification Tests
+        run: |
+          cd server
+          npm test
+          cd ..
+
+      - name: Build Executable & Installer (electron-builder)
+        run: npx electron-builder --win nsis portable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Artifacts to Workflow Run
+        uses: actions/upload-artifact@v4
+        with:
+          name: tellus-windows-binaries
+          path: |
+            dist-app/*.exe
+            dist-app/*.blockmap
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-app/Tellus-Setup-*.exe
+            dist-app/Tellus-*-portable.exe
+            dist-app/*.blockmap
+          generate_release_notes: true
+          draft: false
+          prerelease: false

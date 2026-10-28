@@ -432,7 +432,7 @@ export const ObsidianPluginsModal: React.FC<ObsidianPluginsModalProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-card-border/80 bg-card/60 flex items-center justify-between gap-3 shrink-0">
           <span className="text-[11px] text-slate-500 font-mono">
-            Vault: {customVaultDir || 'E:\\Die-Sonne\\Vault'}/.obsidian/plugins
+            Vault: {customVaultDir || 'Tellus Vault Padrão'}/.obsidian/plugins
           </span>
 
           <button

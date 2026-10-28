@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { spawn } from 'child_process';
 import { ConfigManager } from './configManager.js';
 import { MemoryEngine } from './memory/memoryEngine.js';
@@ -14,7 +15,15 @@ export class ProjectManager {
     if (config.recentProjects.length > 0 && fs.existsSync(config.recentProjects[0])) {
       return config.recentProjects[0];
     }
-    // Default fallback to workspace root
+    // Default fallback: if running inside a packaged app bundle, use ~/Documents/Tellus Workspace
+    const isPackagedBundle = process.cwd().includes('resources') || process.cwd().includes('AppData') || process.cwd().includes('Program Files');
+    if (isPackagedBundle) {
+      const defaultWorkspace = path.join(os.homedir(), 'Documents', 'Tellus Workspace');
+      if (!fs.existsSync(defaultWorkspace)) {
+        try { fs.mkdirSync(defaultWorkspace, { recursive: true }); } catch {}
+      }
+      return defaultWorkspace;
+    }
     return process.cwd();
   }
 

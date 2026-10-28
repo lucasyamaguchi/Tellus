@@ -12,6 +12,10 @@ export interface TellusSkill {
   isProjectSpecific?: boolean;
   isActive?: boolean; // Active state in the current project context
   scope?: 'project' | 'global' | 'situational'; // Scope decision: project only, global root, or situational
+  version?: string;
+  author?: string;
+  license?: string;
+  securitySanitized?: boolean;
   updatedAt: number;
 }
 
@@ -39,6 +43,10 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     description: 'Planejamento modular de alto nível, definição de entidades e diagramas Mermaid.',
     promptInstructions: 'Sempre estruture a arquitetura separando domínio, infraestrutura e apresentação. Forneça diagramas Mermaid quando relevante e liste decisões técnicas críticas.',
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   },
   {
@@ -49,6 +57,10 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     description: 'Diagnóstico analítico profundo de erros em tempo de execução, memory leaks e exceções.',
     promptInstructions: 'Adote raciocínio passo a passo rigoroso. Localize a linha e a causa raiz antes de sugerir alterações. Priorize correções definitivas que previnam regressões.',
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   },
   {
@@ -59,6 +71,10 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     description: 'Auditoria de segurança, sanitização de inputs, proteção contra SQLi, XSS e vazamento de chaves.',
     promptInstructions: 'Verifique se nenhuma chave de API ou credencial está exposta no código. Valide todos os inputs e restrinja permissões de acesso e dados sensíveis.',
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   },
   {
@@ -69,6 +85,10 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     description: 'Geração rápida e tipada de endpoints Express, rotas REST e contratos de dados.',
     promptInstructions: 'Escreva endpoints com validação robusta de tipos, tratamento de exceções padronizado e respostas JSON limpas com códigos HTTP semânticos.',
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   },
   {
@@ -79,6 +99,10 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     description: 'Boas práticas modernas de React, Tailwind CSS, acessibilidade, responsividade e layout.',
     promptInstructions: 'Priorize componentes funcionais limpos, hooks customizados quando necessário, Tailwind moderno, layout flexível responsivo e descanso visual com bom contraste.',
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   },
   {
@@ -89,6 +113,10 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     description: 'Criação de testes unitários e de integração confiáveis e livres de efeitos colaterais.',
     promptInstructions: 'Escreva testes que cubram casos de sucesso, valores de borda e cenários de falha. Mantenha os testes determinísticos e de rápida execução.',
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   },
   {
@@ -146,6 +174,36 @@ FLUXO NO CHAT:
 3. Destaque as primeiras 2 a 3 questões do Módulo 01 para o aluno resolver agora no chat ou praticar no seu ritmo.
 4. Dê liberdade ao aluno: ele pode responder as questões no chat para validação socrática, pedir aprofundamento de qualquer tópico, ou navegar pelas notas no Vault.`,
     isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
+    updatedAt: Date.now()
+  },
+  {
+    id: 'ui-ux-color-design-mastery',
+    name: 'UI/UX Color Psychology & Progressive Disclosure (Goodnotes/Notion)',
+    description: 'Princípios de Teoria das Cores (Regra 60-30-10, OKLCH/HCL), Psicologia das Cores em UX (2025/2026) e Revelação Progressiva estilo Goodnotes e Notion.',
+    category: 'Design & UI/UX',
+    promptInstructions: `Ao criar, refatorar ou avaliar interfaces de usuário (UI/UX), aplique rigorosamente os princípios das 5 referências de Design Mastery & Psicologia das Cores:
+1. REGRA 60-30-10 & CONTENÇÃO CROMÁTICA (HermeticOrmus Design Mastery & Ramotion):
+   - 60% Superfície Neutra Dominante: Canvas calmo e silencioso (#0b0d13 a #0f1219 em dark mode; #f8fafc a #ffffff em light mode).
+   - 30% Estrutura Secundária: Sidebars, cards e docks unificados (#141821) com bordas hairline sutis (rgba(255,255,255,0.06)).
+   - 10% Acento Intencional: Reservado exclusivamente para o 1 CTA primário, a ferramenta ativa no momento ou alertas semânticos reais. Nunca coloque vários botões com bordas neon competitivas lado a lado.
+2. PSICOLOGIA DAS CORES & CONFORTO COGNITIVO 2025/2026 (WithLoveInternet & Qamar Jafari):
+   - Reduza a fadiga visual mantendo ferramentas secundárias em tons neutros (slate-400) que só revelam cor em hover ou estado ativo.
+   - Use Indigo/Blue para foco e estabilidade; Cyan/Sky apenas para fluxos ativos de IA/Voz; Emerald para confirmação de salvamento/segurança; Amber/Rose apenas para limites de cota ou ações destrutivas.
+3. UNIFORMIDADE PERCEPTUAL & PALETAS (Emil Hvitfeldt Color Resources):
+   - Prefira escalas perceptualmente uniformes (OKLCH / HCL) e presets de cores de caneta/status com contraste claro de luminância (acessíveis para daltonismo / WCAG AA/AAA).
+4. REVELAÇÃO PROGRESSIVA ESTILO GOODNOTES & NOTION:
+   - Mantenha todas as ferramentas acessíveis a 1 clique, mas oculte barras secundárias por padrão através de um botão expansível ('✏️ Ferramentas' / '⚡ Ações Rápidas' / '⋯ Mais').
+   - Evite títulos duplicados: use um único cabeçalho limpo + título inline estilo Notion diretamente na folha.`,
+    isProjectSpecific: false,
+    scope: 'global',
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
     updatedAt: Date.now()
   }
 ];

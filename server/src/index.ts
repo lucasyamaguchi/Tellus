@@ -3,6 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { fileURLToPath } from 'url';
+import { execSync, spawn } from 'child_process';
 import { ConfigManager } from './services/configManager.js';
 import { OpenRouterService } from './services/providers/openrouter.js';
 import { ProjectManager } from './services/projectManager.js';
@@ -14,7 +16,7 @@ import { ScreenCapture } from './services/tools/screenCapture.js';
 import { TerminalRunner } from './services/tools/terminalRunner.js';
 import { SessionManager } from './services/sessionManager.js';
 import { AgentLoop, sanitizePortugueseText } from './services/agentLoop.js';
-import { TelluNoteEngine } from './services/notes/telluNoteEngine.js';
+import { TellusNoteEngine, TelluNoteEngine } from './services/notes/tellusNoteEngine.js';
 import { SmartOrganizer } from './services/notes/smartOrganizer.js';
 import { SkillManager } from './services/skills/skillManager.js';
 import { ProviderHub } from './services/providers/providerHub.js';
@@ -23,13 +25,23 @@ import { ObsidianPluginManager } from './services/obsidian/obsidianPluginManager
 import { ProjectSettingsManager } from './services/projectSettingsManager.js';
 import { FileHistoryManager } from './services/history/fileHistoryManager.js';
 import { normalizeVoiceVocabulary } from './utils/voiceVocabulary.js';
+import { CloudSyncEngine } from './services/sync/cloudSyncEngine.js';
+import { SecurityShield } from './services/sync/securityShield.js';
+import prettier from 'prettier';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-app.use('/api/notes/attachments', express.static(TelluNoteEngine.ATTACHMENTS_DIR));
+app.get('/api/notes/attachments/:filename', (req, res) => {
+  const filePath = path.join(TellusNoteEngine.ATTACHMENTS_DIR, req.params.filename);
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: 'Anexo não encontrado' });
+  }
+});
 
 // 1. Config Endpoints
 app.get('/api/config', (req, res) => {
@@ -307,6 +319,71 @@ app.post('/api/files/write', (req, res) => {
     res.json(result);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Format Code via Prettier (VS Code Standard)
+app.post('/api/code/format', async (req, res) => {
+  try {
+    const { content, path: filePath, options } = req.body;
+    if (content === undefined) {
+      return res.status(400).json({ error: 'Conteúdo obrigatório para formatação' });
+    }
+
+    let parser: string | undefined = undefined;
+    const lower = (filePath || '').toLowerCase();
+    if (lower.endsWith('.ts')) parser = 'typescript';
+    else if (lower.endsWith('.tsx')) parser = 'typescript';
+    else if (lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) parser = 'babel';
+    else if (lower.endsWith('.jsx')) parser = 'babel';
+    else if (lower.endsWith('.json')) parser = 'json';
+    else if (lower.endsWith('.css')) parser = 'css';
+    else if (lower.endsWith('.scss')) parser = 'scss';
+    else if (lower.endsWith('.html') || lower.endsWith('.htm')) parser = 'html';
+    else if (lower.endsWith('.md') || lower.endsWith('.mdx')) parser = 'markdown';
+    else if (lower.endsWith('.yaml') || lower.endsWith('.yml')) parser = 'yaml';
+
+    const prettierConfig = {
+      semi: true,
+      singleQuote: true,
+      trailingComma: 'es5' as const,
+      tabWidth: 2,
+      printWidth: 100,
+      filepath: filePath || 'file.ts',
+      ...(parser ? { parser } : {}),
+      ...(options || {})
+    };
+
+    const formatted = await prettier.format(content, prettierConfig);
+    res.json({ formatted, changed: formatted !== content });
+  } catch (err: any) {
+    console.warn('[Prettier API] Erro ao formatar:', err.message);
+    res.status(422).json({ error: err.message || 'Falha ao formatar com Prettier' });
+  }
+});
+
+// Delete file or directory (from File Explorer Context Menu)
+app.post('/api/files/delete', (req, res) => {
+  try {
+    const currentPath = ProjectManager.getCurrentProject();
+    const { path: relPath } = req.body;
+    if (!relPath) return res.status(400).json({ error: 'path é obrigatório' });
+    const fullPath = path.resolve(currentPath, relPath);
+    if (!fullPath.startsWith(path.resolve(currentPath))) {
+      return res.status(403).json({ error: 'Acesso negado fora do projeto' });
+    }
+    if (fs.existsSync(fullPath)) {
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(fullPath);
+      }
+      return res.json({ success: true });
+    }
+    res.status(404).json({ error: 'Arquivo ou pasta não encontrado' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -712,7 +789,7 @@ app.get('/api/openrouter/credits', async (req, res) => {
 app.get('/api/notes', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const notes = TelluNoteEngine.listNotes(currentPath);
+    const notes = TellusNoteEngine.listNotes(currentPath);
     res.json(notes);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -722,7 +799,23 @@ app.get('/api/notes', (req, res) => {
 app.post('/api/notes', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const note = TelluNoteEngine.saveNote(req.body, currentPath);
+    const note = TellusNoteEngine.saveNote(req.body, currentPath);
+
+    // Background Auto-Sync if Cloud Sync or Peer LAN Sync is enabled
+    try {
+      const cfg = ConfigManager.getConfig();
+      setImmediate(() => {
+        try {
+          if (cfg.syncConfig?.enabled && cfg.syncConfig?.autoSync) {
+            CloudSyncEngine.syncNow();
+          }
+          if (cfg.syncConfig?.peerSyncEnabled && cfg.syncConfig?.peerSyncUrl) {
+            CloudSyncEngine.syncWithPeerDevice(cfg.syncConfig.peerSyncUrl).catch(() => {});
+          }
+        } catch {}
+      });
+    } catch {}
+
     res.json(note);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -734,7 +827,7 @@ app.post('/api/notes/search', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
     const { query, folder, limit } = req.body;
-    const results = TelluNoteEngine.searchNotes(query || '', { folder, limit }, currentPath);
+    const results = TellusNoteEngine.searchNotes(query || '', { folder, limit }, currentPath);
     res.json(results);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -744,7 +837,7 @@ app.post('/api/notes/search', (req, res) => {
 // Folders Management Routes (Declared BEFORE :id to prevent route hijacking)
 app.get('/api/notes/folders', (req, res) => {
   try {
-    const folders = TelluNoteEngine.listFolders();
+    const folders = TellusNoteEngine.listFolders();
     res.json(folders);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -757,7 +850,7 @@ app.post('/api/notes/folders', (req, res) => {
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
     }
-    const success = TelluNoteEngine.createFolder(name.trim());
+    const success = TellusNoteEngine.createFolder(name.trim());
     res.json({ success, name: name.trim() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -770,7 +863,7 @@ app.post('/api/notes/folders/move', (req, res) => {
     if (!sourceFolder) {
       return res.status(400).json({ error: 'sourceFolder é obrigatório' });
     }
-    const success = TelluNoteEngine.moveFolder(sourceFolder, targetParentFolder || '');
+    const success = TellusNoteEngine.moveFolder(sourceFolder, targetParentFolder || '');
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -784,7 +877,7 @@ app.delete('/api/notes/folders', (req, res) => {
       return res.status(400).json({ error: 'Nome da pasta é obrigatório' });
     }
     const currentPath = ProjectManager.getCurrentProject();
-    const result = TelluNoteEngine.deleteFolder(folderName, currentPath);
+    const result = TellusNoteEngine.deleteFolder(folderName, currentPath);
 
     // Auto-sync Active Context: if current project's active_context.md references this deleted folder/study,
     // clear the stale reference so AI never presumes notes/modules exist.
@@ -811,7 +904,7 @@ app.post('/api/notes/upload-attachment', (req, res) => {
     }
     const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(cleanBase64, 'base64');
-    const attachment = TelluNoteEngine.saveAttachment(filename || 'imagem.png', buffer);
+    const attachment = TellusNoteEngine.saveAttachment(filename || 'imagem.png', buffer);
     res.json(attachment);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Falha ao salvar anexo da nota' });
@@ -824,7 +917,7 @@ app.post('/api/notes/import-notion', (req, res) => {
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ error: 'Lista de notas para importar é inválida' });
     }
-    const result = TelluNoteEngine.importNotionNotes(items);
+    const result = TellusNoteEngine.importNotionNotes(items);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -834,7 +927,7 @@ app.post('/api/notes/import-notion', (req, res) => {
 app.get('/api/notes/graph', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
-    const graphData = TelluNoteEngine.getGraphData(currentPath);
+    const graphData = TellusNoteEngine.getGraphData(currentPath);
     res.json(graphData);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -894,9 +987,9 @@ app.get('/api/notes/trash', (req, res) => {
     const config = ConfigManager.getConfig();
     // Run automated background cleanup on query
     if (config.deletedNotesRetention) {
-      TelluNoteEngine.cleanupExpiredBackups(config.deletedNotesRetention);
+      TellusNoteEngine.cleanupExpiredBackups(config.deletedNotesRetention);
     }
-    const items = TelluNoteEngine.listDeletedNotes(currentPath);
+    const items = TellusNoteEngine.listDeletedNotes(currentPath);
     res.json({ items, retention: config.deletedNotesRetention || '90_days' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -910,7 +1003,7 @@ app.post('/api/notes/trash/restore', (req, res) => {
       return res.status(400).json({ error: 'backupFilename é obrigatório' });
     }
     const currentPath = ProjectManager.getCurrentProject();
-    const restoredNote = TelluNoteEngine.restoreDeletedNote(backupFilename, currentPath);
+    const restoredNote = TellusNoteEngine.restoreDeletedNote(backupFilename, currentPath);
     if (!restoredNote) {
       return res.status(404).json({ error: 'Arquivo de backup não encontrado' });
     }
@@ -924,10 +1017,10 @@ app.delete('/api/notes/trash', (req, res) => {
   try {
     const backupFilename = (req.query.backupFilename as string) || req.body?.backupFilename;
     if (backupFilename) {
-      const success = TelluNoteEngine.permanentlyDeleteNote(backupFilename);
+      const success = TellusNoteEngine.permanentlyDeleteNote(backupFilename);
       return res.json({ success });
     }
-    const result = TelluNoteEngine.emptyTrash();
+    const result = TellusNoteEngine.emptyTrash();
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -938,7 +1031,7 @@ app.post('/api/notes/trash/cleanup', (req, res) => {
   try {
     const config = ConfigManager.getConfig();
     const retention = req.body.retention || config.deletedNotesRetention || '90_days';
-    const cleanedCount = TelluNoteEngine.cleanupExpiredBackups(retention);
+    const cleanedCount = TellusNoteEngine.cleanupExpiredBackups(retention);
     res.json({ success: true, cleanedCount, retention });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -993,6 +1086,1059 @@ app.post('/api/notes/export-to-downloads', (req, res) => {
   }
 });
 
+// Vault Directory Selection & Inspection Routes (Declared BEFORE :id)
+app.get('/api/notes/vault-info', (req, res) => {
+  try {
+    const vaultPath = TellusNoteEngine.VAULT_DIR;
+    res.json({
+      vaultPath,
+      exists: fs.existsSync(vaultPath),
+      inkDir: TellusNoteEngine.INK_DIR,
+      attachmentsDir: TellusNoteEngine.ATTACHMENTS_DIR
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/pick-vault-directory', async (req, res) => {
+  try {
+    const picked = await ProjectManager.pickDirectory();
+    if (!picked) {
+      return res.json({ cancelled: true, vaultPath: TellusNoteEngine.VAULT_DIR });
+    }
+    if (!fs.existsSync(picked)) {
+      fs.mkdirSync(picked, { recursive: true });
+    }
+    const updatedConfig = ConfigManager.updateConfig({ vaultPath: picked });
+    res.json({
+      cancelled: false,
+      vaultPath: updatedConfig.vaultPath || picked,
+      config: updatedConfig
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ink Mode (Stylus / Pen / Touch Vector Annotations) Routes
+app.get('/api/notes/:id/ink', (req, res) => {
+  try {
+    const inkData = TellusNoteEngine.getInkData(req.params.id);
+    res.json(inkData);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/:id/ink', (req, res) => {
+  try {
+    const savedInk = TellusNoteEngine.saveInkData(req.params.id, req.body || {});
+    try {
+      const cfg = ConfigManager.getConfig();
+      setImmediate(() => {
+        try {
+          if (cfg.syncConfig?.enabled && cfg.syncConfig?.autoSync) {
+            CloudSyncEngine.syncNow();
+          }
+          if (cfg.syncConfig?.peerSyncEnabled && cfg.syncConfig?.peerSyncUrl) {
+            CloudSyncEngine.syncWithPeerDevice(cfg.syncConfig.peerSyncUrl).catch(() => {});
+          }
+        } catch {}
+      });
+    } catch {}
+    res.json(savedInk);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/notes/:id/ink', (req, res) => {
+  try {
+    const success = TellusNoteEngine.deleteInkData(req.params.id);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cloud Sync, Multi-Cloud Provider (Google Drive / Microsoft OneDrive / Dropbox) & 2FA Vault Security Routes
+app.get('/api/sync/status', async (req, res) => {
+  try {
+    const config = ConfigManager.getConfig();
+    const detectedFolders = CloudSyncEngine.detectCloudFolders();
+    const discoveredAccounts = CloudSyncEngine.discoverLocalCloudAccounts();
+    const effectiveMirrorPath = CloudSyncEngine.getEffectiveMirrorPath();
+    const vaultSecurity = TellusNoteEngine.getVaultSecuritySummary();
+    const storageMonitor = await CloudSyncEngine.getStorageMonitorReport();
+    res.json({
+      syncConfig: config.syncConfig,
+      vaultPath: TellusNoteEngine.VAULT_DIR,
+      detectedFolders,
+      discoveredAccounts,
+      effectiveMirrorPath,
+      vaultSecurity,
+      storageMonitor
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/sync/storage-monitor', async (req, res) => {
+  try {
+    const storageMonitor = await CloudSyncEngine.getStorageMonitorReport();
+    res.json(storageMonitor);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/select-provider', async (req, res) => {
+  try {
+    const { provider, cloudMirrorPath } = req.body || {};
+    const cfg = ConfigManager.getConfig();
+    const nextMirror =
+      cloudMirrorPath?.trim() || CloudSyncEngine.getEffectiveMirrorPath(provider);
+    const updated = ConfigManager.updateConfig({
+      syncConfig: {
+        ...(cfg.syncConfig as any),
+        cloudProvider: provider || 'google_drive',
+        cloudMirrorPath: nextMirror
+      }
+    });
+    const storageMonitor = await CloudSyncEngine.getStorageMonitorReport();
+    res.json({
+      success: true,
+      syncConfig: updated.syncConfig,
+      storageMonitor
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/lock-2fa', (req, res) => {
+  try {
+    const syncConfig = CloudSyncEngine.lock2FAVaultKeyOnly();
+    res.json({
+      success: true,
+      syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary()
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/cloud/check-2fa', (req, res) => {
+  try {
+    const email = String(req.query.email || '');
+    const provider = String(req.query.provider || 'google_drive') as any;
+    const status = CloudSyncEngine.checkAccount2FAStatusInCloud(email, provider);
+    res.json(status);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 1. Launch External System Browser for Cloud Platform Authentication (Google / Microsoft) + 2FA Key
+app.post('/api/auth/google/start-browser', (req, res) => {
+  try {
+    const port = Number(PORT) || 3001;
+    const provider = req.body?.provider;
+    const sessionInfo = CloudSyncEngine.launchExternalBrowserAuth(port, provider);
+    res.json({
+      success: true,
+      ...sessionInfo
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Poll External Browser Authentication Session Status
+app.get('/api/auth/google/poll', async (req, res) => {
+  try {
+    const challenge = String(req.query.challenge || '');
+    const session = SecurityShield.getBrowserAuthSession(challenge);
+    if (!session) {
+      return res.json({ status: 'expired' });
+    }
+    if (session.status === 'completed') {
+      const config = ConfigManager.getConfig();
+      const vaultSecurity = TellusNoteEngine.getVaultSecuritySummary();
+      const storageMonitor = await CloudSyncEngine.getStorageMonitorReport();
+      return res.json({
+        status: 'completed',
+        result: session.result,
+        syncConfig: config.syncConfig,
+        vaultSecurity,
+        storageMonitor
+      });
+    }
+    res.json({ status: session.status, error: session.error });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. External Browser Portal Page (Multi-Cloud: Google Drive / Microsoft OneDrive / Dropbox + 2FA Key)
+app.get('/api/auth/google/browser', (req, res) => {
+  const challenge = String(req.query.challenge || '');
+  const session = SecurityShield.getBrowserAuthSession(challenge);
+  if (!session) {
+    return res.status(400).send(`
+      <!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Sessão Expirada — Tellus</title></head>
+      <body style="background:#0a0c12;color:#f8fafc;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+        <div style="background:#131622;border:1px solid #1e293b;padding:32px;border-radius:20px;max-width:440px;text-align:center">
+          <h2 style="color:#fb7185;margin-top:0">Sessão de Autenticação Expirada</h2>
+          <p style="color:#94a3b8;font-size:14px">Volte ao aplicativo Tellus e clique novamente em <strong>Autenticar Conta Cloud & 2FA</strong>.</p>
+        </div>
+      </body></html>
+    `);
+  }
+
+  const prefillEmail = String(req.query.email || '');
+  const prefillName = String(req.query.name || '');
+  const prefillProvider = String(req.query.provider || ConfigManager.getConfig().syncConfig?.cloudProvider || 'google_drive');
+  const verifiedFlag = String(req.query.verified || '') === '1';
+  const config = ConfigManager.getConfig();
+  const savedGoogleClientId = config.syncConfig?.googleOAuthClientId || '';
+  const savedMsClientId = config.syncConfig?.microsoftOAuthClientId || '';
+  const discoveredAccounts = CloudSyncEngine.discoverLocalCloudAccounts();
+  const detectedClouds = CloudSyncEngine.detectCloudFolders();
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Autenticação Cloud (Google / Microsoft) + 2FA — Tellus</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      background: radial-gradient(circle at top, #131b2e 0%, #090b10 70%);
+      color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    .card {
+      width: 100%; max-width: 560px;
+      background: rgba(19, 22, 34, 0.96);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 24px; padding: 26px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-family: monospace;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(34, 211, 238, 0.12); color: #22d3ee;
+      border: 1px solid rgba(34, 211, 238, 0.3);
+      margin-bottom: 10px;
+    }
+    h1 { font-size: 20px; margin: 0 0 6px 0; color: #fff; }
+    p.sub { font-size: 12.5px; color: #94a3b8; margin: 0 0 18px 0; line-height: 1.5; }
+    .step-title {
+      font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #38bdf8; margin: 14px 0 8px 0; display: flex; align-items: center; gap: 6px;
+    }
+    .provider-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;
+    }
+    .prov-btn {
+      padding: 10px 8px; border-radius: 12px; border: 1px solid #262d40;
+      background: #0b0e17; color: #cbd5e1; font-size: 12px; font-weight: 600;
+      cursor: pointer; text-align: center; transition: all 0.15s ease;
+    }
+    .prov-btn.active {
+      border-color: #22d3ee; background: rgba(34, 211, 238, 0.12); color: #fff;
+      box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.15);
+    }
+    .discovered-box {
+      background: rgba(79, 70, 229, 0.1); border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 12px; padding: 10px 12px; margin-bottom: 14px;
+    }
+    .disc-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 8px; border-radius: 8px; background: rgba(11, 14, 23, 0.75);
+      margin-top: 6px; cursor: pointer; border: 1px solid transparent; font-size: 12px;
+    }
+    .disc-item:hover { border-color: #6366f1; }
+    label { display: block; font-size: 12px; font-weight: 600; color: #cbd5e1; margin-bottom: 5px; }
+    input {
+      width: 100%; padding: 10px 13px; border-radius: 12px;
+      border: 1px solid #262d40; background: #0b0e17; color: #f8fafc;
+      font-size: 13px; margin-bottom: 12px; outline: none;
+    }
+    input:focus { border-color: #22d3ee; box-shadow: 0 0 0 2px rgba(34,211,238,0.15); }
+    .btn {
+      width: 100%; padding: 12px 16px; border-radius: 12px; border: none;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #4f46e5, #0891b2);
+      color: #fff; box-shadow: 0 8px 20px rgba(79, 70, 229, 0.35);
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-oauth {
+      background: #ffffff; color: #0f172a; margin-bottom: 8px;
+      border: 1px solid #cbd5e1; font-size: 12px; padding: 9px 12px;
+    }
+    .btn-oauth:hover { background: #f1f5f9; }
+    .info-box {
+      background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25);
+      color: #6ee7b7; padding: 11px; border-radius: 12px; font-size: 11.5px; line-height: 1.45; margin-bottom: 14px;
+    }
+    .twofa-box {
+      background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35);
+      color: #fde68a; padding: 12px; border-radius: 12px; font-size: 12px; margin-bottom: 12px;
+    }
+    .error-box {
+      background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35);
+      color: #fda4af; padding: 12px; border-radius: 12px; font-size: 12px; margin-bottom: 14px; display: none;
+    }
+    details { margin-top: 10px; font-size: 12px; color: #94a3b8; }
+    summary { cursor: pointer; color: #38bdf8; font-weight: 600; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="authCard">
+    <div class="badge">🛡️ TELLUS MULTI-CLOUD CAPSULE • LOGIN + 2FA AES-256-GCM</div>
+    <h1>Conectar Nuvem & Verificar Chave 2FA</h1>
+    <p class="sub">
+      Escolha em qual nuvem (<strong>Google Drive</strong>, <strong>Microsoft OneDrive</strong> ou <strong>Dropbox</strong>) suas notas, desenhos Ink e chats serão encapsulados para edição simultânea entre seus PCs — <strong>sem expor IP</strong> e protegidos com <strong>2FA Criptográfico</strong>.
+    </p>
+
+    <div id="errBox" class="error-box"></div>
+
+    ${verifiedFlag ? `<div class="info-box">✓ <strong>1º Fator Verificado via OAuth (${prefillEmail})</strong>. Agora informe seu <strong>2º Fator (Chave Encriptada 2FA)</strong> abaixo para destrancar seus dados.</div>` : ''}
+
+    <form id="authForm">
+      <div class="step-title">1º PASSO — ESCOLHA A NUVEM DE SINCRONIZAÇÃO</div>
+      <div class="provider-grid">
+        <button type="button" class="prov-btn" data-prov="google_drive">☁️ Google Drive</button>
+        <button type="button" class="prov-btn" data-prov="microsoft_onedrive">🟦 Microsoft OneDrive</button>
+        <button type="button" class="prov-btn" data-prov="dropbox">📦 Dropbox Cloud</button>
+      </div>
+
+      ${
+        discoveredAccounts.length > 0
+          ? `<div class="discovered-box">
+              <div style="font-size:11px;font-weight:700;color:#a5b4fc">✨ Contas Cloud detectadas neste computador (clique para preencher):</div>
+              ${discoveredAccounts
+                .map(
+                  (acc) => `
+                <div class="disc-item" onclick="selectDiscovered('${acc.email}', '${acc.name}', '${acc.provider}')">
+                  <span><strong>${acc.email}</strong> <span style="color:#94a3b8">(${acc.providerLabel})</span></span>
+                  <span style="color:#38bdf8;font-weight:700">Selecionar →</span>
+                </div>`
+                )
+                .join('')}
+            </div>`
+          : ''
+      }
+
+      <label id="emailLabel">E-mail da Conta (Google / Microsoft)</label>
+      <input type="email" id="email" required placeholder="seu.email@gmail.com ou @outlook.com" value="${prefillEmail}" ${verifiedFlag ? 'readonly' : ''} />
+
+      <label>Nome de Exibição</label>
+      <input type="text" id="name" placeholder="Seu nome" value="${prefillName}" />
+
+      <div class="step-title">2º PASSO (2FA OBRIGATÓRIO) — CHAVE ENCRIPTADA DO COFRE</div>
+      <div id="twoFaStatusBanner" class="twofa-box">
+        🔐 <strong>Verificação em Duas Etapas (2FA Criptográfico):</strong><br/>
+        Além da conta Google/Microsoft, seus dados exigem a <strong>Chave Encriptada</strong> que você criou na 1ª vez. Sem ela, ninguém consegue descriptografar suas notas mesmo que tenha acesso à sua nuvem.
+      </div>
+
+      <label id="passLabel">🔑 Chave Encriptada 2FA (Mínimo 6 caracteres)</label>
+      <input type="password" id="vaultPassphrase" required minlength="6" placeholder="Digite sua Chave 2FA (ou crie agora se for seu 1º acesso)" />
+
+      <details>
+        <summary>Autenticação OAuth 2.0 Direta (Google / Microsoft Graph API)</summary>
+        <label style="margin-top:8px">Token OAuth Google Drive ou Microsoft Graph (Opcional — ativa leitura da cota real via API)</label>
+        <input type="text" id="cloudToken" placeholder="Cole um Access Token OAuth se desejar consultar API direta" />
+        <label>Client ID OAuth 2.0 (Google Cloud ou Microsoft Entra ID)</label>
+        <input type="text" id="clientId" placeholder="Client ID oficial para redirecionamento OAuth" value="${savedGoogleClientId || savedMsClientId}" />
+        <button type="button" id="oauthRedirectBtn" class="btn btn-oauth">
+          🌐 Redirecionar para Login Oficial da Plataforma (OAuth 2.0)
+        </button>
+      </details>
+
+      <button type="submit" id="submitBtn" class="btn btn-primary" style="margin-top:14px">
+        🔒 Autenticar Plataforma + Verificar 2FA e Sincronizar
+      </button>
+    </form>
+  </div>
+
+  <script>
+    const challenge = ${JSON.stringify(challenge)};
+    const verifiedByPlatform = ${JSON.stringify(verifiedFlag)};
+    let selectedProvider = ${JSON.stringify(prefillProvider)};
+    const detectedClouds = ${JSON.stringify(detectedClouds)};
+
+    function updateProviderUI(prov) {
+      selectedProvider = prov;
+      document.querySelectorAll('.prov-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-prov') === prov);
+      });
+      const emailLabel = document.getElementById('emailLabel');
+      if (prov === 'microsoft_onedrive') {
+        emailLabel.textContent = 'E-mail da Conta Microsoft (OneDrive / Outlook / Hotmail / Live)';
+      } else if (prov === 'dropbox') {
+        emailLabel.textContent = 'E-mail da Conta Dropbox';
+      } else {
+        emailLabel.textContent = 'E-mail da Conta Google (Google Drive / Gmail)';
+      }
+      checkExisting2FA();
+    }
+
+    document.querySelectorAll('.prov-btn').forEach(btn => {
+      btn.addEventListener('click', () => updateProviderUI(btn.getAttribute('data-prov')));
+    });
+
+    window.selectDiscovered = function(email, name, prov) {
+      document.getElementById('email').value = email;
+      document.getElementById('name').value = name;
+      updateProviderUI(prov);
+      document.getElementById('vaultPassphrase').focus();
+    };
+
+    async function checkExisting2FA() {
+      const email = document.getElementById('email').value.trim();
+      const banner = document.getElementById('twoFaStatusBanner');
+      const passLabel = document.getElementById('passLabel');
+      if (!email || !email.includes('@')) return;
+      try {
+        const res = await fetch('/api/auth/cloud/check-2fa?email=' + encodeURIComponent(email) + '&provider=' + encodeURIComponent(selectedProvider));
+        const data = await res.json();
+        if (data.hasExistingCloudVault) {
+          banner.innerHTML = '🛡️ <strong>Cofre Cloud Existente Detectado!</strong><br/>Esta conta já possui notas encapsuladas na nuvem. Digite a <strong>mesma Chave Encriptada (2FA)</strong> que você criou na primeira vez para destrancar e sincronizar.';
+          passLabel.textContent = '🔑 Digite sua Chave Encriptada 2FA Existente (Obrigatória)';
+        } else {
+          banner.innerHTML = '✨ <strong>Primeiro Acesso nesta Nuvem:</strong><br/>Crie agora sua <strong>Chave Encriptada (2FA)</strong>. Guarde-a com segurança: você precisará digitá-la quando instalar o Tellus no seu 2º PC/Notebook!';
+          passLabel.textContent = '🔑 Crie sua Chave Encriptada 2FA (Mínimo 6 caracteres)';
+        }
+      } catch {}
+    }
+
+    document.getElementById('email').addEventListener('blur', checkExisting2FA);
+    updateProviderUI(selectedProvider);
+
+    document.getElementById('oauthRedirectBtn')?.addEventListener('click', () => {
+      const cid = document.getElementById('clientId').value.trim();
+      if (!cid) {
+        alert('Informe o Client ID OAuth 2.0 ou autentique selecionando sua conta e informando sua Chave 2FA.');
+        return;
+      }
+      window.location.href = '/api/auth/google/oauth-redirect?challenge=' + encodeURIComponent(challenge) + '&clientId=' + encodeURIComponent(cid) + '&provider=' + encodeURIComponent(selectedProvider);
+    });
+
+    document.getElementById('authForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById('errBox');
+      const submitBtn = document.getElementById('submitBtn');
+      errBox.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Verificando Conta Cloud e Chave 2FA...';
+
+      try {
+        const res = await fetch('/api/auth/google/browser-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challenge,
+            provider: selectedProvider,
+            email: document.getElementById('email').value.trim(),
+            name: document.getElementById('name').value.trim(),
+            vaultPassphrase: document.getElementById('vaultPassphrase').value,
+            googleToken: document.getElementById('cloudToken').value.trim(),
+            verifiedByGoogle: verifiedByPlatform
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Falha na autenticação 2FA');
+        }
+        document.getElementById('authCard').innerHTML = \`
+          <div class="badge">✓ 1º FATOR (CLOUD) + 2º FATOR (2FA AES-256) VERIFICADOS</div>
+          <h1 style="color:#34d399">Cápsula Cloud & 2FA Desbloqueados!</h1>
+          <p class="sub" style="margin-top:10px">
+            A conta <strong>\${data.email}</strong> foi conectada ao <strong>\${selectedProvider === 'microsoft_onedrive' ? 'Microsoft OneDrive' : selectedProvider === 'dropbox' ? 'Dropbox' : 'Google Drive'}</strong> e sua <strong>Chave 2FA</strong> destrancou suas notas, desenhos Ink e chats.<br/><br/>
+            Você já pode fechar esta guia e voltar para o Tellus.
+          </p>
+        \`;
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = '🔒 Autenticar Plataforma + Verificar 2FA e Sincronizar';
+      }
+    });
+  </script>
+</body>
+</html>`);
+});
+
+// 4. Official Google / Microsoft OAuth 2.0 Redirect (PKCE S256)
+app.get('/api/auth/google/oauth-redirect', (req, res) => {
+  const challenge = String(req.query.challenge || '');
+  const clientId = String(req.query.clientId || '').trim();
+  const provider = String(req.query.provider || 'google_drive');
+  const session = SecurityShield.getBrowserAuthSession(challenge);
+  if (!session || !clientId) {
+    return res.status(400).send('Sessão ou Client ID inválido.');
+  }
+
+  if (provider === 'microsoft_onedrive') {
+    ConfigManager.updateConfig({
+      syncConfig: {
+        ...ConfigManager.getConfig().syncConfig!,
+        microsoftOAuthClientId: clientId,
+        cloudProvider: 'microsoft_onedrive'
+      }
+    });
+    const redirectUri = `http://localhost:${PORT}/api/auth/google/callback`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile User.Read Files.ReadWrite',
+      state: `${challenge}|microsoft_onedrive`,
+      code_challenge: session.codeChallenge,
+      code_challenge_method: 'S256',
+      prompt: 'select_account'
+    });
+    return res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`);
+  }
+
+  ConfigManager.updateConfig({
+    syncConfig: {
+      ...ConfigManager.getConfig().syncConfig!,
+      googleOAuthClientId: clientId,
+      cloudProvider: 'google_drive'
+    }
+  });
+  const redirectUri = `http://localhost:${PORT}/api/auth/google/callback`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile https://www.googleapis.com/auth/drive.metadata.readonly',
+    state: `${challenge}|google_drive`,
+    code_challenge: session.codeChallenge,
+    code_challenge_method: 'S256',
+    access_type: 'offline',
+    prompt: 'select_account'
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+// 5. Official Google / Microsoft OAuth 2.0 Callback
+app.get('/api/auth/google/callback', async (req, res) => {
+  try {
+    const code = String(req.query.code || '');
+    const rawState = String(req.query.state || '');
+    const [state, providerFromState] = rawState.split('|');
+    const provider = providerFromState || 'google_drive';
+    const session = SecurityShield.getBrowserAuthSession(state);
+    if (!session || !code) {
+      return res.status(400).send('Callback OAuth inválido ou sessão expirada.');
+    }
+    const redirectUri = `http://localhost:${PORT}/api/auth/google/callback`;
+
+    if (provider === 'microsoft_onedrive') {
+      const clientId = ConfigManager.getConfig().syncConfig?.microsoftOAuthClientId || '';
+      const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          code,
+          code_verifier: session.codeVerifier,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri
+        })
+      });
+      const tokenData: any = await tokenRes.json();
+      const accessToken = tokenData.access_token;
+      if (!accessToken) {
+        return res.redirect(`/api/auth/google/browser?challenge=${encodeURIComponent(state)}&provider=microsoft_onedrive`);
+      }
+      const verifiedProfile = await CloudSyncEngine.verifyMicrosoftOAuthToken(accessToken);
+      return res.redirect(
+        `/api/auth/google/browser?challenge=${encodeURIComponent(state)}&provider=microsoft_onedrive&email=${encodeURIComponent(
+          verifiedProfile.email
+        )}&name=${encodeURIComponent(verifiedProfile.name)}&verified=1`
+      );
+    }
+
+    const clientId = ConfigManager.getConfig().syncConfig?.googleOAuthClientId || '';
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        code,
+        code_verifier: session.codeVerifier,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri
+      })
+    });
+    const tokenData: any = await tokenRes.json();
+    const accessToken = tokenData.access_token || tokenData.id_token;
+    if (!accessToken) {
+      return res.redirect(`/api/auth/google/browser?challenge=${encodeURIComponent(state)}`);
+    }
+    const verifiedProfile = await CloudSyncEngine.verifyGoogleOAuthToken(accessToken);
+    return res.redirect(
+      `/api/auth/google/browser?challenge=${encodeURIComponent(state)}&provider=google_drive&email=${encodeURIComponent(
+        verifiedProfile.email
+      )}&name=${encodeURIComponent(verifiedProfile.name)}&verified=1`
+    );
+  } catch (err: any) {
+    res.status(500).send(`Erro no retorno OAuth: ${err.message}`);
+  }
+});
+
+// 6. Complete External Browser Authentication + Verify 2FA E2EE Key
+app.post('/api/auth/google/browser-complete', async (req, res) => {
+  try {
+    const { challenge, provider, email, name, vaultPassphrase, googleToken, verifiedByGoogle } = req.body;
+    const session = SecurityShield.getBrowserAuthSession(String(challenge || ''));
+    if (!session) {
+      return res.status(400).json({ error: 'Sessão de autenticação expirada. Abra novamente pelo Tellus.' });
+    }
+
+    const selectedProvider = (provider || 'google_drive') as any;
+    let finalEmail = String(email || '').trim().toLowerCase();
+    let finalName = String(name || '').trim();
+    let finalPicture: string | undefined;
+    let finalSub = `${selectedProvider}_${Date.now()}`;
+    let isTokenVerified = Boolean(verifiedByGoogle);
+    const cleanToken = googleToken ? String(googleToken).trim() : '';
+
+    if (cleanToken) {
+      if (selectedProvider === 'microsoft_onedrive') {
+        const msProfile = await CloudSyncEngine.verifyMicrosoftOAuthToken(cleanToken);
+        finalEmail = msProfile.email.toLowerCase();
+        finalName = msProfile.name || finalName;
+        finalSub = msProfile.sub;
+        isTokenVerified = true;
+      } else {
+        const tokenProfile = await CloudSyncEngine.verifyGoogleOAuthToken(cleanToken);
+        finalEmail = tokenProfile.email.toLowerCase();
+        finalName = tokenProfile.name || finalName;
+        finalPicture = tokenProfile.picture;
+        finalSub = tokenProfile.sub;
+        isTokenVerified = true;
+      }
+    }
+
+    const authMethod = isTokenVerified
+      ? selectedProvider === 'microsoft_onedrive'
+        ? 'microsoft_token_verified'
+        : 'google_token_verified'
+      : 'google_browser_vault_key';
+
+    const { syncConfig, accountHash, isFirstTimeVault } = CloudSyncEngine.authenticateGoogleWithVaultKey({
+      email: finalEmail,
+      name: finalName || finalEmail.split('@')[0],
+      vaultPassphrase: String(vaultPassphrase || ''),
+      provider: selectedProvider,
+      picture: finalPicture,
+      sub: finalSub,
+      authMethod,
+      verifiedByGoogle: isTokenVerified,
+      verifiedByPlatform: isTokenVerified,
+      cloudAccessToken: cleanToken || undefined
+    });
+
+    const report = CloudSyncEngine.syncNow();
+    const storageMonitor = await CloudSyncEngine.getStorageMonitorReport();
+
+    SecurityShield.completeBrowserAuthSession(challenge, {
+      email: finalEmail,
+      name: syncConfig.googleAccount?.name || finalEmail,
+      picture: finalPicture,
+      sub: finalSub,
+      authMethod: authMethod as any,
+      accountHash
+    });
+
+    res.json({
+      success: true,
+      email: finalEmail,
+      accountHash,
+      isFirstTimeVault,
+      syncConfig,
+      report,
+      storageMonitor
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Direct Authenticated Login (Step 1: Platform Account + Step 2: Mandatory 2FA Encrypted Key)
+app.post('/api/sync/google-login', async (req, res) => {
+  try {
+    const { email, name, provider, vaultPassphrase, googleToken, picture, cloudMirrorPath } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'E-mail da conta Cloud (Google ou Microsoft) é obrigatório.' });
+    }
+    if (!vaultPassphrase || String(vaultPassphrase).trim().length < 6) {
+      return res.status(400).json({
+        error: '2º Fator Obrigatório (2FA): Informe sua Chave Encriptada (mínimo 6 caracteres) criada na 1ª vez para destrancar seus dados.'
+      });
+    }
+
+    const selectedProvider = (provider || ConfigManager.getConfig().syncConfig?.cloudProvider || 'google_drive') as any;
+    let verifiedEmail = email.trim().toLowerCase();
+    let verifiedName = (name || verifiedEmail.split('@')[0]).trim();
+    let verifiedPic = picture;
+    let verifiedByPlatform = false;
+    const cleanToken = googleToken ? String(googleToken).trim() : '';
+
+    if (cleanToken) {
+      if (selectedProvider === 'microsoft_onedrive') {
+        const msProfile = await CloudSyncEngine.verifyMicrosoftOAuthToken(cleanToken);
+        verifiedEmail = msProfile.email.toLowerCase();
+        verifiedName = msProfile.name || verifiedName;
+        verifiedByPlatform = true;
+      } else {
+        const profile = await CloudSyncEngine.verifyGoogleOAuthToken(cleanToken);
+        verifiedEmail = profile.email.toLowerCase();
+        verifiedName = profile.name || verifiedName;
+        verifiedPic = profile.picture;
+        verifiedByPlatform = true;
+      }
+    }
+
+    CloudSyncEngine.authenticateGoogleWithVaultKey({
+      email: verifiedEmail,
+      name: verifiedName,
+      provider: selectedProvider,
+      vaultPassphrase: String(vaultPassphrase),
+      picture: verifiedPic,
+      cloudMirrorPath,
+      authMethod: verifiedByPlatform ? 'google_token_verified' : 'google_browser_vault_key',
+      verifiedByGoogle: verifiedByPlatform,
+      verifiedByPlatform,
+      cloudAccessToken: cleanToken || undefined
+    });
+
+    const report = CloudSyncEngine.syncNow();
+    const storageMonitor = await CloudSyncEngine.getStorageMonitorReport();
+    res.json({
+      success: true,
+      syncConfig: ConfigManager.getConfig().syncConfig,
+      report,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary(),
+      storageMonitor
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/google-logout', (req, res) => {
+  try {
+    const syncConfig = CloudSyncEngine.logoutGoogle();
+    res.json({
+      success: true,
+      syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary()
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/vault-ownership', (req, res) => {
+  try {
+    const { mode } = req.body; // 'bind_to_account' | 'release_to_local_pc'
+    if (mode !== 'bind_to_account' && mode !== 'release_to_local_pc') {
+      return res.status(400).json({ error: 'Modo inválido.' });
+    }
+    const result = TellusNoteEngine.setVaultNotesOwnership(mode);
+    const vaultSecurity = TellusNoteEngine.getVaultSecuritySummary();
+    res.json({
+      success: true,
+      ...result,
+      vaultSecurity
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/now', async (req, res) => {
+  try {
+    const report = CloudSyncEngine.syncNow();
+    const cfg = ConfigManager.getConfig();
+    if (cfg.syncConfig?.peerSyncEnabled && cfg.syncConfig?.peerSyncUrl) {
+      const peerRes = await CloudSyncEngine.syncWithPeerDevice(cfg.syncConfig.peerSyncUrl);
+      if (peerRes.success) {
+        report.notesPulled += peerRes.notesUpdated;
+        report.inkPulled += peerRes.inksUpdated;
+        report.details.push(...peerRes.details);
+      }
+    }
+    res.json({
+      ...report,
+      syncConfig: ConfigManager.getConfig().syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary()
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Multi-Account Switching & Local-Only Mode (No Login Required)
+app.post('/api/sync/switch-account', (req, res) => {
+  try {
+    const { target, vaultPassphrase } = req.body; // email, accountHash, or 'local_only'
+    const result = CloudSyncEngine.switchAccount(String(target || 'local_only'), vaultPassphrase);
+    let report = undefined;
+    if (result.mode === 'account') {
+      report = CloudSyncEngine.syncNow();
+    }
+    res.json({
+      success: true,
+      mode: result.mode,
+      activeEmail: result.activeEmail,
+      syncConfig: ConfigManager.getConfig().syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary(),
+      report
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/remove-account', (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'E-mail ou ID da conta é obrigatório.' });
+    }
+    const syncConfig = CloudSyncEngine.removeSavedAccount(String(email));
+    res.json({
+      success: true,
+      syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary()
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/view-scope', (req, res) => {
+  try {
+    const { scope } = req.body;
+    if (scope !== 'all_accessible' && scope !== 'account_only' && scope !== 'local_only') {
+      return res.status(400).json({ error: 'Escopo de visualização inválido.' });
+    }
+    const syncConfig = CloudSyncEngine.setVaultViewScope(scope);
+    res.json({
+      success: true,
+      syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary()
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Direct Peer-to-Peer LAN Co-Editing & Network Discovery Endpoints
+app.get('/api/sync/network-info', (req, res) => {
+  try {
+    const port = Number(PORT) || 3001;
+    const netInfo = CloudSyncEngine.getLocalNetworkInfo(port);
+    res.json(netInfo);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/sync/peer-bundle', (req, res) => {
+  try {
+    const requestedHash = req.query.accountHash ? String(req.query.accountHash) : undefined;
+    const bundle = CloudSyncEngine.exportPeerSyncBundle(requestedHash);
+    res.json(bundle);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/peer-push', (req, res) => {
+  try {
+    const result = CloudSyncEngine.applyPeerSyncBundle(req.body || {});
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/peer-sync', async (req, res) => {
+  try {
+    const { peerUrl, peerSyncEnabled } = req.body || {};
+    if (typeof peerUrl === 'string') {
+      const cfg = ConfigManager.getConfig();
+      ConfigManager.updateConfig({
+        syncConfig: {
+          ...(cfg.syncConfig as any),
+          peerSyncUrl: peerUrl.trim(),
+          peerSyncEnabled: peerSyncEnabled !== undefined ? Boolean(peerSyncEnabled) : Boolean(peerUrl.trim())
+        }
+      });
+    }
+    const result = await CloudSyncEngine.syncWithPeerDevice(peerUrl);
+    res.json({
+      ...result,
+      syncConfig: ConfigManager.getConfig().syncConfig,
+      vaultSecurity: TellusNoteEngine.getVaultSecuritySummary()
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Background Co-Editing Auto-Sync Interval (pulls remote Cloud Drive & LAN Peer updates every 6s)
+setInterval(() => {
+  try {
+    const cfg = ConfigManager.getConfig();
+    if (cfg.syncConfig?.enabled && cfg.syncConfig?.autoSync && SecurityShield.isVaultUnlocked()) {
+      CloudSyncEngine.syncNow();
+    }
+    if (cfg.syncConfig?.peerSyncEnabled && cfg.syncConfig?.peerSyncUrl) {
+      CloudSyncEngine.syncWithPeerDevice(cfg.syncConfig.peerSyncUrl).catch(() => {});
+    }
+  } catch {}
+}, 6000);
+
+app.post('/api/sync/pick-mirror-directory', async (req, res) => {
+  try {
+    const picked = await ProjectManager.pickDirectory();
+    if (!picked) {
+      return res.json({ cancelled: true });
+    }
+    const currentSync = ConfigManager.getConfig().syncConfig;
+    const updated = ConfigManager.updateConfig({
+      syncConfig: {
+        ...(currentSync || {
+          enabled: true,
+          autoSync: true,
+          syncNotes: true,
+          syncInk: true,
+          syncChats: true,
+          syncAiConfig: true,
+          deviceId: os.hostname(),
+          deviceName: os.hostname()
+        }),
+        cloudMirrorPath: picked,
+        enabled: true
+      }
+    });
+    res.json({
+      cancelled: false,
+      cloudMirrorPath: picked,
+      syncConfig: updated.syncConfig
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// One-Click Update & Restart Routes
+app.get('/api/system/update-status', (req, res) => {
+  try {
+    const rootDir = path.resolve(__dirname, '../..');
+    let branch = 'main';
+    let commit = '';
+    try {
+      branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: rootDir, encoding: 'utf-8' }).trim();
+      commit = execSync('git rev-parse --short HEAD', { cwd: rootDir, encoding: 'utf-8' }).trim();
+    } catch {}
+    res.json({
+      version: '2.4.0',
+      branch,
+      commit,
+      rootDir,
+      vaultPath: TellusNoteEngine.VAULT_DIR
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system/update-and-restart', async (req, res) => {
+  try {
+    const rootDir = path.resolve(__dirname, '../..');
+    const steps: string[] = [];
+
+    // 1. Sync Cloud data first if enabled so nothing is lost
+    try {
+      const cfg = ConfigManager.getConfig();
+      if (cfg.syncConfig?.enabled) {
+        CloudSyncEngine.syncNow();
+        steps.push('Sincronização em nuvem concluída antes da atualização.');
+      }
+    } catch {}
+
+    // 2. Git Pull (if git repository with remote exists)
+    try {
+      const pullOut = execSync('git pull --rebase --autostash', {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        timeout: 30000
+      }).trim();
+      steps.push(`Git Pull: ${pullOut || 'Código atualizado'}`);
+    } catch (gitErr: any) {
+      steps.push(`Git local mantido (${gitErr.message?.split('\n')[0] || 'sem repositório remoto configurado'})`);
+    }
+
+    // 3. Build Client & Server so newest changes are compiled
+    try {
+      execSync('npm run build --prefix client', { cwd: rootDir, encoding: 'utf-8', timeout: 120000 });
+      steps.push('Interface (Client) compilada com sucesso.');
+    } catch (buildClientErr: any) {
+      steps.push(`Aviso ao compilar Client: ${buildClientErr.message?.split('\n')[0]}`);
+    }
+
+    try {
+      execSync('npm run build --prefix server', { cwd: rootDir, encoding: 'utf-8', timeout: 60000 });
+      steps.push('Servidor (Backend) compilado com sucesso.');
+    } catch (buildServerErr: any) {
+      steps.push(`Aviso ao compilar Server: ${buildServerErr.message?.split('\n')[0]}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Atualização concluída! Reiniciando o Tellus...',
+      steps
+    });
+
+    // 4. Self-restart backend process after response flushes so tsx/Electron reloads cleanly
+    setTimeout(() => {
+      try {
+        const touchFile = path.resolve(__dirname, 'index.ts');
+        if (fs.existsSync(touchFile)) {
+          const now = new Date();
+          fs.utimesSync(touchFile, now, now);
+        }
+      } catch {}
+    }, 600);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Falha ao atualizar e reiniciar o Tellus' });
+  }
+});
+
 // Parameterized Individual Note Routes
 app.post('/api/notes/:id/move', (req, res) => {
   try {
@@ -1001,7 +2147,7 @@ app.post('/api/notes/:id/move', (req, res) => {
     if (!targetFolder) {
       return res.status(400).json({ error: 'targetFolder é obrigatório' });
     }
-    const updatedNote = TelluNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
+    const updatedNote = TellusNoteEngine.moveNote(req.params.id, targetFolder, currentPath);
     if (!updatedNote) {
       return res.status(404).json({ error: 'Nota não encontrada' });
     }
@@ -1015,7 +2161,7 @@ app.delete('/api/notes/:id', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
     const isProjectSpecific = req.query.isProjectSpecific === 'true';
-    const success = TelluNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
+    const success = TellusNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
 
     // Auto-clean active_context if it specifically mentions this deleted note ID
     try {
@@ -1113,7 +2259,7 @@ Breve resumo dos objetivos, contexto e conclusões da discussão.
       subject = sanitizePortugueseText(subject);
     }
 
-    const savedNote = TelluNoteEngine.saveNote({
+    const savedNote = TellusNoteEngine.saveNote({
       title,
       subject,
       content: generatedNoteContent,
@@ -1633,9 +2779,13 @@ app.get('/api/voice/status', (req, res) => {
 });
 
 // Serve Client Dist statically if built
-const clientDistPath = path.resolve(process.cwd(), '../client/dist');
-const altClientDistPath = path.resolve(process.cwd(), 'client/dist');
-const activeDist = fs.existsSync(clientDistPath) ? clientDistPath : (fs.existsSync(altClientDistPath) ? altClientDistPath : null);
+const candidateDistPaths = [
+  path.resolve(process.cwd(), '../client/dist'),
+  path.resolve(process.cwd(), 'client/dist'),
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist'),
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../client/dist'),
+];
+const activeDist = candidateDistPaths.find(p => fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html'))) || null;
 
 if (activeDist) {
   app.use(express.static(activeDist));

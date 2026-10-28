@@ -84,7 +84,7 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
   const currentTitle = activeMemoryPage ? activeMemoryPage.title : '🎯 Active Context (Estado Atual)';
 
   return (
-    <div className="h-full flex flex-col bg-sidebar">
+    <div className="h-full w-full flex flex-col bg-sidebar">
       {/* Header Bar */}
       <div className="h-11 border-b border-card-border bg-panel px-4 flex items-center justify-between select-none shrink-0">
         <div className="flex items-center space-x-2 text-xs">

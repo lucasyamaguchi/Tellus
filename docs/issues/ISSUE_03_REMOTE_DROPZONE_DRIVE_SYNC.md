@@ -14,7 +14,7 @@ sequenceDiagram
     participant Drive as Google Drive (Pasta Tellus Inbox)
     actor Tellus as Tellus Desktop (Ao ligar o PC)
     participant Dropzone as Smart Dropzone Engine
-    participant Vault as Obsidian Vault (E:\Die-Sonne\Vault)
+    participant Vault as Tellus Vault (Local Documents)
 
     User->>Drive: Faz upload de fotos de caderno / PDFs pelo celular
     Note over User,Drive: PC pode estar DESLIGADO neste momento
@@ -58,7 +58,7 @@ sequenceDiagram
 >   1. **Sanitização de Metadados & Nomes de Arquivo:** Higienização contra path traversal (`../`), caracteres de escape de shell e comandos de injeção.
 >   2. **Inspeção de Conteúdo de Texto:** Extrações de texto de PDFs/Markdown passam por filtro de regex que neutraliza comandos imperativos de jailbreak antes de submeter ao modelo de IA local da Dropzone.
 >   3. **Sanitização GitSafe:** Varredura imediata de chaves privadas, senhas e tokens embutidos nos arquivos antes da gravação no cofre.
->   4. **Restrição de Escrita em Sandbox:** A Dropzone só tem permissão de criar e mover arquivos dentro de `E:\Die-Sonne\Vault`, sendo incapaz de alterar arquivos de sistema ou da raiz do projeto.
+>   4. **Restrição de Escrita em Sandbox:** A Dropzone só tem permissão de criar e mover arquivos dentro do cofre local Tellus, sendo incapaz de alterar arquivos de sistema ou da raiz do projeto.
 
 ---
 

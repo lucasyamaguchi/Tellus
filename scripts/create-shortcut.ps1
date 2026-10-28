@@ -1,4 +1,4 @@
-$ProjectRoot = "e:\Die-Sonne\Projects\AgenticIDE"
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ExePath = "$ProjectRoot\Tellus.exe"
 $IconPath = "$ProjectRoot\Tellus.ico"
 $AppId = "Tellus.AgenticIDE"

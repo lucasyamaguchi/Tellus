@@ -11,21 +11,36 @@
     "build": "cd server && npm run build && cd ../client && npm run build",
     "test": "cd server && npm test",
     "desktop": "electron .",
-    "dist": "npm run build && electron-builder --win portable",
+    "dist": "npm run build && electron-builder --win nsis portable",
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "dist:installer": "npm run build && electron-builder --win nsis",
     "generate-icons": "node scripts/generate-icons.js",
     "create-shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-shortcut.ps1"
   },
   "build": {
     "appId": "com.tellus.app",
     "productName": "Tellus",
+    "asar": false,
     "directories": {
       "output": "dist-app"
     },
     "win": {
       "icon": "resources/icon.ico",
       "target": [
+        "nsis",
         "portable"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tellus",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "files": [
       "electron/**/*",
@@ -33,7 +48,8 @@
       "server/package.json",
       "server/node_modules/**/*",
       "client/dist/**/*",
-      "resources/**/*"
+      "resources/**/*",
+      "skills/**/*"
     ]
   },
   "keywords": [
@@ -56,6 +72,13 @@
     "sharp": "^0.33.5"
   },
   "dependencies": {
-    "pdf-parse": "^2.4.5"
+    "axios": "^1.7.9",
+    "chokidar": "^4.0.3",
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pdf-parse": "^2.4.5",
+    "prettier": "^3.9.10"
   }
 }

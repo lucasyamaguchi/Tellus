@@ -29,6 +29,25 @@ config.json
 .agentic/
 **/.agentic/
 
+# User Personal Chats, Sessions, Resumes & Private Notes
+Chats/
+chats/
+**/Chats/
+**/chats/
+Vault/
+vault/
+**/Vault/
+**/vault/
+.tellus/
+**/.tellus/
+
+# Compiled Executables & Binaries (Distributed via GitHub Releases)
+*.exe
+*.dll
+*.node
+*.dylib
+*.so
+
 # Uploaded attachments & screenshots
 attachments/
 **/attachments/

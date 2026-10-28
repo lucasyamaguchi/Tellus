@@ -1,8 +1,8 @@
-// Backward-compatibility bridge: all note view features are standardized on TelluNoteView
-export * from './TelluNoteView';
+// Backward-compatibility bridge: all note view features are standardized on TellusNoteView
+export * from './TellusNoteView';
 export {
-  TelluNoteView as default,
+  TellusNoteView as default,
+  TellusNoteView,
   TelluNoteView,
-  FrankNoteView,
-  TellusNoteView
-} from './TelluNoteView';
+  FrankNoteView
+} from './TellusNoteView';

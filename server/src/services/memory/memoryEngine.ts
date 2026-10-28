@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { PrivacySanitizer } from '../security/privacySanitizer.js';
-import { TelluNoteEngine } from '../notes/telluNoteEngine.js';
+import { TellusNoteEngine } from '../notes/tellusNoteEngine.js';
 import { MemoryPalace } from './memoryPalace.js';
 
 export interface MemoryPage {
@@ -241,7 +241,7 @@ ${openQuestions.length > 0 ? openQuestions.map(q => `- ${q}`).join('\n') : '- Ne
 
     // Mirror to Vault under "Handoffs" folder so it's accessible in Tellus Notes and Knowledge Graph
     try {
-      TelluNoteEngine.saveNote({
+      TellusNoteEngine.saveNote({
         title,
         folder: 'Handoffs',
         subject: 'Handoffs',

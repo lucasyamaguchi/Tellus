@@ -34,7 +34,7 @@ const PRESET_ISSUES = [
   {
     icon: FileText,
     title: 'Falha ao Abrir / Carregar Notas',
-    prompt: 'A tela de notas apresentou comportamento anômalo ao carregar conteúdo. Inspecione o TelluNoteView e garanta que o DOM e estados sincronizem corretamente.'
+    prompt: 'A tela de notas apresentou comportamento anômalo ao carregar conteúdo. Inspecione o TellusNoteView e garanta que o DOM e estados sincronizem corretamente.'
   },
   {
     icon: Terminal,

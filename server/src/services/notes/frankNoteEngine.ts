@@ -1,9 +1,9 @@
-// Backward compatibility bridge: all note engine capabilities are standardized on TelluNoteEngine
-export * from './telluNoteEngine.js';
+// Backward compatibility bridge: all note engine capabilities are standardized on TellusNoteEngine
+export * from './tellusNoteEngine.js';
 export {
-  TelluNoteEngine as default,
-  TelluNoteEngine,
+  TellusNoteEngine as default,
   TellusNoteEngine,
+  TelluNoteEngine,
   FrankNoteEngine,
   NotesEngine
-} from './telluNoteEngine.js';
+} from './tellusNoteEngine.js';

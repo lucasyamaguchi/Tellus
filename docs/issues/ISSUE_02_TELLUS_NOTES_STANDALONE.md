@@ -50,7 +50,7 @@ Separar a experiência do módulo de anotações da IDE principal de programaç�
 
 ## 🏗️ Modos de Distribuição
 * **Opção 1**: Alternador de modo na inicialização do Tellus (`Modo Dev` vs `Modo Estudos`).
-* **Opção 2**: Binário Electron separado (`Tellus Notes.exe`) compartilhando o cofre `E:\Die-Sonne\Vault` e backend local.
+* **Opção 2**: Binário Electron separado (`Tellus Notes.exe`) compartilhando o cofre local (`~/Documents/Tellus Vault`) e backend local.
 * **Opção 3**: PWA web instalável no celular (somente leitura/escrita de notas, sem IA exposta em servidor).
 
 ---

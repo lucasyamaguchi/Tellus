@@ -115,7 +115,7 @@ export const FileHistoryViewer: React.FC<FileHistoryViewerProps> = ({
   const currentChatChangesCount = changes.filter(c => c.sessionId === activeSessionId).length;
 
   return (
-    <div className="h-full flex flex-col bg-[#12141c] text-slate-200 select-none">
+    <div className="h-full w-full flex flex-col bg-[#12141c] text-slate-200 select-none">
       {/* Top Scope / Filter Tabs */}
       <div className="p-3 border-b border-card-border bg-sidebar/80 space-y-2.5">
         <div className="flex items-center justify-between">

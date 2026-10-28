@@ -10,7 +10,7 @@
 [![Node.js](https://img.shields.io/badge/Backend-Node.js%20%2B%20Express-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TailwindCSS](https://img.shields.io/badge/Styling-TailwindCSS%20v4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![Obsidian Compatible](https://img.shields.io/badge/Vault-Obsidian%20Compatible-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/)
-[![GitSafe Protected](https://img.shields.io/badge/Security-GitSafe%20Verified-emerald?logo=shield&logoColor=white)](https://github.com/lucasyamaguchi/Tellus)
+[![Local First](https://img.shields.io/badge/Privacy-100%25%20Local-emerald?logo=shield&logoColor=white)](LICENSE)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>
@@ -117,9 +117,9 @@ O Tellus utiliza nativamente o hub de provedores (`ProviderHub`) conectado à AP
 
 ---
 
-## 🛡️ Política de Versionamento & Protocolo GitSafe
+## 🛡️ Política de Versionamento & Segurança Local
 
-O projeto segue rigorosamente o protocolo **GitSafe** antes de qualquer commit ou submissão para a branch principal (`main`):
+O projeto adota diretrizes estritas de segurança, privacidade e higienização antes de qualquer commit ou submissão para a branch principal (`main`):
 
 ```bash
 # 1. Auditoria de status e arquivos não rastreados
@@ -133,11 +133,13 @@ npm run build   # Backend (server)
 # Zero chaves de API, arquivos .env ou dados pessoais rastreados
 ```
 
-### Regras de Ouro do GitSafe:
+### Regras de Ouro de Segurança:
 1. **Blindagem de Segredos:** Arquivos `.env`, `config.json`, chaves e credenciais jamais são commitados.
-2. **Sanitização de Dados:** Bancos locais (`*.db`, `*.sqlite`), uploads temporários e pastas de cache (`.agentic/attachments/`, `scratch/`) são estritamente ignorados.
-3. **Compilação Limpa:** Todo merge exige aprovação de `tsc --noEmit` e `vite build` sem warnings impeditivos.
-4. **Imagens Oficiais:** O repositório armazena apenas mockups e diagramas gerados do sistema, preservando dados pessoais de conversas.
+2. **Privacidade Absoluta:** Conversas pessoais (`Chats/`), anotações de vagas, currículos e vaults locais são 100% blindados pelo `.gitignore`.
+3. **Caminhos Dinâmicos:** Nenhum caminho absoluto ou específico de máquina é hardcoded; o Tellus resolve caminhos dinamicamente a partir do diretório do usuário (`os.homedir()`).
+4. **Sanitização de Dados:** Bancos locais (`*.db`, `*.sqlite`), uploads temporários e pastas de cache (`.agentic/attachments/`, `scratch/`) são estritamente ignorados.
+5. **Compilação Limpa:** Todo merge exige aprovação de `tsc --noEmit` e `vite build` sem warnings impeditivos.
+6. **Imagens Oficiais:** O repositório armazena apenas mockups e diagramas gerados do sistema, preservando dados pessoais de conversas.
 
 ---
 
@@ -149,11 +151,16 @@ Tellus/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── ChatArea.tsx              # Chat com renderizador Markdown, Voice Orbe & Chips
-│   │   │   ├── FrankNoteView.tsx         # Cofre Obsidian, Destaques Temáticos & Grafo
+│   │   │   ├── TellusNoteView.tsx        # Cofre TellusMD / Obsidian, Destaques Temáticos & Grafo
+│   │   │   ├── NoteInkCanvas.tsx         # Canvas vetorial de caligrafia e desenho livre (Ink)
+│   │   │   ├── TellusCodeStudio.tsx      # Editor Monaco multi-abas, atalhos VS Code & Prettier
+│   │   │   ├── MaterialFileIcon.tsx      # Sistema completo de ícones Material por extensão/pasta
 │   │   │   ├── SmartDropzoneModal.tsx    # Dropzone Unificado & Brain Dump Multimodal
 │   │   │   ├── SettingsModal.tsx         # Configurações de API Keys, Modelos e Retenção
+│   │   │   ├── OnboardingModal.tsx       # Wizard de Boas-Vindas e Setup de Primeiro Uso
+│   │   │   ├── PatchNotesModal.tsx       # Modal de novidades e notas da versão v1.0.0
 │   │   │   ├── PipelineMindMapModal.tsx  # Mindmap de orquestração multi-agente
-│   │   │   └── Sidebar.tsx               # Navegação de projetos, histórico e rotinas
+│   │   │   └── Sidebar.tsx               # Navegação de projetos, histórico, rotinas e menu de contexto
 │   │   ├── api.ts                        # Cliente REST & WebSocket para comunicação com o backend
 │   │   └── types.ts                      # Definições de tipos TypeScript
 │   └── vite.config.ts
@@ -163,17 +170,19 @@ Tellus/
 │   │   ├── services/
 │   │   │   ├── agentLoop.ts              # Loop autônomo do agente, invocação de tools e streaming
 │   │   │   ├── configManager.ts          # Gestão persistente de configurações locais
+│   │   │   ├── sync/                     # Sincronização em Nuvem (Drive/OneDrive) com 2FA AES-256-GCM
 │   │   │   ├── notes/
-│   │   │   │   ├── frankNoteEngine.ts    # Motor do Vault (CRUD, Grafo, Pastas & Lixeira)
+│   │   │   │   ├── tellusNoteEngine.ts   # Motor do Vault (CRUD, Grafo, Pastas & Lixeira)
 │   │   │   │   └── smartOrganizer.ts     # AI Archivist (Decomposição, Classificação & Relatórios)
 │   │   │   ├── providers/
-│   │   │   │   ├── providerHub.ts        # Hub unificado OpenRouter / Gemini / DeepSeek
+│   │   │   │   ├── providerHub.ts        # Hub unificado OpenRouter / Gemini / DeepSeek / Claude
 │   │   │   │   └── openrouter.ts         # Streaming SSE resiliente para OpenRouter e LLMs
 │   │   │   └── tools/
 │   │   │       ├── fileParser.ts         # Extração de PDF, CSV e arquivos multimídia
 │   │   │       ├── fileManager.ts        # Manipulação de arquivos do projeto
 │   │   │       └── terminalRunner.ts     # Execução local segura de comandos e scripts
-│   │   └── index.ts                      # Rotas da API REST e endpoints do Vault
+│   │   └── index.ts                      # Rotas da API REST, formatador Prettier e endpoints
+│   ├── tests/                  # Suíte de mais de 80 testes automatizados
 │   └── tsconfig.json
 │
 └── docs/                       # Recursos visuais e documentação oficial

@@ -52,9 +52,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   };
 
   const quickPresets = [
-    'e:\\Die-Sonne\\Projects',
-    currentPath,
-    'C:\\Users\\Lusca\\Projects'
+    currentPath
   ].filter(Boolean);
 
   const uniquePresets = Array.from(new Set(quickPresets));
@@ -99,7 +97,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   type="text"
                   value={projectPathInput}
                   onChange={(e) => setProjectPathInput(e.target.value)}
-                  placeholder="Ex: E:\Die-Sonne\Projects\MeuNovoApp"
+                  placeholder="Ex: C:\Projetos\MeuApp ou ~/Documents/Projects"
                   className="w-full bg-background border border-card-border rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-accent shadow-inner"
                   autoFocus
                 />

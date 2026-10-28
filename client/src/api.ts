@@ -29,7 +29,11 @@ import {
   ProjectSettings,
   ExecutionSecurityPreset,
   FileChangeEntry,
-  GitDiffReport
+  GitDiffReport,
+  NoteInkData,
+  CloudSyncConfig,
+  SyncReport,
+  VaultSecuritySummary
 } from './types';
 
 const API_BASE = '/api';
@@ -173,6 +177,32 @@ export const api = {
     return res.json();
   },
 
+  async formatCode(content: string, path?: string, options?: any): Promise<{ formatted: string; changed: boolean }> {
+    const res = await fetch(`${API_BASE}/code/format`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, path, options })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Falha ao formatar código com Prettier');
+    }
+    return res.json();
+  },
+
+  async deleteFile(path: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/files/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Falha ao excluir arquivo/diretório');
+    }
+    return res.json();
+  },
+
   // Multimodal File Uploads & Screen Capture
   async uploadFiles(files: Array<{ name: string; type: string; base64: string }>): Promise<Attachment[]> {
     const res = await fetch(`${API_BASE}/files/upload`, {
@@ -299,6 +329,276 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
+    return res.json();
+  },
+
+  // Vault Directory Picker & Info
+  async getVaultInfo(): Promise<{ vaultPath: string; exists: boolean; inkDir: string; attachmentsDir: string }> {
+    const res = await fetch(`${API_BASE}/notes/vault-info`);
+    return res.json();
+  },
+
+  async pickVaultDirectory(): Promise<{ cancelled: boolean; vaultPath: string; config?: AppConfig }> {
+    const res = await fetch(`${API_BASE}/notes/pick-vault-directory`, { method: 'POST' });
+    return res.json();
+  },
+
+  // Ink Mode (Stylus / Pen / Touch Dual-Format Annotations)
+  async getNoteInk(noteId: string): Promise<NoteInkData> {
+    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(noteId)}/ink`);
+    return res.json();
+  },
+
+  async saveNoteInk(noteId: string, data: Partial<NoteInkData>): Promise<NoteInkData> {
+    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(noteId)}/ink`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+
+  async deleteNoteInk(noteId: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(noteId)}/ink`, {
+      method: 'DELETE'
+    });
+    return res.json();
+  },
+
+  // Multi-Cloud (Google Drive / Microsoft OneDrive / Dropbox) & 2FA Vault Ownership
+  async getSyncStatus(): Promise<{
+    syncConfig?: CloudSyncConfig;
+    vaultPath: string;
+    detectedFolders: Array<{ providerId?: string; provider: string; path: string; available?: boolean }>;
+    discoveredAccounts?: Array<{
+      email: string;
+      name: string;
+      provider: string;
+      providerLabel: string;
+      mirrorPath: string;
+    }>;
+    effectiveMirrorPath: string;
+    vaultSecurity?: VaultSecuritySummary;
+    storageMonitor?: any;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/status`);
+    return res.json();
+  },
+
+  async getStorageMonitorReport(): Promise<any> {
+    const res = await fetch(`${API_BASE}/sync/storage-monitor`);
+    return res.json();
+  },
+
+  async selectCloudProvider(provider: string, cloudMirrorPath?: string): Promise<{
+    success: boolean;
+    syncConfig: CloudSyncConfig;
+    storageMonitor?: any;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/select-provider`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, cloudMirrorPath })
+    });
+    return res.json();
+  },
+
+  async lock2FAVaultKeyOnly(): Promise<{
+    success: boolean;
+    syncConfig: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/lock-2fa`, { method: 'POST' });
+    return res.json();
+  },
+
+  async startBrowserGoogleAuth(provider?: string): Promise<{
+    success: boolean;
+    challenge: string;
+    authUrl: string;
+    expiresAt: number;
+  }> {
+    const res = await fetch(`${API_BASE}/auth/google/start-browser`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao abrir portal de autenticação no navegador' }));
+      throw new Error(err.error || 'Falha ao abrir portal de autenticação no navegador');
+    }
+    return res.json();
+  },
+
+  async pollBrowserGoogleAuth(challenge: string): Promise<{
+    status: 'pending' | 'completed' | 'failed' | 'expired';
+    error?: string;
+    syncConfig?: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+    storageMonitor?: any;
+  }> {
+    const res = await fetch(`${API_BASE}/auth/google/poll?challenge=${encodeURIComponent(challenge)}`);
+    return res.json();
+  },
+
+  async loginGoogle(data: {
+    email: string;
+    name: string;
+    provider?: string;
+    vaultPassphrase: string;
+    googleToken?: string;
+    picture?: string;
+    cloudMirrorPath?: string;
+  }): Promise<{
+    success: boolean;
+    syncConfig: CloudSyncConfig;
+    report: SyncReport;
+    vaultSecurity?: VaultSecuritySummary;
+    storageMonitor?: any;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/google-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao autenticar conta Google' }));
+      throw new Error(err.error || 'Falha ao autenticar conta Google');
+    }
+    return res.json();
+  },
+
+  async logoutGoogle(): Promise<{
+    success: boolean;
+    syncConfig: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/google-logout`, { method: 'POST' });
+    return res.json();
+  },
+
+  async setVaultNotesOwnership(mode: 'bind_to_account' | 'release_to_local_pc'): Promise<{
+    success: boolean;
+    updatedCount: number;
+    vaultSecurity: VaultSecuritySummary;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/vault-ownership`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao atualizar vínculo das notas' }));
+      throw new Error(err.error || 'Falha ao atualizar vínculo das notas');
+    }
+    return res.json();
+  },
+
+  async syncNow(): Promise<SyncReport> {
+    const res = await fetch(`${API_BASE}/sync/now`, { method: 'POST' });
+    return res.json();
+  },
+
+  async switchAccount(target: string, vaultPassphrase?: string): Promise<{
+    success: boolean;
+    mode: 'local_only' | 'account';
+    activeEmail?: string;
+    syncConfig: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+    report?: SyncReport;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/switch-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, vaultPassphrase })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao trocar de conta' }));
+      throw new Error(err.error || 'Falha ao trocar de conta');
+    }
+    return res.json();
+  },
+
+  async removeSavedAccount(email: string): Promise<{
+    success: boolean;
+    syncConfig: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/remove-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao remover conta salva' }));
+      throw new Error(err.error || 'Falha ao remover conta salva');
+    }
+    return res.json();
+  },
+
+  async setVaultViewScope(scope: 'all_accessible' | 'account_only' | 'local_only'): Promise<{
+    success: boolean;
+    syncConfig: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/view-scope`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao alterar filtro de visualização' }));
+      throw new Error(err.error || 'Falha ao alterar filtro de visualização');
+    }
+    return res.json();
+  },
+
+  async getNetworkSyncInfo(): Promise<{
+    deviceName: string;
+    deviceId: string;
+    lanUrls: string[];
+    peerSyncUrl: string;
+    peerSyncEnabled: boolean;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/network-info`);
+    return res.json();
+  },
+
+  async syncWithPeerDevice(peerUrl?: string, peerSyncEnabled?: boolean): Promise<{
+    success: boolean;
+    peerUrl: string;
+    notesUpdated: number;
+    inksUpdated: number;
+    details: string[];
+    error?: string;
+    syncConfig?: CloudSyncConfig;
+    vaultSecurity?: VaultSecuritySummary;
+  }> {
+    const res = await fetch(`${API_BASE}/sync/peer-sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peerUrl, peerSyncEnabled })
+    });
+    return res.json();
+  },
+
+  async pickSyncMirrorDirectory(): Promise<{ cancelled: boolean; cloudMirrorPath?: string; syncConfig?: CloudSyncConfig }> {
+    const res = await fetch(`${API_BASE}/sync/pick-mirror-directory`, { method: 'POST' });
+    return res.json();
+  },
+
+  // One-Click Update & Restart
+  async getSystemUpdateStatus(): Promise<{ version: string; branch: string; commit: string; rootDir: string; vaultPath: string }> {
+    const res = await fetch(`${API_BASE}/system/update-status`);
+    return res.json();
+  },
+
+  async updateAndRestartApp(): Promise<{ success: boolean; message: string; steps: string[] }> {
+    const res = await fetch(`${API_BASE}/system/update-and-restart`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha na atualização' }));
+      throw new Error(err.error || 'Falha na atualização');
+    }
     return res.json();
   },
 

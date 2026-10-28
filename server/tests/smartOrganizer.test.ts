@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { FrankNoteEngine, TellusNoteEngine } from '../src/services/notes/frankNoteEngine.js';
+import { TellusNoteEngine } from '../src/services/notes/tellusNoteEngine.js';
 import { SmartOrganizer } from '../src/services/notes/smartOrganizer.js';
 
 describe('TellusMD Smart Organizer - Content Analysis & Categorization', () => {

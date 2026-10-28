@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, nativeImage, desktopCapturer, ipcMain, session } from 'electron';
+import { app, BrowserWindow, shell, nativeImage, desktopCapturer, ipcMain, session, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
@@ -83,28 +83,65 @@ function startBackendServer() {
   killPortProcess(SERVER_PORT);
 
   const hasBuiltServer = fs.existsSync(serverDistScript);
-  const execPath = 'node';
+  // Use Electron's embedded Node runtime when running built dist/index.js so target PCs don't need Node installed
+  const useEmbeddedNode = hasBuiltServer && app.isPackaged;
+  const execPath = useEmbeddedNode ? process.execPath : 'node';
   const execArgs = hasBuiltServer 
-    ? ['dist/index.js'] 
+    ? [serverDistScript] 
     : ['--loader', 'ts-node/esm', 'src/index.ts'];
 
-  console.log(`[Electron] Inicializando backend server silenciosamente...`);
+  console.log(`[Electron] Inicializando backend server (${useEmbeddedNode ? 'Embedded Node' : 'System Node'})...`);
+
+  // Ensure log directory exists
+  const logDir = app.getPath('userData');
+  if (!fs.existsSync(logDir)) {
+    try { fs.mkdirSync(logDir, { recursive: true }); } catch {}
+  }
+  const logFile = path.join(logDir, 'tellus-server.log');
+  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
 
   serverProcess = spawn(execPath, execArgs, {
     cwd: serverDir,
-    shell: true,
-    env: { ...process.env, PORT: String(SERVER_PORT) },
-    stdio: 'ignore'
+    shell: !useEmbeddedNode,
+    env: {
+      ...process.env,
+      PORT: String(SERVER_PORT),
+      ...(useEmbeddedNode ? { ELECTRON_RUN_AS_NODE: '1' } : {})
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
   });
+
+  serverProcess.stdout?.pipe(logStream);
+  serverProcess.stderr?.pipe(logStream);
+  if (!app.isPackaged) {
+    serverProcess.stdout?.pipe(process.stdout);
+    serverProcess.stderr?.pipe(process.stderr);
+  }
 
   serverProcess.on('error', (err) => {
     console.error('[Electron] Falha ao iniciar servidor backend:', err);
+    try {
+      fs.appendFileSync(logFile, `\n[${new Date().toISOString()}] Spawn Error: ${err.message}\n`);
+    } catch {}
+  });
+
+  serverProcess.on('exit', (code, signal) => {
+    console.log(`[Electron] Servidor backend finalizou com código ${code}, sinal ${signal}`);
+    try {
+      fs.appendFileSync(logFile, `\n[${new Date().toISOString()}] Server Exited: code=${code}, signal=${signal}\n`);
+    } catch {}
   });
 }
 
 function waitForServer(callback, retries = 40) {
   if (retries <= 0) {
     console.warn('[Electron] Timeout aguardando backend, inicializando janela...');
+    if (app.isPackaged && serverProcess && serverProcess.exitCode !== null) {
+      dialog.showErrorBox(
+        'Tellus - Falha na Inicialização',
+        `O servidor backend interno encerrou inesperadamente (código ${serverProcess.exitCode}).\nConsulte o arquivo de log para detalhes:\n${path.join(app.getPath('userData'), 'tellus-server.log')}`
+      );
+    }
     callback();
     return;
   }

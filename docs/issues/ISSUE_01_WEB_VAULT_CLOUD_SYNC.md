@@ -1,7 +1,7 @@
 # 🌐 Issue #01: Web Vault & Sincronização em Nuvem (Tellus Notes Cloud)
 
 ## 📌 Contexto & Objetivo
-Permitir que o usuário acesse, leia, escreva e organize suas anotações do cofre em qualquer lugar (celular, tablet ou outro computador) através de um navegador web, mantendo a soberania dos dados em `E:\Die-Sonne\Vault` e sem risco de vazamento de credenciais (GitSafe nativo).
+Permitir que o usuário acesse, leia, escreva e organize suas anotações do cofre em qualquer lugar (celular, tablet ou outro computador) através de um navegador web, mantendo a soberania dos dados no cofre local (`~/Documents/Tellus Vault`) e com criptografia ponta a ponta.
 
 ---
 
@@ -13,7 +13,7 @@ Permitir que o usuário acesse, leia, escreva e organize suas anotações do cof
   * As notas são armazenadas em um bucket S3/R2 privado criptografado (gratuito até 10GB no Cloudflare R2).
   * No celular, o usuário adiciona o Tellus Notes à tela inicial como PWA, podendo escrever offline ou online.
   * **Sincronização com o PC**:
-    * Ao abrir o Tellus Desktop, um job de sincronização bidirecional compara os timestamps (ETags) entre `E:\Die-Sonne\Vault` e o R2, aplicando as alterações pendentes e criando backups em `.backups/`.
+    * Ao abrir o Tellus Desktop, um job de sincronização bidirecional compara os timestamps (ETags) entre o cofre local e a nuvem, aplicando as alterações pendentes e criando backups em `.backups/`.
 
 ### Alternativa B: Acesso Remoto Direto via Tailscale / Cloudflare Tunnel (Zero Infraestrutura)
 * **Como funciona**:

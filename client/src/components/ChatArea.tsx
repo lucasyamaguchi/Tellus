@@ -171,6 +171,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [createdNoteInfo, setCreatedNoteInfo] = useState<{ id: string; title: string } | null>(null);
 
   const [isExpandedEditor, setIsExpandedEditor] = useState<boolean>(false);
+  const [isComposerToolsExpanded, setIsComposerToolsExpanded] = useState<boolean>(false);
 
   const stopDictation = (hardCancel = false) => {
     isDictatingRef.current = false;
@@ -956,27 +957,29 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         </div>
       ) : (
-        <div className="border-b border-card-border/50 px-3.5 py-1.5 flex items-center justify-between text-xs text-slate-400 bg-sidebar/30 shrink-0 gap-2">
+        <div className="border-b border-card-border/40 px-4 py-1 flex items-center justify-between text-xs text-slate-400 bg-sidebar/20 shrink-0 gap-2">
           <div className="flex items-center space-x-2 text-[11px] text-slate-400 min-w-0">
             {currentProject && (
               <div
-                className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-lg bg-panel/90 border border-card-border text-[11px] font-mono text-slate-300 shadow-xs shrink-0"
-                title={`Diretório Ativo de Trabalho:\n${currentProject.path}\n\nO Tellus executa ferramentas, cria/edita arquivos e roda comandos neste diretório.`}
+                className="flex items-center space-x-1.5 text-[11px] font-mono text-slate-400 shrink-0"
+                title={`Diretório Ativo de Trabalho:\n${currentProject.path}`}
               >
-                <FolderGit2 className="w-3.5 h-3.5 text-accent-light shrink-0" />
-                <span className="font-semibold text-white truncate max-w-[120px] sm:max-w-[160px]">
+                <FolderGit2 className="w-3 h-3 text-slate-500 shrink-0" />
+                <span className="font-medium text-slate-300 truncate max-w-[140px]">
                   {currentProject.name}
-                </span>
-                <span className="text-slate-500 hidden xl:inline truncate max-w-[220px]">
-                  ({currentProject.path})
                 </span>
               </div>
             )}
             {activeSessionTitle && (
-              <span className="font-semibold text-slate-300 truncate max-w-[180px] sm:max-w-[240px]">
-                {activeSessionTitle}
-              </span>
+              <>
+                <span className="text-slate-600">/</span>
+                <span className="font-medium text-slate-300 truncate max-w-[220px]">
+                  {activeSessionTitle}
+                </span>
+              </>
             )}
+          </div>
+          <div className="flex items-center space-x-2 shrink-0">
             {onChangeExecutionMode && onOpenProjectSettings && (
               <ExecutionModeDropdown
                 currentMode={executionMode}
@@ -987,28 +990,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 disabled={isStreaming}
               />
             )}
-          </div>
-          <div className="flex items-center space-x-2 shrink-0">
-            {onNewChat && (
-              <button
-                type="button"
-                onClick={onNewChat}
-                className="px-2 py-0.5 rounded-md hover:bg-accent/20 border border-transparent hover:border-accent/40 text-[11px] text-slate-300 hover:text-accent-light flex items-center space-x-1 transition-all cursor-pointer"
-                title="Criar um novo chat e focar na digitação imediatamente"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Novo Chat</span>
-              </button>
-            )}
             {onToggleLiveVoice && (
               <button
                 type="button"
                 onClick={onToggleLiveVoice}
-                className="px-2 py-0.5 rounded-md hover:bg-card-border/60 text-[11px] text-slate-400 hover:text-red-400 flex items-center space-x-1 transition-colors cursor-pointer"
-                title="Ativar Live Voice nesta conversa (para respostas faladas por voz em tempo real)"
+                className="px-2 py-0.5 rounded-md hover:bg-card text-[11px] text-slate-400 hover:text-slate-200 flex items-center space-x-1 transition-colors cursor-pointer"
+                title="Ativar Live Voice nesta conversa"
               >
                 <Mic className="w-3 h-3" />
-                <span>Ativar Live Voice</span>
+                <span className="hidden sm:inline">Voz</span>
               </button>
             )}
           </div>
@@ -1079,73 +1069,53 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 textareaRef.current?.focus();
               }
             }}
-            className="min-h-[380px] h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-8 space-y-5 cursor-text"
+            className="min-h-[340px] h-full flex flex-col items-center justify-center text-center max-w-xl mx-auto py-8 space-y-6 cursor-text"
           >
-            <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-card-border/80 shadow-xl shadow-accent/5 flex items-center justify-center shrink-0 animate-in fade-in zoom-in-95 cursor-pointer" onClick={() => textareaRef.current?.focus()}>
+            <div className="w-12 h-12 rounded-2xl bg-white p-1 border border-card-border/70 shadow-md flex items-center justify-center shrink-0 animate-in fade-in zoom-in-95 cursor-pointer" onClick={() => textareaRef.current?.focus()}>
               <img src="/logo.png" alt="Tellus Logo" className="w-full h-full object-contain" />
             </div>
 
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold text-slate-100">
-                Tellus Workspace
+            <div className="space-y-1.5">
+              <h2 className="text-lg font-semibold text-slate-100 tracking-tight">
+                Como posso ajudar hoje?
               </h2>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Converse com qualquer modelo do OpenRouter, Google, Claude ou OpenAI. Importe arquivos (PDF, CSV, PNG, MP3) ou cite mensagens de outros chats mantendo a continuidade do projeto.
+              <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                Escreva sua mensagem abaixo, anexe arquivos ou clique em <strong className="text-slate-300 font-medium">Ferramentas</strong> na barra inferior para expandir ações rápidas.
               </p>
             </div>
 
-            {/* Quick Starter Suggestions */}
-            <div className="grid grid-cols-2 gap-2.5 w-full pt-4">
+            {/* Clean Notion-Style Starter Pills (60-30-10 Calm Surface) */}
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
               <button
                 onClick={() => onSendMessage('Faça um raio-x completo do projeto e atualize o active_context.md com os objetivos atuais.')}
-                className="p-3 rounded-xl bg-card hover:bg-card-border/60 border border-card-border text-left text-xs transition-all group"
+                className="px-3 py-1.5 rounded-full bg-card/70 hover:bg-card border border-card-border/70 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all flex items-center space-x-1.5 cursor-pointer"
               >
-                <div className="flex items-center space-x-2 text-accent-light font-semibold mb-1">
-                  <Brain className="w-3.5 h-3.5" />
-                  <span>Mapear Projeto</span>
-                </div>
-                <span className="text-[11px] text-slate-400">
-                  Lê arquivos e mapeia o contexto ativo.
-                </span>
+                <Brain className="w-3.5 h-3.5 text-slate-400" />
+                <span>Mapear Projeto</span>
               </button>
 
               <button
                 onClick={() => onSendMessage('Proponha um plano de arquitetura em etapas para o próximo recurso.')}
-                className="p-3 rounded-xl bg-card hover:bg-card-border/60 border border-card-border text-left text-xs transition-all group"
+                className="px-3 py-1.5 rounded-full bg-card/70 hover:bg-card border border-card-border/70 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all flex items-center space-x-1.5 cursor-pointer"
               >
-                <div className="flex items-center space-x-2 text-brand-cyan font-semibold mb-1">
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Planejar Arquitetura</span>
-                </div>
-                <span className="text-[11px] text-slate-400">
-                  Estrutura decisões e salva em decisions/.
-                </span>
+                <Layers className="w-3.5 h-3.5 text-slate-400" />
+                <span>Planejar Arquitetura</span>
               </button>
 
               <button
                 onClick={() => onSendMessage('Gere um snapshot de handoff sintetizando o que foi feito até agora.')}
-                className="p-3 rounded-xl bg-card hover:bg-card-border/60 border border-card-border text-left text-xs transition-all group"
+                className="px-3 py-1.5 rounded-full bg-card/70 hover:bg-card border border-card-border/70 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all flex items-center space-x-1.5 cursor-pointer"
               >
-                <div className="flex items-center space-x-2 text-brand-emerald font-semibold mb-1">
-                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                  <span>Criar Handoff</span>
-                </div>
-                <span className="text-[11px] text-slate-400">
-                  Prepara a transição para outro modelo.
-                </span>
+                <ArrowRightLeft className="w-3.5 h-3.5 text-slate-400" />
+                <span>Criar Handoff</span>
               </button>
 
               <button
                 onClick={() => onSendMessage('Verifique se há erros no código e execute os testes ou linter.')}
-                className="p-3 rounded-xl bg-card hover:bg-card-border/60 border border-card-border text-left text-xs transition-all group"
+                className="px-3 py-1.5 rounded-full bg-card/70 hover:bg-card border border-card-border/70 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all flex items-center space-x-1.5 cursor-pointer"
               >
-                <div className="flex items-center space-x-2 text-brand-amber font-semibold mb-1">
-                  <Terminal className="w-3.5 h-3.5" />
-                  <span>Executar Testes</span>
-                </div>
-                <span className="text-[11px] text-slate-400">
-                  Roda diagnósticos locais diretamente.
-                </span>
+                <Terminal className="w-3.5 h-3.5 text-slate-400" />
+                <span>Executar Diagnóstico</span>
               </button>
             </div>
           </div>
@@ -1783,94 +1753,133 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
-        {/* Quick Action Chips Bar */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none text-[11px]">
-          {onOpenLiveVoice && (
+        {/* Expandable Quick Tools & Actions Dock (Goodnotes / Notion Progressive Disclosure) */}
+        {(isComposerToolsExpanded || attachments.some(att => att.isImage)) && (
+          <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 rounded-xl bg-card/90 border border-card-border/70 text-[11px] animate-in fade-in slide-in-from-bottom-1 duration-150">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mr-1">
+              Ferramentas:
+            </span>
+
             <button
-              onClick={onOpenLiveVoice}
-              className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/25 to-indigo-600/25 hover:from-purple-600/40 hover:to-indigo-600/40 border border-purple-500/50 text-purple-300 transition-all whitespace-nowrap flex items-center space-x-1.5 font-semibold cursor-pointer shadow-xs animate-pulse"
-              title="Abrir Modo Live Voice Chat para estudo conversacional por voz em tempo real"
+              type="button"
+              onClick={handleCaptureScreen}
+              disabled={isUploading}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-all flex items-center space-x-1 cursor-pointer"
+              title="Capturar a tela inteira do computador"
             >
-              <Radio className="w-3.5 h-3.5 text-purple-400" />
-              <span>🎙️ Live Voice Chat</span>
+              <ImageIcon className="w-3 h-3 text-slate-400" />
+              <span>Capturar Tela</span>
             </button>
-          )}
 
-          {attachments.some(att => att.isImage) && (
             <button
-              onClick={() => {
-                setInput('Anote isso: faça o reconhecimento desta anotação do meu caderno e salve como nota no Notes Module (Vault).');
-                textareaRef.current?.focus();
-              }}
-              className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 transition-colors whitespace-nowrap flex items-center space-x-1 font-semibold animate-pulse"
-              title="Digitalizar caligrafia da foto e salvar no Notes Module (Vault)"
+              type="button"
+              onClick={onOpenWindowPicker}
+              disabled={isUploading}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-all flex items-center space-x-1 cursor-pointer"
+              title="Escolher uma janela específica para inspecionar"
             >
-              <Camera className="w-3.5 h-3.5 text-emerald-400" />
-              <span>📷 Anote isso (OCR Caderno)</span>
+              <Eye className="w-3 h-3 text-slate-400" />
+              <span>Escolher Janela</span>
             </button>
-          )}
 
-          <button
-            onClick={onOpenMentionModal}
-            className="px-2.5 py-1 rounded-lg bg-brand-cyan/10 hover:bg-brand-cyan/20 border border-brand-cyan/30 text-brand-cyan transition-colors whitespace-nowrap flex items-center space-x-1"
-            title="Citar mensagem de outro chat"
-          >
-            <MessageSquareQuote className="w-3.5 h-3.5" />
-            <span>@ Citar Mensagem</span>
-          </button>
-
-          <button
-            onClick={() => onQuickAction('Atualize o active_context.md com o status atual do projeto.')}
-            className="px-2.5 py-1 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 transition-colors whitespace-nowrap flex items-center space-x-1"
-          >
-            <Brain className="w-3 h-3 text-brand-cyan" />
-            <span>Atualizar Contexto</span>
-          </button>
-          <button
-            onClick={() => onQuickAction('Crie um snapshot de handoff para transição de modelo.')}
-            className="px-2.5 py-1 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 transition-colors whitespace-nowrap flex items-center space-x-1"
-          >
-            <ArrowRightLeft className="w-3 h-3 text-brand-emerald" />
-            <span>Criar Handoff</span>
-          </button>
-          <button
-            onClick={() => onQuickAction('Execute um diagnóstico no projeto e reporte os achados.')}
-            className="px-2.5 py-1 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 transition-colors whitespace-nowrap flex items-center space-x-1"
-          >
-            <Terminal className="w-3 h-3 text-brand-amber" />
-            <span>Diagnóstico</span>
-          </button>
-
-          {/* Quick Token Efficiency Switcher */}
-          {onToggleTokenEfficiency && (
             <button
-              onClick={onToggleTokenEfficiency}
-              className={`px-2.5 py-1 rounded-lg border text-xs transition-all whitespace-nowrap flex items-center space-x-1.5 font-mono ${
-                tokenEfficiency
-                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-sm font-semibold'
-                  : 'bg-card hover:bg-card-border border-card-border text-slate-400'
-              }`}
-              title="Ativar/Desativar Token Efficiency: Respostas diretas e sem enrolação, apenas aplicando a ação e reportando arquivos modificados."
+              type="button"
+              onClick={handleGenerateNote}
+              disabled={isGeneratingNote || messages.length === 0}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-all flex items-center space-x-1 cursor-pointer disabled:opacity-40"
+              title="Criar nota estruturada no Vault com o resumo da conversa (/nota)"
             >
-              <Zap className={`w-3 h-3 ${tokenEfficiency ? 'text-amber-400 fill-amber-400' : 'text-slate-500'}`} />
-              <span>{tokenEfficiency ? '⚡ Eficiência: ON' : '⚡ Modo Eficiência'}</span>
+              <FileText className="w-3 h-3 text-slate-400" />
+              <span>{isGeneratingNote ? 'Sintetizando...' : 'Anotar Chat'}</span>
             </button>
-          )}
 
-          {messages.length > 0 && (
+            {onOpenLiveVoice && (
+              <button
+                onClick={onOpenLiveVoice}
+                className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-all flex items-center space-x-1 cursor-pointer"
+                title="Abrir Modo Live Voice Chat em tempo real"
+              >
+                <Radio className="w-3 h-3 text-red-400" />
+                <span>Live Voice</span>
+              </button>
+            )}
+
+            {attachments.some(att => att.isImage) && (
+              <button
+                onClick={() => {
+                  setInput('Anote isso: faça o reconhecimento desta anotação do meu caderno e salve como nota no Notes Module (Vault).');
+                  textareaRef.current?.focus();
+                }}
+                className="px-2.5 py-1 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 transition-colors flex items-center space-x-1 font-medium cursor-pointer"
+                title="Digitalizar caligrafia da foto e salvar no Vault"
+              >
+                <Camera className="w-3 h-3 text-emerald-400" />
+                <span>OCR Caderno ("Anote isso")</span>
+              </button>
+            )}
+
             <button
-              onClick={() => {
-                onClearChat();
-                setTimeout(() => textareaRef.current?.focus(), 50);
-              }}
-              className="px-2 py-1 rounded-lg bg-card hover:bg-rose-950/30 border border-card-border hover:border-rose-800/40 text-slate-400 hover:text-rose-300 transition-colors ml-auto flex items-center space-x-1"
-              title="Limpar Conversa"
+              onClick={onOpenMentionModal}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-colors flex items-center space-x-1 cursor-pointer"
+              title="Citar mensagem de outro chat"
             >
-              <Trash2 className="w-3 h-3" />
-              <span>Limpar</span>
+              <MessageSquareQuote className="w-3 h-3 text-slate-400" />
+              <span>@ Citar Chat</span>
             </button>
-          )}
-        </div>
+
+            <button
+              onClick={() => onQuickAction('Atualize o active_context.md com o status atual do projeto.')}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-colors flex items-center space-x-1 cursor-pointer"
+            >
+              <Brain className="w-3 h-3 text-slate-400" />
+              <span>Atualizar Contexto</span>
+            </button>
+
+            <button
+              onClick={() => onQuickAction('Crie um snapshot de handoff para transição de modelo.')}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-colors flex items-center space-x-1 cursor-pointer"
+            >
+              <ArrowRightLeft className="w-3 h-3 text-slate-400" />
+              <span>Criar Handoff</span>
+            </button>
+
+            <button
+              onClick={() => onQuickAction('Execute um diagnóstico no projeto e reporte os achados.')}
+              className="px-2.5 py-1 rounded-full bg-panel hover:bg-card-border border border-card-border/60 text-slate-300 hover:text-white transition-colors flex items-center space-x-1 cursor-pointer"
+            >
+              <Terminal className="w-3 h-3 text-slate-400" />
+              <span>Diagnóstico</span>
+            </button>
+
+            {onToggleTokenEfficiency && (
+              <button
+                onClick={onToggleTokenEfficiency}
+                className={`px-2.5 py-1 rounded-full border transition-all flex items-center space-x-1 cursor-pointer ${
+                  tokenEfficiency
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-medium'
+                    : 'bg-panel hover:bg-card-border border-card-border/60 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Zap className={`w-3 h-3 ${tokenEfficiency ? 'text-amber-400 fill-amber-400' : 'text-slate-400'}`} />
+                <span>{tokenEfficiency ? 'Eficiência: ON' : 'Modo Eficiência'}</span>
+              </button>
+            )}
+
+            {messages.length > 0 && (
+              <button
+                onClick={() => {
+                  onClearChat();
+                  setTimeout(() => textareaRef.current?.focus(), 50);
+                }}
+                className="px-2.5 py-1 rounded-full bg-panel hover:bg-rose-950/30 border border-card-border/60 hover:border-rose-800/40 text-slate-400 hover:text-rose-300 transition-colors ml-auto flex items-center space-x-1 cursor-pointer"
+                title="Limpar Conversa"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Limpar</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Microphone Permission / Diagnostic Help Banner */}
         {micPermissionError && (
@@ -1908,7 +1917,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
-        {/* Auto-Expanding Input Bar Card (Flexbox - Buttons NEVER overlap text!) */}
+        {/* Clean Notion/Goodnotes Composer Card */}
         <div 
           onClick={(e) => {
             const target = e.target as HTMLElement;
@@ -1916,8 +1925,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               textareaRef.current?.focus();
             }
           }}
-          className={`rounded-2xl bg-card border border-card-border focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30 shadow-xl shadow-black/40 transition-all flex flex-col p-3 gap-2.5 cursor-text ${
-            isExpandedEditor ? 'ring-2 ring-accent/30' : ''
+          className={`rounded-2xl bg-card border border-card-border/80 focus-within:border-accent/70 focus-within:ring-1 focus-within:ring-accent/20 shadow-lg shadow-black/30 transition-all flex flex-col px-3.5 py-2.5 gap-2 cursor-text ${
+            isExpandedEditor ? 'ring-1 ring-accent/30' : ''
           }`}
         >
           <input
@@ -1929,32 +1938,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             className="hidden"
           />
 
-          {/* Top Bar inside Input Box: Expand Button & Status */}
-          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-0.5 select-none">
-            <div className="flex items-center space-x-1.5">
-              {input.length > 0 ? (
-                <span className="text-[10px] text-amber-400 font-mono font-medium">
-                  {input.length} caracteres
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-500 font-sans flex items-center space-x-1">
-                  <Sparkles className="w-3 h-3 text-accent-light inline opacity-70" />
-                  <span>Chat com Tellus</span>
-                </span>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsExpandedEditor(!isExpandedEditor)}
-              className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white transition-colors flex items-center space-x-1 text-[10px]"
-              title={isExpandedEditor ? "Recolher caixa de texto" : "Expandir caixa de texto para digitação confortável"}
-            >
-              {isExpandedEditor ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{isExpandedEditor ? 'Recolher' : 'Expandir'}</span>
-            </button>
-          </div>
-
-          {/* Auto-Expanding Textarea (Full clear visibility) */}
+          {/* Auto-Expanding Textarea */}
           <textarea
             ref={textareaRef}
             value={input}
@@ -1971,85 +1955,73 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             }}
             onChange={(e) => {
               setInput(e.target.value);
-              // Trigger mention modal if user typed @
               if (e.target.value.endsWith('@')) {
                 onOpenMentionModal();
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Digite uma mensagem, instrução para o agente, ou use @ para citar outro chat..."
-            className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none leading-relaxed overflow-y-auto font-sans caret-amber-400 selection:bg-accent/40 selection:text-white"
-            style={{ minHeight: isExpandedEditor ? '240px' : '48px' }}
+            placeholder="Pergunte qualquer coisa, cole arquivos ou digite @ para citar um chat..."
+            className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none leading-relaxed overflow-y-auto font-sans caret-accent-light selection:bg-accent/40 selection:text-white"
+            style={{ minHeight: isExpandedEditor ? '220px' : '44px' }}
             autoFocus
           />
 
-          {/* Bottom Toolbar naturally below the text (NEVER covering text!) */}
-          <div className="pt-2 border-t border-card-border/60 flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center space-x-1.5 text-[10px] text-slate-400 font-mono flex-wrap gap-y-1">
+          {/* Minimal Bottom Composer Bar */}
+          <div className="pt-1.5 border-t border-card-border/40 flex items-center justify-between gap-2">
+            <div className="flex items-center space-x-1.5 text-[11px] text-slate-400">
+              {/* Attach Button */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                className="p-1.5 rounded-lg bg-panel hover:bg-card-border border border-card-border text-slate-300 hover:text-accent-light transition-all flex items-center space-x-1"
+                className="px-2.5 py-1 rounded-full hover:bg-panel border border-transparent hover:border-card-border/70 text-slate-400 hover:text-slate-200 transition-all flex items-center space-x-1 cursor-pointer"
                 title="Anexar arquivos (PDF, CSV, PNG, MP3, etc.)"
               >
                 <Paperclip className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-sans">
-                  {isUploading ? 'Processando...' : 'Anexar'}
+                <span>{isUploading ? 'Anexando...' : 'Anexar'}</span>
+              </button>
+
+              {/* Click-to-Expand Tools Toggle Pill */}
+              <button
+                type="button"
+                onClick={() => setIsComposerToolsExpanded(!isComposerToolsExpanded)}
+                className={`px-2.5 py-1 rounded-full border transition-all flex items-center space-x-1 cursor-pointer ${
+                  isComposerToolsExpanded
+                    ? 'bg-accent/20 border-accent/50 text-accent-light font-medium'
+                    : 'hover:bg-panel border-transparent hover:border-card-border/70 text-slate-400 hover:text-slate-200'
+                }`}
+                title="Clique para expandir ou recolher ferramentas rápidas (Capturar Tela, Janela, Anotar Chat, Voz, Citar, Handoff, Diagnóstico)"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Ferramentas</span>
+              </button>
+
+              {/* Expand Editor Toggle */}
+              <button
+                type="button"
+                onClick={() => setIsExpandedEditor(!isExpandedEditor)}
+                className="p-1 rounded-full hover:bg-panel text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                title={isExpandedEditor ? "Recolher caixa de texto" : "Expandir caixa de texto"}
+              >
+                {isExpandedEditor ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              </button>
+
+              {input.length > 0 && (
+                <span className="text-[10px] text-slate-500 font-mono pl-1">
+                  {input.length} chars
                 </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCaptureScreen}
-                disabled={isUploading}
-                className="p-1.5 rounded-lg bg-panel hover:bg-brand-cyan/20 border border-card-border hover:border-brand-cyan/40 text-brand-cyan transition-all flex items-center space-x-1"
-                title="Capturar a tela inteira do computador"
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-brand-cyan" />
-                <span className="text-[11px] font-sans font-medium">Capturar Tela</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onOpenWindowPicker}
-                disabled={isUploading}
-                className="p-1.5 rounded-lg bg-panel hover:bg-accent/20 border border-card-border hover:border-accent/40 text-accent-light transition-all flex items-center space-x-1"
-                title="Escolher uma janela específica (VS Code, Navegador, etc.) para inspecionar"
-              >
-                <Eye className="w-3.5 h-3.5 text-accent-light" />
-                <span className="text-[11px] font-sans font-medium">Escolher Janela</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleGenerateNote}
-                disabled={isGeneratingNote || messages.length === 0}
-                className="p-1.5 rounded-lg bg-panel hover:bg-emerald-500/20 border border-card-border hover:border-emerald-500/40 text-emerald-400 transition-all flex items-center space-x-1"
-                title="Criar nota estruturada no Notes Module (Vault) com os pontos chave e resumo da conversa (/nota)"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-sans font-medium">
-                  {isGeneratingNote ? 'Sintetizando...' : 'Anotar Chat'}
-                </span>
-              </button>
-
-              <span className="flex items-center space-x-1 pl-1 text-slate-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="font-semibold">{activeModel.split('/').pop()}</span>
-              </span>
-              <span className="hidden sm:inline text-slate-500">• Shift+Enter p/ nova linha</span>
+              )}
             </div>
 
             {isStreaming ? (
               <button
                 type="button"
                 onClick={onStopStreaming}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-rose-600/30 transition-all cursor-pointer"
-                title="Interromper processamento e desbloquear o chat"
+                className="px-3 py-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium flex items-center space-x-1.5 shadow-sm transition-all cursor-pointer"
+                title="Interromper processamento"
               >
                 <Square className="w-3 h-3 fill-current" />
-                <span>Interromper & Desbloquear</span>
+                <span>Parar</span>
               </button>
             ) : (
               <div className="flex items-center space-x-1.5">
@@ -2057,35 +2029,35 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <button
                   type="button"
                   onClick={handleToggleDictation}
-                  className={`p-2 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+                  className={`p-1.5 rounded-full border transition-all flex items-center justify-center cursor-pointer ${
                     isTranscribing
-                      ? 'bg-amber-600 text-white border-amber-500 ring-2 ring-amber-500/50 shadow-md shadow-amber-600/30 animate-pulse'
+                      ? 'bg-amber-600 text-white border-amber-500 animate-pulse'
                       : isDictating
-                      ? 'bg-purple-600 text-white border-purple-500 ring-2 ring-purple-500/50 shadow-md shadow-purple-600/30 animate-pulse'
-                      : 'bg-panel hover:bg-card-border border-card-border text-slate-300 hover:text-white'
+                      ? 'bg-accent text-white border-accent animate-pulse'
+                      : 'hover:bg-panel border-transparent text-slate-400 hover:text-slate-200'
                   }`}
-                  title={isTranscribing ? "Processando transcrição..." : isDictating ? "Parar ditado e transcrever fala" : "Ditar mensagem por voz (Reconhecimento de fala em pt-BR)"}
+                  title={isTranscribing ? "Processando transcrição..." : isDictating ? "Parar ditado" : "Ditar por voz"}
                 >
                   {isTranscribing ? (
                     <Sparkles className="w-4 h-4 text-amber-200 animate-spin" />
                   ) : isDictating ? (
                     <MicOff className="w-4 h-4 text-white" />
                   ) : (
-                    <Mic className="w-4 h-4 text-purple-400" />
+                    <Mic className="w-4 h-4" />
                   )}
                 </button>
 
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() && attachments.length === 0}
-                  className={`px-4 py-2 rounded-xl text-white text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-md ${
+                  className={`px-3.5 py-1.5 rounded-full text-white text-xs font-medium flex items-center space-x-1.5 transition-all ${
                     input.trim() || attachments.length > 0
-                      ? 'bg-accent hover:bg-accent-hover shadow-accent/30 cursor-pointer'
-                      : 'bg-card-border text-slate-500 cursor-not-allowed'
+                      ? 'bg-accent hover:bg-accent-hover shadow-sm cursor-pointer'
+                      : 'bg-card-border/60 text-slate-500 cursor-not-allowed'
                   }`}
                 >
                   <span>Enviar</span>
-                  <Send className="w-3.5 h-3.5" />
+                  <Send className="w-3 h-3" />
                 </button>
               </div>
             )}

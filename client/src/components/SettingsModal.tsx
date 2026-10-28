@@ -15,9 +15,19 @@ import {
   Volume2,
   Mic,
   Play,
-  Globe
+  Globe,
+  FolderOpen,
+  Cloud,
+  RefreshCw,
+  LogIn,
+  LogOut,
+  Laptop,
+  Lock,
+  Unlock,
+  HardDrive,
+  AlertTriangle
 } from 'lucide-react';
-import { AppConfig } from '../types';
+import { AppConfig, CloudProviderId, CloudStorageMonitorReport, CloudSyncConfig, SyncReport, VaultSecuritySummary } from '../types';
 import { api } from '../api';
 import { voiceService, VoiceOption, FISH_VOICE_PRESETS, VoiceProvider } from '../services/voiceService';
 
@@ -43,6 +53,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [fishAudioKey, setFishAudioKey] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [deletedNotesRetention, setDeletedNotesRetention] = useState<'30_days' | '90_days' | '120_days' | '1_year' | 'never'>('90_days');
+  const [vaultPath, setVaultPath] = useState<string>('');
+
+  // Google Login & Multi-PC Cloud Sync States
+  const [syncConfig, setSyncConfig] = useState<CloudSyncConfig>({
+    enabled: false,
+    autoSync: true,
+    syncNotes: true,
+    syncInk: true,
+    syncChats: true,
+    syncAiConfig: true,
+    e2eeEnabled: true,
+    isolateAccountNotes: true,
+    cloudMirrorPath: ''
+  });
+  const [googleEmailInput, setGoogleEmailInput] = useState('');
+  const [googleNameInput, setGoogleNameInput] = useState('');
+  const [vaultPassphraseInput, setVaultPassphraseInput] = useState('');
+  const [browserAuthChallenge, setBrowserAuthChallenge] = useState<string | null>(null);
+  const [browserAuthUrl, setBrowserAuthUrl] = useState<string | null>(null);
+  const [vaultSecurity, setVaultSecurity] = useState<VaultSecuritySummary | null>(null);
+  const [detectedCloudFolders, setDetectedCloudFolders] = useState<Array<{ provider: string; providerId?: string; label?: string; path: string; available?: boolean }>>([]);
+  const [storageMonitor, setStorageMonitor] = useState<CloudStorageMonitorReport | null>(null);
+  const [discoveredAccounts, setDiscoveredAccounts] = useState<Array<{ email: string; name?: string; provider: string; providerLabel?: string; mirrorPath?: string; source?: string }>>([]);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
+  const [lastSyncReport, setLastSyncReport] = useState<SyncReport | null>(null);
+  const [showAddAnotherAccount, setShowAddAnotherAccount] = useState(false);
+  const [lanUrls, setLanUrls] = useState<string[]>([]);
+  const [peerUrlInput, setPeerUrlInput] = useState('');
+  const [isPeerSyncing, setIsPeerSyncing] = useState(false);
+  const [peerSyncStatusMsg, setPeerSyncStatusMsg] = useState<string | null>(null);
+  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
+  const [updateSteps, setUpdateSteps] = useState<string[]>([]);
   
   // Localization & Strict Language States
   const [locale, setLocale] = useState<string>('pt-BR');
@@ -72,6 +114,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setFishAudioKey(config.keys.fishAudio || '');
       if (config.theme) setTheme(config.theme);
       if (config.deletedNotesRetention) setDeletedNotesRetention(config.deletedNotesRetention);
+      if (config.vaultPath) setVaultPath(config.vaultPath);
+      if (config.syncConfig) {
+        setSyncConfig(config.syncConfig);
+        if (config.syncConfig.googleAccount?.email) {
+          setGoogleEmailInput(config.syncConfig.googleAccount.email);
+          setGoogleNameInput(config.syncConfig.googleAccount.name || '');
+        }
+      }
       if (config.locale) setLocale(config.locale);
       if (config.language) setLanguage(config.language);
       if (config.country) setCountry(config.country);
@@ -79,6 +129,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (config.voiceSettings?.provider) setVoiceProvider(config.voiceSettings.provider);
       if (config.voiceSettings?.fishAudioVoiceId) setFishVoiceId(config.voiceSettings.fishAudioVoiceId);
       if (config.voiceSettings?.fishAudioModel) setFishModel(config.voiceSettings.fishAudioModel);
+    }
+
+    if (isOpen) {
+      api.getSyncStatus().then(status => {
+        if (status.vaultPath && !vaultPath) setVaultPath(status.vaultPath);
+        if (status.detectedFolders) setDetectedCloudFolders(status.detectedFolders);
+        if (status.vaultSecurity) setVaultSecurity(status.vaultSecurity);
+        if (status.storageMonitor) setStorageMonitor(status.storageMonitor);
+        if (Array.isArray(status.discoveredAccounts)) setDiscoveredAccounts(status.discoveredAccounts);
+        if (status.syncConfig) {
+          setSyncConfig(prev => ({
+            ...prev,
+            ...status.syncConfig,
+            cloudMirrorPath: status.syncConfig?.cloudMirrorPath || status.effectiveMirrorPath
+          }));
+          if (status.syncConfig.peerSyncUrl) {
+            setPeerUrlInput(status.syncConfig.peerSyncUrl);
+          }
+        }
+      }).catch(() => {});
+
+      api.getNetworkSyncInfo().then(net => {
+        if (Array.isArray(net.lanUrls)) setLanUrls(net.lanUrls);
+        if (net.peerSyncUrl && !peerUrlInput) setPeerUrlInput(net.peerSyncUrl);
+      }).catch(() => {});
     }
 
     setVoiceProvider(voiceService.getVoiceProvider());
@@ -94,9 +169,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
     loadVoices();
     voiceService.onVoicesReady(loadVoices);
-  }, [config]);
+  }, [config, isOpen]);
+
+  // Poll external browser authentication status while waiting for user to finish in browser
+  useEffect(() => {
+    if (!browserAuthChallenge || !isOpen) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.pollBrowserGoogleAuth(browserAuthChallenge);
+        if (res.status === 'completed') {
+          setBrowserAuthChallenge(null);
+          setBrowserAuthUrl(null);
+          if (res.syncConfig) setSyncConfig(res.syncConfig);
+          if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+          if (res.storageMonitor) setStorageMonitor(res.storageMonitor);
+          const updatedCfg = await api.getConfig();
+          onConfigUpdated(updatedCfg);
+          window.dispatchEvent(new Event('tellus:vault-security-changed'));
+        } else if (res.status === 'expired' || res.status === 'failed') {
+          setBrowserAuthChallenge(null);
+        }
+      } catch {}
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [browserAuthChallenge, isOpen, onConfigUpdated]);
 
   if (!isOpen) return null;
+
+  const formatBytes = (bytes: number | null | undefined): string => {
+    if (bytes === null || bytes === undefined || isNaN(bytes)) return '—';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+
+  const handleSelectCloudProvider = async (provider: CloudProviderId) => {
+    try {
+      const res = await api.selectCloudProvider(provider);
+      if (res.syncConfig) {
+        setSyncConfig(prev => ({
+          ...prev,
+          ...res.syncConfig,
+          cloudProvider: provider,
+          cloudMirrorPath: res.syncConfig.cloudMirrorPath || prev.cloudMirrorPath
+        }));
+      }
+      if (res.storageMonitor) setStorageMonitor(res.storageMonitor);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+    } catch (err: any) {
+      alert(`Erro ao selecionar provedor Cloud: ${err.message}`);
+    }
+  };
+
+  const handleLock2FAOnly = async () => {
+    try {
+      const res = await api.lock2FAVaultKeyOnly();
+      if (res.syncConfig) setSyncConfig(res.syncConfig);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new Event('tellus:vault-security-changed'));
+      window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+    } catch (err: any) {
+      alert(`Erro ao trancar Chave 2FA: ${err.message}`);
+    }
+  };
 
   const handleTestVoice = () => {
     if (isTestingVoice) {
@@ -123,6 +262,244 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
   };
 
+  const handlePickVaultDirectory = async () => {
+    try {
+      const res = await api.pickVaultDirectory();
+      if (!res.cancelled && res.vaultPath) {
+        setVaultPath(res.vaultPath);
+        if (res.config) onConfigUpdated(res.config);
+        window.dispatchEvent(new Event('tellus:vault-security-changed'));
+      }
+    } catch (err: any) {
+      alert(`Erro ao selecionar pasta do Cofre: ${err.message}`);
+    }
+  };
+
+  const handlePickMirrorDir = async () => {
+    try {
+      const res = await api.pickSyncMirrorDirectory();
+      if (!res.cancelled && res.cloudMirrorPath) {
+        setSyncConfig(prev => ({
+          ...prev,
+          ...(res.syncConfig || {}),
+          cloudMirrorPath: res.cloudMirrorPath,
+          enabled: true
+        }));
+        api.getStorageMonitorReport().then(setStorageMonitor).catch(() => {});
+      }
+    } catch (err: any) {
+      alert(`Erro ao escolher pasta de sincronização: ${err.message}`);
+    }
+  };
+
+  const handleLaunchBrowserAuth = async (providerOverride?: string) => {
+    try {
+      const chosenProvider = providerOverride || syncConfig.cloudProvider || 'google_drive';
+      const res = await api.startBrowserGoogleAuth(chosenProvider);
+      setBrowserAuthChallenge(res.challenge);
+      setBrowserAuthUrl(res.authUrl);
+    } catch (err: any) {
+      alert(`Erro ao iniciar login no navegador externo: ${err.message}`);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    if (!googleEmailInput.trim()) {
+      alert('Informe o e-mail da sua conta Google ou Microsoft.');
+      return;
+    }
+    if (!vaultPassphraseInput || vaultPassphraseInput.trim().length < 6) {
+      alert(
+        'Segurança 2FA Obrigatória: Informe sua Chave Encriptada (2º Fator — mínimo 6 caracteres) criada na 1ª vez para destrancar suas notas, chats e desenhos Ink.'
+      );
+      return;
+    }
+    setIsSyncingNow(true);
+    try {
+      const isMs =
+        syncConfig.cloudProvider === 'microsoft_onedrive' ||
+        /@(outlook|hotmail|live|msn)\./i.test(googleEmailInput.trim());
+      const res = await api.loginGoogle({
+        email: googleEmailInput.trim(),
+        name: googleNameInput.trim() || googleEmailInput.split('@')[0],
+        provider: syncConfig.cloudProvider || (isMs ? 'microsoft_onedrive' : 'google_drive'),
+        vaultPassphrase: vaultPassphraseInput,
+        cloudMirrorPath: syncConfig.cloudMirrorPath
+      });
+      setSyncConfig(res.syncConfig);
+      setLastSyncReport(res.report);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      if ((res as any).storageMonitor) setStorageMonitor((res as any).storageMonitor);
+      setVaultPassphraseInput('');
+      setShowAddAnotherAccount(false);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new Event('tellus:vault-security-changed'));
+    } catch (err: any) {
+      alert(`Erro na autenticação 2FA: ${err.message}`);
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      const res = await api.logoutGoogle();
+      setSyncConfig(res.syncConfig);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      setLastSyncReport(null);
+      setShowAddAnotherAccount(false);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new Event('tellus:vault-security-changed'));
+      window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+    } catch (err: any) {
+      alert(`Erro ao desconectar conta Google: ${err.message}`);
+    }
+  };
+
+  const handleSwitchSavedAccount = async (targetEmailOrLocal: string) => {
+    setIsSyncingNow(true);
+    try {
+      const res = await api.switchAccount(targetEmailOrLocal);
+      setSyncConfig(res.syncConfig);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      if (res.report) setLastSyncReport(res.report);
+      setShowAddAnotherAccount(false);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new Event('tellus:vault-security-changed'));
+      window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+    } catch (err: any) {
+      const pass = window.prompt(
+        `Informe a Chave/Senha Mestra do Cofre para desbloquear as notas de "${targetEmailOrLocal}":`
+      );
+      if (pass && pass.trim()) {
+        try {
+          const retry = await api.switchAccount(targetEmailOrLocal, pass.trim());
+          setSyncConfig(retry.syncConfig);
+          if (retry.vaultSecurity) setVaultSecurity(retry.vaultSecurity);
+          if (retry.report) setLastSyncReport(retry.report);
+          setShowAddAnotherAccount(false);
+          const updatedCfg = await api.getConfig();
+          onConfigUpdated(updatedCfg);
+          window.dispatchEvent(new Event('tellus:vault-security-changed'));
+          window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+        } catch (retryErr: any) {
+          alert(retryErr.message || 'Chave Mestra incorreta.');
+        }
+      }
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  const handleRemoveSavedAccount = async (email: string) => {
+    if (!window.confirm(`Remover "${email}" da lista de contas salvas neste computador?`)) return;
+    try {
+      const res = await api.removeSavedAccount(email);
+      setSyncConfig(res.syncConfig);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleChangeVaultScope = async (scope: 'all_accessible' | 'account_only' | 'local_only') => {
+    try {
+      const res = await api.setVaultViewScope(scope);
+      setSyncConfig(res.syncConfig);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleSyncWithPeer = async () => {
+    if (!peerUrlInput.trim()) {
+      alert('Informe o endereço IP da rede local do 2º computador/notebook (ex: http://192.168.15.10:3001)');
+      return;
+    }
+    setIsPeerSyncing(true);
+    setPeerSyncStatusMsg(null);
+    try {
+      const res = await api.syncWithPeerDevice(peerUrlInput.trim(), true);
+      if (res.syncConfig) setSyncConfig(res.syncConfig);
+      if (res.vaultSecurity) setVaultSecurity(res.vaultSecurity);
+      if (res.success) {
+        setPeerSyncStatusMsg(
+          `✓ Co-Edição sincronizada com ${res.peerUrl}: ${res.notesUpdated} nota(s) e ${res.inksUpdated} folha(s) Ink mescladas!`
+        );
+        const updatedCfg = await api.getConfig();
+        onConfigUpdated(updatedCfg);
+        window.dispatchEvent(new CustomEvent('tellus:vault-updated'));
+      } else {
+        setPeerSyncStatusMsg(`⚠️ ${res.error || 'Não foi possível conectar ao 2º dispositivo.'}`);
+      }
+    } catch (err: any) {
+      setPeerSyncStatusMsg(`⚠️ Erro: ${err.message}`);
+    } finally {
+      setIsPeerSyncing(false);
+    }
+  };
+
+  const handleVaultOwnership = async (mode: 'bind_to_account' | 'release_to_local_pc') => {
+    try {
+      const res = await api.setVaultNotesOwnership(mode);
+      setVaultSecurity(res.vaultSecurity);
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new Event('tellus:vault-security-changed'));
+    } catch (err: any) {
+      alert(`Erro ao atualizar segurança das notas: ${err.message}`);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setIsSyncingNow(true);
+    try {
+      await api.updateConfig({ vaultPath: vaultPath.trim() || undefined, syncConfig });
+      const report = await api.syncNow();
+      setLastSyncReport(report);
+      if (report.syncConfig) setSyncConfig(report.syncConfig);
+      if (report.vaultSecurity) setVaultSecurity(report.vaultSecurity);
+      if ((report as any).storageMonitor) {
+        setStorageMonitor((report as any).storageMonitor);
+      } else {
+        api.getStorageMonitorReport().then(setStorageMonitor).catch(() => {});
+      }
+      const updatedCfg = await api.getConfig();
+      onConfigUpdated(updatedCfg);
+      window.dispatchEvent(new Event('tellus:vault-security-changed'));
+    } catch (err: any) {
+      alert(`Falha ao sincronizar: ${err.message}`);
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  const handleUpdateAndRestart = async () => {
+    if (isUpdatingApp) return;
+    setIsUpdatingApp(true);
+    setUpdateSteps(['Sincronizando dados e baixando versão mais recente...']);
+    try {
+      const res = await api.updateAndRestartApp();
+      setUpdateSteps(res.steps || [res.message]);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err: any) {
+      setUpdateSteps([`Erro ao atualizar: ${err.message}`]);
+      setIsUpdatingApp(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -140,6 +517,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const updated = await api.updateConfig({
         theme,
         deletedNotesRetention,
+        vaultPath: vaultPath.trim() || undefined,
+        syncConfig,
         locale,
         language,
         country,
@@ -180,8 +559,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <img src="/logo.png" alt="Tellus" className="w-full h-full object-contain" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-slate-100">Configuração de Chaves e Provedores</h3>
-              <p className="text-[11px] text-slate-400">Armazenamento 100% local e seguro na sua máquina.</p>
+              <h3 className="font-bold text-sm text-slate-100">Configuração do Tellus, Cofre & Nuvem</h3>
+              <p className="text-[11px] text-slate-400">Pasta de notas, Login Google Multi-PC, Atualizações e Chaves de IA.</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-card-border text-slate-400 hover:text-white transition-colors">
@@ -193,12 +572,704 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="p-3.5 bg-brand-cyan/10 border-b border-brand-cyan/20 flex items-start space-x-2.5">
           <ShieldCheck className="w-4 h-4 text-brand-cyan shrink-0 mt-0.5" />
           <p className="text-[11px] text-slate-300 leading-relaxed">
-            <strong className="text-brand-cyan">Privacidade Garantida:</strong> Suas chaves de API nunca passam por nenhum servidor de terceiros. As requisições saem diretamente do seu computador para a OpenRouter, Google, Anthropic ou OpenAI via HTTPS criptografado.
+            <strong className="text-brand-cyan">Privacidade & Portabilidade:</strong> Suas notas (<code>.md</code> e <code>.ink.json</code>), chats e IAs ficam no seu Cofre local e podem ser sincronizados entre seu PC principal e seu Notebook com touch/caneta.
           </p>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSave} className="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
+        <form onSubmit={handleSave} className="p-4 space-y-4 overflow-y-auto max-h-[65vh]">
+          {/* 1. Vault Folder Selection (Escolher Pasta ao instalar no PC / Notebook) */}
+          <div className="space-y-2.5 p-3.5 rounded-xl bg-panel border border-brand-cyan/30">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-100 flex items-center space-x-2">
+                <FolderOpen className="w-4 h-4 text-brand-cyan" />
+                <span>Pasta do Cofre de Notas (Tellus Vault)</span>
+              </label>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/30 font-mono">
+                .md + .ink.json
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Escolha onde suas notas, cadernos e anotações de caneta (Ink) ficam salvos neste computador. Ao instalar em outro PC, basta escolher a pasta desejada aqui.
+            </p>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={vaultPath}
+                onChange={(e) => setVaultPath(e.target.value)}
+                placeholder="Ex: C:\Users\SeuUsuario\Documents\Tellus Vault"
+                className="flex-1 bg-background border border-card-border rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-brand-cyan"
+              />
+              <button
+                type="button"
+                onClick={handlePickVaultDirectory}
+                className="px-3 py-2 rounded-xl bg-brand-cyan/15 hover:bg-brand-cyan/25 border border-brand-cyan/40 text-brand-cyan text-xs font-semibold flex items-center space-x-1.5 shrink-0 transition-all"
+                title="Abrir seletor de pastas do Windows"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span>Escolher Pasta...</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Multi-Cloud Encapsulated Sync, Platform Auth (Google / Microsoft) + 2FA Key & Storage Monitor */}
+          <div className="space-y-3 p-3.5 rounded-xl bg-panel border border-indigo-500/30">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-100 flex items-center space-x-2">
+                <Cloud className="w-4 h-4 text-indigo-400" />
+                <span>Cápsula Cloud Multi-PC (Google / Microsoft) + Chave Encriptada 2FA</span>
+              </label>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border flex items-center space-x-1 ${
+                syncConfig.googleAccount && syncConfig.googleAccount.twoFactorUnlocked !== false
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}>
+                {syncConfig.googleAccount && syncConfig.googleAccount.twoFactorUnlocked !== false ? (
+                  <>
+                    <Lock className="w-3 h-3 text-emerald-400" />
+                    <span>2FA Destrancado: {syncConfig.googleAccount.email}</span>
+                  </>
+                ) : syncConfig.googleAccount ? (
+                  <>
+                    <Lock className="w-3 h-3 text-amber-400" />
+                    <span>Aguardando Chave 2FA: {syncConfig.googleAccount.email}</span>
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="w-3 h-3 text-amber-400" />
+                    <span>Modo Somente Arquivos Locais</span>
+                  </>
+                )}
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Escolha sua nuvem (<strong>Google Drive</strong>, <strong>Microsoft OneDrive</strong> ou <strong>Dropbox</strong>) para enviar, visualizar e <strong>editar simultaneamente</strong> suas notas (<code>.md</code>), traços de caneta (<code>.ink.json</code>) e chats em 2 PCs <strong>sem precisar divulgar nenhum IP</strong>. O acesso exige login na plataforma (1º Fator) + sua <strong>Chave Encriptada 2FA</strong> criada na 1ª vez (2º Fator).
+            </p>
+
+            {/* PASSO 1: Escolher qual Cloud usar */}
+            <div className="p-2.5 rounded-xl bg-background/80 border border-card-border space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                  <span>1. Escolha qual Cloud encapsulará seus arquivos:</span>
+                </span>
+                <span className="text-[10px] text-brand-cyan font-mono">
+                  Sem exposição de IP • AES-256-GCM
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {[
+                  {
+                    id: 'google_drive' as CloudProviderId,
+                    title: 'Google Drive',
+                    subtitle: 'Conta Google',
+                    badge: detectedCloudFolders.some(d => d.providerId === 'google_drive') ? 'Detectado no PC' : 'Recomendado'
+                  },
+                  {
+                    id: 'microsoft_onedrive' as CloudProviderId,
+                    title: 'Microsoft OneDrive',
+                    subtitle: 'Conta Microsoft',
+                    badge: detectedCloudFolders.some(d => d.providerId === 'microsoft_onedrive') ? 'Detectado no PC' : 'Integrado Windows'
+                  },
+                  {
+                    id: 'dropbox' as CloudProviderId,
+                    title: 'Dropbox Cloud',
+                    subtitle: 'Pasta Dropbox',
+                    badge: detectedCloudFolders.some(d => d.providerId === 'dropbox') ? 'Detectado no PC' : 'Multi-PC'
+                  },
+                  {
+                    id: 'custom_cloud' as CloudProviderId,
+                    title: 'Outra Cloud',
+                    subtitle: 'Pasta Personalizada',
+                    badge: 'iCloud / Mega / NAS'
+                  }
+                ].map((prov) => {
+                  const currentProv = syncConfig.cloudProvider || 'google_drive';
+                  const isSelected = currentProv === prov.id;
+                  return (
+                    <button
+                      key={prov.id}
+                      type="button"
+                      onClick={() => handleSelectCloudProvider(prov.id)}
+                      className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-500/20 border-indigo-400 text-white shadow-sm'
+                          : 'bg-card border-card-border text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold truncate">{prov.title}</div>
+                      <div className="text-[9px] text-slate-400 truncate">{prov.subtitle}</div>
+                      <div className={`text-[9px] mt-1 font-mono truncate ${isSelected ? 'text-brand-cyan' : 'text-indigo-300/80'}`}>
+                        {prov.badge}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Caminho Encapsulado da Cloud Selecionada */}
+              <div className="flex items-center space-x-2 pt-1">
+                <input
+                  type="text"
+                  value={syncConfig.cloudMirrorPath || ''}
+                  onChange={(e) => setSyncConfig(prev => ({ ...prev, cloudMirrorPath: e.target.value, enabled: true }))}
+                  placeholder="Pasta da Cloud selecionada (ex: G:\Meu Drive\Tellus Cloud Sync ou OneDrive\Tellus Cloud Sync)"
+                  className="flex-1 bg-background border border-card-border rounded-xl px-3 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-400"
+                />
+                <button
+                  type="button"
+                  onClick={handlePickMirrorDir}
+                  className="px-2.5 py-1.5 rounded-xl bg-card hover:bg-card-border border border-card-border text-slate-200 text-xs flex items-center space-x-1 shrink-0 cursor-pointer"
+                  title="Escolher manualmente a pasta do Google Drive, OneDrive ou outra Cloud neste PC"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Pasta Cloud...</span>
+                </button>
+              </div>
+            </div>
+
+            {/* PASSO 2: Login na Plataforma (1º Fator) + Chave Encriptada 2FA (2º Fator) & Troca de Contas */}
+            <div className="p-2.5 rounded-xl bg-background/80 border border-card-border space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-1.5">
+                <span className="text-[11px] font-bold text-slate-200">
+                  2. Autenticação na Plataforma (Google / Microsoft) + Chave 2FA:
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {syncConfig.googleAccount && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchSavedAccount('local_only')}
+                      className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-300 text-[10px] font-semibold transition-all cursor-pointer"
+                      title="Sai das contas e mostra apenas as notas locais livres do PC"
+                    >
+                      💻 Modo Somente Arquivos Locais
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGoogleEmailInput('');
+                      setGoogleNameInput('');
+                      setVaultPassphraseInput('');
+                      setShowAddAnotherAccount(!showAddAnotherAccount);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 text-[10px] font-semibold transition-all cursor-pointer"
+                  >
+                    {showAddAnotherAccount ? 'Fechar Login' : '+ Outra Conta (Google / Microsoft)'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Saved Accounts List */}
+              {Array.isArray(syncConfig.savedAccounts) && syncConfig.savedAccounts.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  {syncConfig.savedAccounts.map((acc) => {
+                    const isCurrent =
+                      syncConfig.googleAccount?.email?.toLowerCase() === acc.email.toLowerCase();
+                    const noteCount =
+                      acc.accountHash && vaultSecurity?.countsByAccountHash
+                        ? vaultSecurity.countsByAccountHash[acc.accountHash] || 0
+                        : 0;
+                    const provBadge =
+                      acc.provider === 'microsoft_onedrive' || /@(outlook|hotmail|live|msn)\./i.test(acc.email)
+                        ? 'Microsoft'
+                        : 'Google';
+                    return (
+                      <div
+                        key={acc.email}
+                        className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border text-xs ${
+                          isCurrent
+                            ? 'bg-indigo-500/15 border-indigo-500/40 text-white'
+                            : 'bg-card border-card-border text-slate-300'
+                        }`}
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="font-semibold text-[11px] flex items-center gap-1.5 truncate">
+                            <span>{acc.name}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-200 font-mono">
+                              {provBadge}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-panel border border-card-border text-slate-300 font-mono">
+                              {noteCount} nota(s)
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono truncate">{acc.email}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isCurrent ? (
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono">
+                              2FA Ativo
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSwitchSavedAccount(acc.email)}
+                              disabled={isSyncingNow}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold cursor-pointer"
+                            >
+                              Destrancar Conta
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSavedAccount(acc.email)}
+                            className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                            title="Remover esta conta da lista salva neste PC"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Filter Scope for Vault Notes */}
+              <div className="pt-1.5 border-t border-card-border/60 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-300 font-medium">
+                  Filtro de Notas Visíveis no Tellus Notes:
+                </span>
+                <div className="flex items-center gap-1">
+                  {[
+                    { id: 'all_accessible', label: 'Todas Acessíveis (Conta + PC)' },
+                    { id: 'account_only', label: 'Só da Conta Logada' },
+                    { id: 'local_only', label: `Só Arquivos Locais (${vaultSecurity?.localPcNotesCount ?? 0})` }
+                  ].map((tab) => {
+                    const activeScope = syncConfig.googleAccount
+                      ? syncConfig.vaultViewScope || 'all_accessible'
+                      : 'local_only';
+                    const isSelected = activeScope === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => handleChangeVaultScope(tab.id as any)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-brand-cyan/20 border border-brand-cyan/50 text-brand-cyan'
+                            : 'bg-card border border-card-border text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {syncConfig.googleAccount && syncConfig.googleAccount.twoFactorUnlocked !== false && !showAddAnotherAccount ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-background/80 border border-emerald-500/30 flex-wrap gap-2">
+                  <div className="flex items-center space-x-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-xs font-bold text-indigo-300 shrink-0">
+                      {syncConfig.googleAccount.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-slate-200 truncate flex items-center space-x-1.5">
+                        <span>{syncConfig.googleAccount.name}</span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">
+                          2FA #{syncConfig.googleAccount.accountHash?.slice(0, 8) || 'E2EE'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-emerald-400 font-mono truncate">{syncConfig.googleAccount.email}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleSyncNow}
+                      disabled={isSyncingNow}
+                      className="px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNow ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingNow ? 'Sincronizando...' : 'Sincronizar Cloud'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLock2FAOnly}
+                      className="px-2 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
+                      title="Tranca apenas a Chave Encriptada 2FA na memória, exigindo a chave novamente para ver as notas desta conta"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Trancar 2FA</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogout}
+                      className="px-2 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-[11px] font-semibold flex items-center space-x-1 transition-all cursor-pointer"
+                      title="Trancar notas vinculadas e sair da conta neste PC"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Sair</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Vault Ownership Controls when Authenticated */}
+                {vaultSecurity && (
+                  <div className="p-2.5 rounded-xl bg-background/70 border border-card-border space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-slate-200 flex items-center space-x-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-brand-cyan" />
+                        <span>Isolamento de Propriedade das Notas (Protegidas por 2FA):</span>
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        {vaultSecurity.linkedToActiveAccountCount} na cápsula da conta • {vaultSecurity.localPcNotesCount} locais do PC
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleVaultOwnership('bind_to_account')}
+                        className="px-2.5 py-1 rounded-lg bg-brand-cyan/15 hover:bg-brand-cyan/25 border border-brand-cyan/40 text-brand-cyan text-[11px] font-semibold transition-all cursor-pointer"
+                        title="Encapsula todas as notas atuais na sua conta (exigirão login + Chave 2FA em qualquer PC)"
+                      >
+                        🔒 Encapsular Notas na Minha Conta + 2FA ({vaultSecurity.localPcNotesCount})
+                      </button>
+                      {vaultSecurity.linkedToActiveAccountCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handleVaultOwnership('release_to_local_pc')}
+                          className="px-2.5 py-1 rounded-lg bg-card hover:bg-card-border border border-card-border text-slate-300 text-[11px] transition-all cursor-pointer"
+                          title="Transforma as notas vinculadas em notas locais visíveis neste PC mesmo desconectado"
+                        >
+                          🔓 Liberar para Vault Local do PC
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2.5 p-3 rounded-xl bg-background/80 border border-card-border">
+                {/* Primary Option: External System Browser Login (Google or Microsoft + 2FA Key) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleLaunchBrowserAuth('google_drive')}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs font-bold flex items-center justify-center space-x-2 shadow-lg shadow-indigo-500/20 transition-all cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4 shrink-0" />
+                    <span>1º Fator Google + Chave 2FA</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLaunchBrowserAuth('microsoft_onedrive')}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center justify-center space-x-2 shadow-lg shadow-sky-500/20 transition-all cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4 shrink-0" />
+                    <span>1º Fator Microsoft + Chave 2FA</span>
+                  </button>
+                </div>
+
+                {browserAuthChallenge && (
+                  <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-[11px] text-indigo-200 flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-cyan shrink-0" />
+                      <span>Conclua a autenticação da plataforma + Chave 2FA na guia aberta no seu navegador...</span>
+                    </div>
+                    {browserAuthUrl && (
+                      <a
+                        href={browserAuthUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-cyan underline font-semibold ml-2 shrink-0"
+                      >
+                        Reabrir janela
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Auto-Discovered Accounts on Windows (OneDrive / Google Drive) */}
+                {discoveredAccounts.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-400">Contas detectadas neste Windows:</span>
+                    {discoveredAccounts.map((dAcc) => {
+                      const isMsAcc = dAcc.provider === 'microsoft_onedrive' || dAcc.provider === 'microsoft';
+                      return (
+                        <button
+                          key={dAcc.email}
+                          type="button"
+                          onClick={() => {
+                            setGoogleEmailInput(dAcc.email);
+                            setGoogleNameInput(dAcc.name || dAcc.email.split('@')[0]);
+                            handleSelectCloudProvider(
+                              isMsAcc ? 'microsoft_onedrive' : 'google_drive'
+                            );
+                          }}
+                          className="px-2 py-0.5 rounded-full bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-200 text-[10px] font-mono cursor-pointer transition-all"
+                        >
+                          {isMsAcc ? '🟦' : '🟩'} {dAcc.email}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Direct Unlock with Platform Email + Mandatory 2FA Encrypted Key */}
+                <div className="pt-1.5 border-t border-card-border/60 space-y-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Ou destranque direto informando a Conta + sua Chave Encriptada 2FA (2º Fator):
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="email"
+                      value={googleEmailInput}
+                      onChange={(e) => setGoogleEmailInput(e.target.value)}
+                      placeholder="E-mail Google ou Microsoft (ex: voce@gmail.com)"
+                      className="bg-card border border-card-border rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-400"
+                    />
+                    <input
+                      type="text"
+                      value={googleNameInput}
+                      onChange={(e) => setGoogleNameInput(e.target.value)}
+                      placeholder="Nome de exibição (opcional)"
+                      className="bg-card border border-card-border rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-400"
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="password"
+                      value={vaultPassphraseInput}
+                      onChange={(e) => setVaultPassphraseInput(e.target.value)}
+                      placeholder="🔐 Chave Encriptada 2FA (criada na 1ª vez — mín. 6 caracteres)"
+                      className="flex-1 bg-card border border-indigo-500/40 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-brand-cyan"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={isSyncingNow}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1.5 shrink-0 transition-all cursor-pointer"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Validar 2FA & Abrir</span>
+                    </button>
+                  </div>
+                </div>
+
+                {vaultSecurity && vaultSecurity.lockedForeignNotesCount > 0 && (
+                  <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 flex items-center space-x-2">
+                    <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>
+                      Existem <strong>{vaultSecurity.lockedForeignNotesCount} notas encapsuladas</strong> protegidas por Chave 2FA ocultas neste PC. Autentique a conta + Chave 2FA para acessá-las.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* PASSO 3: Monitor de Armazenamento, Tamanho Encapsulado & Alerta de Limite da Conta Cloud */}
+            {storageMonitor && (
+              <div className={`p-3 rounded-xl border space-y-2.5 ${
+                storageMonitor.isCriticalLimit
+                  ? 'bg-rose-500/10 border-rose-500/40'
+                  : storageMonitor.isNearLimit
+                  ? 'bg-amber-500/10 border-amber-500/40'
+                  : 'bg-background/80 border-card-border'
+              }`}>
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <span className="text-[11px] font-bold text-slate-100 flex items-center gap-1.5">
+                    <HardDrive className="w-3.5 h-3.5 text-brand-cyan" />
+                    <span>3. Monitor de Armazenamento ({storageMonitor.providerLabel}) & Cápsula Tellus</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-slate-300">
+                      Cápsula Tellus: <strong className="text-brand-cyan">{formatBytes(storageMonitor.tellusBreakdown.totalTellusBytes)}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => api.getStorageMonitorReport().then(setStorageMonitor).catch(() => {})}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-card hover:bg-card-border border border-card-border text-slate-300 cursor-pointer"
+                      title="Atualizar leitura de espaço e tamanho dos arquivos"
+                    >
+                      ↻ Atualizar
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quota Bar of the Cloud Account / Drive */}
+                {storageMonitor.accountTotalBytes > 0 ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono">
+                      <span className="text-slate-300">
+                        Uso total da conta/unidade: <strong>{formatBytes(storageMonitor.accountUsedBytes)}</strong> de <strong>{formatBytes(storageMonitor.accountTotalBytes)}</strong>
+                        {storageMonitor.accountFreeBytes >= 0 && (
+                          <span className="text-slate-400"> ({formatBytes(storageMonitor.accountFreeBytes)} livres)</span>
+                        )}
+                      </span>
+                      <span className={`font-bold ${
+                        storageMonitor.isCriticalLimit
+                          ? 'text-rose-400'
+                          : storageMonitor.isNearLimit
+                          ? 'text-amber-300'
+                          : 'text-emerald-400'
+                      }`}>
+                        {storageMonitor.usagePercent}% usado
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-card overflow-hidden border border-card-border/70">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          storageMonitor.isCriticalLimit
+                            ? 'bg-gradient-to-r from-rose-500 to-red-500'
+                            : storageMonitor.isNearLimit
+                            ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                            : 'bg-gradient-to-r from-brand-cyan to-emerald-400'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(2, storageMonitor.usagePercent || 0))}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    Espaço encapsulado na nuvem sincronizada: <strong>{formatBytes(storageMonitor.tellusBreakdown.cloudCapsuleBytes)}</strong>
+                  </div>
+                )}
+
+                {/* Near Limit Warning Alert */}
+                {storageMonitor.warningMessage && (
+                  <div className={`p-2 rounded-lg border text-[11px] flex items-start gap-2 ${
+                    storageMonitor.isCriticalLimit
+                      ? 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+                      : 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                  }`}>
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{storageMonitor.warningMessage}</span>
+                  </div>
+                )}
+
+                {/* Encapsulated Size Breakdown by Category */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-0.5">
+                  <div className="p-2 rounded-lg bg-card/80 border border-card-border/70">
+                    <div className="text-[10px] text-slate-400">Notas (.md)</div>
+                    <div className="text-xs font-bold font-mono text-slate-100">
+                      {formatBytes(storageMonitor.tellusBreakdown.notesBytes)}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">
+                      {storageMonitor.tellusBreakdown.notesCount} arquivo(s)
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-card/80 border border-card-border/70">
+                    <div className="text-[10px] text-slate-400">Caneta (.ink.json)</div>
+                    <div className="text-xs font-bold font-mono text-brand-cyan">
+                      {formatBytes(storageMonitor.tellusBreakdown.inkBytes)}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">
+                      {storageMonitor.tellusBreakdown.inkCount} folha(s) Ink
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-card/80 border border-card-border/70">
+                    <div className="text-[10px] text-slate-400">Chats & IAs</div>
+                    <div className="text-xs font-bold font-mono text-indigo-300">
+                      {formatBytes(storageMonitor.tellusBreakdown.chatsBytes)}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">
+                      {storageMonitor.tellusBreakdown.chatsCount} sessão(ões)
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-card/80 border border-card-border/70">
+                    <div className="text-[10px] text-slate-400">Anexos / Mídia</div>
+                    <div className="text-xs font-bold font-mono text-emerald-300">
+                      {formatBytes(storageMonitor.tellusBreakdown.attachmentsBytes)}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-mono">
+                      {storageMonitor.tellusBreakdown.attachmentsCount} item(ns)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Co-Edição Simultânea via Cápsula Cloud (Zero Exposição de IP) */}
+            <div className="p-2.5 rounded-xl bg-background/70 border border-brand-cyan/30 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-brand-cyan flex items-center gap-1.5">
+                  <Laptop className="w-3.5 h-3.5" />
+                  <span>Co-Edição Simultânea via Cloud Encapsulada (Zero Exposição de IP)</span>
+                </span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand-cyan/15 text-brand-cyan font-mono">
+                  Auto-Merge .md + .ink.json
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Ao abrir a mesma nota no <strong>PC Principal</strong> e no <strong>Notebook Touch/Caneta</strong> logados na mesma Cloud + Chave 2FA, o Tellus sincroniza e mescla automaticamente os parágrafos (<code>.md</code>) e os traços de caneta (<code>.ink.json</code> por ID único de traço) direto pela cápsula da nuvem — <strong>sem precisar digitar nem expor nenhum endereço IP</strong>.
+              </p>
+            </div>
+
+            {/* Sync & Security Isolation Toggles */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1">
+              {[
+                { key: 'syncNotes', label: 'Notas (.md)' },
+                { key: 'syncInk', label: 'Caneta (.ink)' },
+                { key: 'syncChats', label: 'Chats' },
+                { key: 'syncAiConfig', label: 'IAs & Chaves' },
+                { key: 'e2eeEnabled', label: 'Criptografia 2FA AES-256' },
+                { key: 'isolateAccountNotes', label: 'Ocultar ao Sair' }
+              ].map(item => (
+                <label key={item.key} className="flex items-center space-x-1.5 p-1.5 rounded-lg bg-background/60 border border-card-border/60 cursor-pointer text-[11px] text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={(syncConfig as any)[item.key] !== false}
+                    onChange={(e) => setSyncConfig(prev => ({ ...prev, [item.key]: e.target.checked, enabled: true }))}
+                    className="rounded border-card-border text-indigo-500 focus:ring-0"
+                  />
+                  <span>{item.label}</span>
+                </label>
+              ))}
+            </div>
+
+            {lastSyncReport && (
+              <div className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
+                lastSyncReport.success
+                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/25 text-rose-300'
+              }`}>
+                {lastSyncReport.success ? (
+                  <span>
+                    ✓ Cápsula 2FA sincronizada: {(lastSyncReport.notesPushed || 0) + (lastSyncReport.notesPulled || 0)} notas, {(lastSyncReport.inkPushed || 0) + (lastSyncReport.inkPulled || 0)} folhas Ink, {(lastSyncReport.chatsPushed || 0) + (lastSyncReport.chatsPulled || 0)} chats.
+                  </span>
+                ) : (
+                  <span>⚠️ {lastSyncReport.error || lastSyncReport.errors?.[0] || 'Autentique sua conta + Chave 2FA para sincronizar.'}</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 3. One-Click Update & Restart Card */}
+          <div className="space-y-2 p-3.5 rounded-xl bg-panel border border-emerald-500/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs font-semibold text-slate-100 flex items-center space-x-2">
+                  <Laptop className="w-4 h-4 text-emerald-400" />
+                  <span>Atualização Rápida do Tellus</span>
+                </label>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Baixa a versão mais nova, recompila as atualizações e reinicia o aplicativo automaticamente.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdateAndRestart}
+                disabled={isUpdatingApp}
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm shrink-0 transition-all"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isUpdatingApp ? 'animate-spin' : ''}`} />
+                <span>{isUpdatingApp ? 'Atualizando...' : 'Atualizar e Reiniciar'}</span>
+              </button>
+            </div>
+            {updateSteps.length > 0 && (
+              <div className="p-2 rounded-lg bg-background/80 border border-emerald-500/20 text-[11px] font-mono text-emerald-300 space-y-0.5">
+                {updateSteps.map((step, i) => (
+                  <div key={i}>• {step}</div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Theme Selector (Dark / Light) */}
           <div className="space-y-2 p-3 rounded-xl bg-panel border border-card-border">
             <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">

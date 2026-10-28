@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FolderTree, 
   Brain, 
@@ -17,9 +17,15 @@ import {
   FolderGit2,
   X,
   Filter,
-  Search
+  Search,
+  Edit3,
+  Sparkles,
+  Wand2,
+  Copy
 } from 'lucide-react';
 import { FileTreeItem, MemoryPage, Routine, ProjectOverview, ChatSessionMetadata } from '../types';
+import { MaterialFileIcon } from './MaterialFileIcon';
+import { api } from '../api';
 
 interface SidebarProps {
   currentProject: ProjectOverview | null;
@@ -43,6 +49,8 @@ interface SidebarProps {
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
+  onAskAI?: (prompt: string, filePath?: string) => void;
+  onRefreshFileTree?: () => void;
 }
 
 function pathBasename(p: string): string {
@@ -86,7 +94,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeSessionId,
   onSelectSession,
   onNewSession,
-  onDeleteSession
+  onDeleteSession,
+  onAskAI,
+  onRefreshFileTree
 }) => {
   const [activeTab, setActiveTab] = useState<'projects' | 'files' | 'memory' | 'routines'>('projects');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
@@ -94,6 +104,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [showInactive, setShowInactive] = useState<boolean>(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileTreeItem } | null>(null);
+
+  useEffect(() => {
+    const handleClose = () => setContextMenu(null);
+    window.addEventListener('click', handleClose);
+    return () => window.removeEventListener('click', handleClose);
+  }, []);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => ({ ...prev, [path]: !prev[path] }));
@@ -191,18 +208,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div key={item.path} className="space-y-0.5">
                 <button
                   onClick={() => toggleFolder(item.path)}
-                  className="w-full flex items-center space-x-1.5 py-1 px-1.5 rounded text-xs text-slate-300 hover:text-white hover:bg-card-border/40 transition-colors text-left font-mono"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ 
+                      x: Math.min(e.clientX, window.innerWidth - 250), 
+                      y: Math.min(e.clientY, window.innerHeight - 280), 
+                      item 
+                    });
+                  }}
+                  className="w-full flex items-center space-x-1.5 py-1 px-1.5 rounded text-xs text-slate-300 hover:text-white hover:bg-card-border/40 transition-colors text-left font-mono group"
                 >
                   {isExpanded ? (
                     <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
                   ) : (
                     <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
                   )}
-                  {isExpanded ? (
-                    <FolderOpen className="w-3.5 h-3.5 text-accent-light shrink-0" />
-                  ) : (
-                    <Folder className="w-3.5 h-3.5 text-accent-light shrink-0" />
-                  )}
+                  <MaterialFileIcon filename={item.name} isDirectory={true} isOpen={isExpanded} size={14} />
                   <span className="truncate">{item.name}</span>
                 </button>
                 {isExpanded && item.children && renderFileTree(item.children, depth + 1)}
@@ -214,13 +236,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.path}
               onClick={() => onSelectFile(item.path)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({ 
+                  x: Math.min(e.clientX, window.innerWidth - 250), 
+                  y: Math.min(e.clientY, window.innerHeight - 280), 
+                  item 
+                });
+              }}
               className={`w-full flex items-center space-x-2 py-1 px-2 rounded text-xs transition-colors text-left font-mono ${
                 isSelected 
                   ? 'bg-accent/20 text-accent-light font-medium border-l-2 border-accent' 
                   : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/30'
               }`}
             >
-              <FileCode className="w-3.5 h-3.5 shrink-0 opacity-70" />
+              <MaterialFileIcon filename={item.name} isDirectory={false} size={14} />
               <span className="truncate">{item.name}</span>
             </button>
           );
@@ -230,7 +261,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-full h-[calc(100vh-3.5rem)] border-r border-card-border bg-sidebar flex flex-col select-none overflow-hidden">
+    <aside className="w-full h-full border-r border-card-border bg-sidebar flex flex-col select-none overflow-hidden">
       {/* Top Section Header: Projects with filter and new project action buttons (Matching reference UI) */}
       <div className="px-3 pt-3 pb-2 border-b border-card-border flex items-center justify-between">
         <span className="text-sm font-semibold text-slate-200 tracking-tight">
@@ -673,6 +704,152 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div>
+
+      {/* Right-Click Context Menu for Files and Folders */}
+      {contextMenu && (
+        <div
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          className="fixed z-50 w-64 rounded-xl bg-[#141821]/95 border border-card-border shadow-2xl p-1.5 text-xs text-slate-200 backdrop-blur-md animate-in fade-in zoom-in-95 space-y-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header with Material Icon */}
+          <div className="flex items-center space-x-2 px-2 py-1.5 border-b border-card-border/50 text-slate-400 font-mono text-[11px] truncate">
+            <MaterialFileIcon filename={contextMenu.item.name} isDirectory={contextMenu.item.type === 'directory'} size={14} />
+            <span className="font-semibold text-slate-200 truncate">{contextMenu.item.name}</span>
+          </div>
+
+          {contextMenu.item.type !== 'directory' && (
+            <button
+              onClick={() => {
+                onSelectFile(contextMenu.item.path);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-200 flex items-center space-x-2 transition-colors"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-accent-light" />
+              <span>Abrir no Tellus Studio</span>
+            </button>
+          )}
+
+          <div className="px-2 pt-1.5 pb-0.5 text-[10px] uppercase font-bold text-accent-light tracking-wider flex items-center space-x-1">
+            <Bot className="w-3 h-3 text-cyan-400" />
+            <span>Inteligência Artificial</span>
+          </div>
+
+          <button
+            onClick={() => {
+              const target = contextMenu.item.path;
+              const isDir = contextMenu.item.type === 'directory';
+              setContextMenu(null);
+              if (onAskAI) {
+                onAskAI(
+                  isDir 
+                    ? `Inspecione o diretório "${target}" e todos os seus arquivos. Me explique claramente qual o propósito desse diretório, o que cada arquivo faz e como ele se integra ao projeto.`
+                    : `Analise o arquivo "${target}" e me explique detalhadamente o que ele faz, suas principais funções, dependências e responsabilidades na arquitetura.`,
+                  target
+                );
+              }
+            }}
+            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-200 flex items-center space-x-2 transition-colors"
+          >
+            <Bot className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Do que se trata? (Explicar)</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const target = contextMenu.item.path;
+              const isDir = contextMenu.item.type === 'directory';
+              setContextMenu(null);
+              if (onAskAI) {
+                onAskAI(
+                  isDir
+                    ? `Analise os arquivos e a estrutura dentro do diretório "${target}". Sugira melhorias de organização, modularidade, boas práticas e performance.`
+                    : `Revise minuciosamente o código do arquivo "${target}". Sugira melhorias práticas de arquitetura, legibilidade, tratamento de erros e performance com exemplos de código.`,
+                  target
+                );
+              }
+            }}
+            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-200 flex items-center space-x-2 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Sugerir Melhorias com IA</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const target = contextMenu.item.path;
+              const isDir = contextMenu.item.type === 'directory';
+              setContextMenu(null);
+              if (onAskAI) {
+                onAskAI(
+                  isDir
+                    ? `Dentro do diretório "${target}", preciso que você implemente: `
+                    : `No arquivo "${target}", preciso que você implemente: `,
+                  target
+                );
+              }
+            }}
+            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-200 flex items-center space-x-2 transition-colors"
+          >
+            <Wand2 className="w-3.5 h-3.5 text-purple-400" />
+            <span>Implementar Funcionalidade...</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const target = contextMenu.item.path;
+              const isDir = contextMenu.item.type === 'directory';
+              setContextMenu(null);
+              if (onAskAI) {
+                onAskAI(
+                  isDir
+                    ? `Faça uma varredura crítica nos arquivos do diretório "${target}" procurando vulnerabilidades, possíveis bugs, exceções não tratadas e problemas de concorrência ou tipagem.`
+                    : `Faça uma análise crítica no arquivo "${target}" procurando bugs, vulnerabilidades de segurança, edge cases não tratados e erros de tipagem.`,
+                  target
+                );
+              }
+            }}
+            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-200 flex items-center space-x-2 transition-colors"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+            <span>Diagnóstico & Procurar Bugs</span>
+          </button>
+
+          <div className="border-t border-card-border/50 my-1" />
+
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(contextMenu.item.path);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-300 flex items-center space-x-2 transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5 text-slate-400" />
+            <span>Copiar Caminho</span>
+          </button>
+
+          <button
+            onClick={async () => {
+              const target = contextMenu.item.path;
+              const isDir = contextMenu.item.type === 'directory';
+              setContextMenu(null);
+              if (confirm(`Tem certeza que deseja excluir ${isDir ? 'o diretório' : 'o arquivo'} "${target}"?`)) {
+                try {
+                  await api.deleteFile(target);
+                  if (onRefreshFileTree) onRefreshFileTree();
+                } catch (err: any) {
+                  alert(`Erro ao excluir: ${err.message}`);
+                }
+              }
+            }}
+            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 flex items-center space-x-2 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Excluir {contextMenu.item.type === 'directory' ? 'Diretório' : 'Arquivo'}</span>
+          </button>
+        </div>
+      )}
     </aside>
   );
 };

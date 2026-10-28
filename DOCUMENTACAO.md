@@ -1,392 +1,169 @@
-# 🧠 Agentic IDE — Documentação Completa do Projeto
+# 🌐 Tellus v1.0.0 — Documentação Oficial & Manual de Arquitetura
 
-> **Versão Atual**: 1.0 — Desktop App Local para Windows  
-> **Stack**: Electron · Node.js + Express · React 19 + Vite · TypeScript  
-> **Gerado em**: Agosto 2026
-
----
-
-## 📖 O Que É Este Projeto
-
-O **Agentic IDE** é um ambiente de desenvolvimento pessoal local, projetado para ser um hub de IA que permite:
-
-- Conversar com **qualquer modelo de IA** disponível no mercado (OpenRouter, Google Gemini, Anthropic Claude, OpenAI GPT) usando apenas suas chaves de API.
-- Monitorar em tempo real seu **saldo e consumo de créditos na OpenRouter** diretamente na barra superior.
-- **TellusMD Safe Note Taker & Knowledge Graph**: Sistema de anotações com Data Safety (auto-backup, proteção contra deleção acidental), wikilinks `[[Link]]`, tags `#tag` e **Grafo de Conhecimento Visual Interativo (estilo Obsidian)** para conectar ideias entre todos os projetos.
-- **Skills dos Agentes & Galeria de Artefatos**: Pastas dedicadas para catalogar e criar novas skills por agente (`Architect`, `Debugger`, `Fast Coder`, etc.) e gerenciar entregas estruturadas do projeto (`.agentic/artifacts/`).
-- Executar um **agente autônomo** capaz de ler, criar e modificar arquivos do seu computador, rodar comandos no terminal, capturar sua tela, fazer scraping de páginas web e manter memória contínua entre conversas.
-- Tudo isso com uma interface visual elegante, sem precisar abrir nenhum terminal manualmente.
-
-**Filosofia central**: Nenhum dado sai da sua máquina exceto as mensagens enviadas diretamente para as APIs dos provedores usando *suas* chaves. Não há servidor intermediário, sem banco de dados externo, sem proxy. É 100% local.
+> **Versão Oficial**: 1.0.0 — Ambiente Integrado de Desenvolvimento Agêntico & Gestão de Conhecimento  
+> **Stack Tecnológica**: Electron · Node.js + Express · React 19 + Vite · Monaco Editor · TailwindCSS v4 · TypeScript  
+> **Arquitetura de Dados**: 100% Local-First · Obsidian Compatible (`TellusMD Vault`) · E2EE AES-256-GCM  
 
 ---
 
-## 🏗️ Arquitetura Geral
+## 📖 1. Visão Geral e Filosofia
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ELECTRON SHELL                           │
-│  ┌────────────────────────────┐  ┌────────────────────────────┐ │
-│  │   Frontend React 19        │  │  Backend Express (Node.js) │ │
-│  │   client/                  │◄─┤  server/                   │ │
-│  │   Port: 3001 (via Express) │  │  Port: 3001                │ │
-│  └────────────────────────────┘  └──────────────┬─────────────┘ │
-└─────────────────────────────────────────────────┼───────────────┘
-                                                   │ HTTPS (fetch)
-                              ┌────────────────────┤
-                              │                    │
-                    ┌─────────▼────────┐  ┌────────▼────────────┐
-                    │   OpenRouter API │  │  Google / Anthropic  │
-                    │   (+ 300 modelos)│  │  OpenAI APIs         │
-                    └──────────────────┘  └─────────────────────┘
-```
+O **Tellus** é uma central agêntica unificada desenvolvida para programadores, pesquisadores e estudantes de alta performance. Ele combina:
 
-### Como as Camadas se Conectam
+1. **Desenvolvimento Agêntico Local**: Orquestração multi-modelo de inteligência artificial com chamadas autônomas de ferramentas de terminal, sistema de arquivos, scraping e captura de tela.
+2. **Tellus Code Studio**: Editor de código robusto baseado no Monaco (núcleo do VS Code) com suporte a abas simultâneas, atalhos nativos, formatação automática com **Prettier** (`Shift + Alt + F`), ícones estilizados **Material Icons** por extensão de arquivo e menu de contexto inteligente com ações de IA acionáveis por clique direito em qualquer arquivo ou pasta.
+3. **TellusMD Vault & Canvas Caligráfico**: Cofre de anotações 100% compatível com a sintaxe do **Obsidian** (`[[Wikilinks]]`, `#tags`, metadados Frontmatter), com editor de texto, visualização em grafo de conceitos interativo e **NoteInkCanvas** para caligrafia digital vetorial (Perfect Freehand) e desenho livre.
+4. **Smart Dropzone Multimodal**: Console de despejo unificado para mensagens brutas (ex: WhatsApp, transcrições de vídeos e anexos em PDF/imagens) com decomposição automática pelo **AI Archivist** e relatórios auditáveis de organização.
+5. **Multi-PC Cloud Sync Seguro com 2FA**: Sincronização opcional com Google Drive ou OneDrive blindada por criptografia ponta a ponta (**AES-256-GCM**), garantindo que os servidores em nuvem jamais visualizem anotações ou códigos em texto puro.
 
-1. **Electron** inicia o servidor Node.js em background (silenciosamente, sem janela de terminal) e abre o frontend React em uma janela nativa.
-2. O **frontend React** (rodando na porta 3001 servida pelo próprio Express) se comunica com o backend via `fetch()` e SSE (Server-Sent Events) para streaming.
-3. O **backend Express** recebe as mensagens, seleciona o provedor certo, faz as chamadas para a API externa e executa as ferramentas locais (arquivos, terminal, tela).
-4. As **respostas da IA** chegam em streaming de volta via SSE, aparecendo na interface em tempo real.
+### 🔒 Princípio de Privacidade Absoluta (Local-First BYOK)
+- **Zero Intermediários:** As requisições de IA saem diretamente da sua máquina para as APIs oficiais dos provedores usando suas próprias credenciais (*Bring Your Own Key - BYOK*).
+- **Zero Telemetria Oculta:** Nenhum arquivo do seu computador ou anotação é enviado para servidores proprietários.
+- **Isolamento de Dados Sensíveis:** Arquivos pessoais de conversas (`Chats/`), credenciais (`.env`), tokens e diretórios de cofres privados são estritamente excluídos do versionamento e mantidos em pastas locais seguras.
 
 ---
 
-## 📁 Estrutura de Arquivos
+## 🚀 2. Guia de Primeiro Uso (Onboarding & Setup)
 
-```
-AgenticIDE/
-├── electron/
-│   └── main.js                  # Ponto de entrada Electron (janela, overlay, server)
-├── server/
-│   └── src/
-│       ├── index.ts             # Servidor Express principal — todas as rotas REST e SSE
-│       └── services/
-│           ├── agentLoop.ts     # Loop autônomo do agente (tool calling, reasoning)
-│           ├── configManager.ts # Chaves de API e rotinas em ~/.agentic-ide/config.json
-│           ├── projectManager.ts# Abre e rastreia pastas de projetos
-│           ├── sessionManager.ts# Salva e recupera histórico (.agentic/sessions/)
-│           ├── memory/
-│           │   └── memoryEngine.ts  # Motor de memória contínua (ai-memory pattern)
-│           ├── providers/
-│           │   ├── openrouter.ts    # Cliente da API OpenRouter
-│           │   ├── gemini.ts        # Cliente da API Google Gemini
-│           │   ├── anthropic.ts     # Cliente da API Anthropic Claude
-│           │   ├── openai.ts        # Cliente da API OpenAI
-│           │   └── providerHub.ts   # Despachante central — seleciona o provedor correto
-│           └── tools/
-│               ├── fileTools.ts     # read_file, write_file, edit_file, list_dir
-│               ├── terminalRunner.ts# Executa comandos no shell local, captura logs
-│               ├── fileParser.ts    # PDF→texto, CSV→amostra, PNG→base64, MP3→player
-│               ├── screenCapture.ts # Captura tela inteira ou janela específica
-│               └── webScraper.ts    # Scraping de páginas web → Markdown/HTML
-├── client/
-│   └── src/
-│       ├── App.tsx              # Raiz — gerencia estado global, splitters, modais
-│       ├── api.ts               # Funções de cliente HTTP para o backend Express
-│       ├── types.ts             # Interfaces TypeScript compartilhadas
-│       └── components/
-│           ├── Navbar.tsx           # Barra superior (modelo, CLI launcher, Overlay)
-│           ├── Sidebar.tsx          # Painel lateral (chats, arquivos, memória, rotinas)
-│           ├── ChatArea.tsx         # Chat com streaming, ferramentas, anexos
-│           ├── CodeViewer.tsx       # Editor Monaco integrado
-│           ├── MemoryInspector.tsx  # Visualizador/editor do Active Context e wiki
-│           ├── TerminalView.tsx     # Terminal integrado com lançadores de CLI
-│           ├── FloatingOverlay.tsx  # Widget flutuante always-on-top
-│           ├── ModelSelectorModal.tsx  # Catálogo de modelos com filtros
-│           ├── SettingsModal.tsx    # Configuração de chaves de API
-│           ├── ProjectModal.tsx     # Abrir/trocar de projeto
-│           ├── MentionModal.tsx     # Citação de mensagens de outros chats (@)
-│           └── WindowPickerModal.tsx # Seletor de janela do Windows para captura
-├── resources/
-│   └── icon.ico / icon.png      # Ícone customizado do executável
-├── scripts/
-│   ├── generate-icons.js        # Gera ícones a partir da imagem original
-│   └── create-shortcut.ps1      # Cria o atalho .lnk com ícone no Explorer
-├── AgenticIDE.vbs               # Launcher VBScript (sem janela de CMD)
-├── start.bat                    # Launcher alternativo via .bat
-└── Agentic IDE.lnk              # Atalho do Windows com ícone customizado
-```
+Ao iniciar o Tellus em uma nova máquina, o aplicativo oferece um assistente interativo de primeiro uso (**Guia de Início**). O setup é concluído em poucos minutos seguindo estes passos:
+
+### 2.1. Obtenção da Chave de API (OpenRouter — Recomendado)
+O Tellus utiliza o **OpenRouter** como agregador central para mais de 300 modelos de ponta sem a necessidade de assinar dezenas de plataformas:
+1. Acesse [openrouter.ai](https://openrouter.ai) e crie sua conta.
+2. Navegue até a seção de chaves em [openrouter.ai/keys](https://openrouter.ai/keys) e clique em **Create Key**.
+3. Dê um nome (ex: `Tellus-Desktop`) e copie o token gerado (formato `sk-or-v1-...`).
+4. Adicione créditos de acordo com sua demanda (um valor inicial de \$5 a \$10 dólares é suficiente para meses de uso rotineiro).
+5. No Tellus, clique em **Guia de Início** ou no ícone de engrenagem (**Configurações & Chaves API**) e cole a chave no campo **OpenRouter Key**.
+
+#### Modelos de Alta Eficiência de Custo
+- **Google Gemini 2.5 Flash** (`google/gemini-2.5-flash`): Ultrarrápido para ferramentas e arquivamento de notas (~$0.00045 por lote).
+- **DeepSeek R1** (`deepseek/deepseek-r1`): Raciocínio lógico e matemático profundo para planejamento e arquitetura de software (~$0.0035 por requisição complexa).
+
+### 2.2. Voz Natural com Fish Audio (TTS & Orbe de Voz)
+Para utilizar a síntese de voz neural ultra-realista no Tellus:
+1. Crie uma conta gratuita em [fish.audio](https://fish.audio).
+2. Acesse a área de desenvolvedor e gere uma **API Key**.
+3. Cole o token no campo **Fish Audio Key** nas Configurações do Tellus.
+4. Você poderá conversar em tempo real com o Orbe de Voz ou ouvir o resumo de notas e roteiros de estudo.
+
+### 2.3. Diretórios Padrão de Execução
+O Tellus gerencia seus dados organizados em pastas no diretório do usuário:
+- **TellusMD Vault:** `~/Documents/Tellus Vault` (Cofre padrão de notas Markdown).
+- **Tellus Workspace:** `~/Documents/Tellus Workspace` (Projetos e arquivos de código).
+*Nota: É possível alternar ou selecionar qualquer pasta existente do computador a qualquer momento.*
 
 ---
 
-## 🔄 Fluxo de uma Mensagem (do clique ao código)
+## 💻 3. Tellus Code Studio & Navegador de Arquivos
 
-Quando você digita uma mensagem e clica em Enviar:
+O **Tellus Code Studio** transforma a IDE em uma estação de trabalho completa com o Monaco Editor:
 
-```
-[1] Você digita no ChatArea.tsx
-        │
-        ▼
-[2] api.ts → fetch POST /api/chat/stream (SSE)
-        │
-        ▼
-[3] server/index.ts recebe a requisição
-        ├─ Injeta o Active Context da memória do projeto
-        └─ Identifica o provedor e modelo ativos
-        │
-        ▼
-[4] agentLoop.ts inicia o loop de raciocínio
-        │
-        ▼
-[5] providerHub.ts → chama a API externa com streaming
-        │
-        ├─ chunk de texto → SSE "content" → ChatArea exibe em tempo real
-        ├─ chunk de raciocínio → SSE "reasoning" → bloco expansível 🧠
-        └─ tool_call da IA → SSE "tool_start"
-                │
-                ▼
-          [6] agentLoop.executeTool()
-                ├─ read_file    → fileTools.readFile()
-                ├─ write_file   → fileTools.writeFile()
-                ├─ run_command  → terminalRunner.run()
-                ├─ screenshot   → screenCapture.captureScreen()
-                ├─ web_scrape   → webScraper.scrapeUrl()
-                └─ memory_*     → memoryEngine.*()
-                │
-                └─ resultado volta para a IA → loop continua
-```
+- **Abas Multi-Arquivos:** Abra e alterne entre dezenas de arquivos com persistência de estado e rolagem horizontal suave.
+- **Material File Icons:** Sistema de tipagem de ícones visuais para mais de 50 extensões (`.ts`, `.tsx`, `.js`, `.py`, `.json`, `.md`, `.sql`, `.css`, `.html`, `.png`, etc.) e ícones específicos para pastas (`src/`, `tests/`, `docs/`, `config/`).
+- **Formatação Automática com Prettier:** Integração nativa acionada pelo atalho mundial `Shift + Alt + F` ou pelo botão **Formatar** na barra de status inferior.
+- **Menu de Contexto de IA no Navegador Lateral:** Ao clicar com o botão direito em qualquer arquivo ou pasta na árvore de diretórios, o usuário pode:
+  - 📝 **Abrir no Editor**
+  - 💡 **Explicar Arquivo com IA**
+  - 🛠️ **Refatorar / Sugerir Melhorias com IA**
+  - 🧪 **Gerar Testes Unitários Automatizados**
+  - 🔍 **Examinar Arquitetura do Diretório**
+  - 🗑️ **Excluir com Confirmação Segura**
 
 ---
 
-## 🧠 Sistema de Memória Contínua (ai-memory Engine)
+## 📚 4. TellusMD Vault & Canvas Caligráfico (Ink)
 
-Inspirado no padrão [akitaonrails/ai-memory](https://github.com/akitaonrails/ai-memory), o sistema garante que nenhum contexto seja perdido entre sessões, mesmo trocando de modelo.
+O motor **TellusNoteEngine** garante compatibilidade completa com o Obsidian e proteção contra perda acidental:
 
-### Estrutura de Diretórios (por projeto)
-
-```
-seu-projeto/
-└── .agentic/
-    ├── memory/
-    │   ├── active_context.md   ← O "estado atual do projeto" (atualizado pelo agente)
-    │   ├── decisions/          ← Decisões arquiteturais registradas
-    │   ├── procedures/         ← Procedimentos recorrentes
-    │   ├── gotchas/            ← Armadilhas e erros conhecidos
-    │   └── handoffs/           ← Snapshots ao trocar de modelo/sessão
-    ├── sessions/               ← Histórico JSON de cada conversa
-    └── attachments/            ← Arquivos importados (PDF, PNG, MP3, screenshots)
-```
-
-### Por Que Funciona
-
-Antes de cada mensagem enviada para a IA, o backend **automaticamente injeta**:
-1. O conteúdo completo do `active_context.md` (estado atual do projeto)
-2. O último `handoff` (onde parou o agente anterior)
-3. As 5 decisões mais recentes de `decisions/`
-4. Os 5 gotchas mais críticos de `gotchas/`
-
-Isso significa que mesmo se você mudar de Claude para Gemini, ou fechar o app e reabrir dias depois, o novo modelo já sabe exatamente o que está acontecendo no projeto.
+- **Sintaxe Híbrida e Wikilinks:** Suporte total a `[[Link para Nota]]`, destaque semântico de blocos `#tag` e formatação Markdown padrão.
+- **NoteInkCanvas (Caligrafia Vetorial):**
+  - Permite desenhar à mão livre, criar anotações manuscritas com caneta/mesa digitalizadora (Wacom, Apple Pencil) ou mouse sobre as notas.
+  - Renderização fluida com curvas calculadas via `perfect-freehand`.
+  - Controle de espessura de traço, cor da tinta, opacidade e palm rejection.
+  - Exportação e inserção de camadas em formato SVG vetorial ou PNG de alta resolução.
+- **Grafo de Conhecimento Interativo:**
+  - Visualização de nós interconectados por links semânticos com simulação física em tempo real (força de repulsão, gravidade central e colisão elástica).
+- **Lixeira com Retenção Configurável:**
+  - Notas excluídas são preservadas em uma pasta interna protegida (`.backups`) com políticas de retenção de 30, 90, 120 dias, 1 ano ou permanente.
 
 ---
 
-## 🔌 Provedores de IA Suportados
+## 📥 5. Smart Dropzone Multimodal & AI Archivist
 
-| Provedor | Chave Necessária | Modelos Notáveis |
-|---|---|---|
-| **OpenRouter** | `OPENROUTER_API_KEY` | DeepSeek R1, Claude 3.7, Gemini 2.0 Flash, Llama 3.3, Qwen 2.5, +300 modelos |
-| **Google Gemini** | `GOOGLE_API_KEY` | Gemini 2.0 Pro, Gemini 2.0 Flash, Gemini 1.5 Pro |
-| **Anthropic** | `ANTHROPIC_API_KEY` | Claude 3.7 Sonnet, Claude 3.5 Haiku, Claude 3 Opus |
-| **OpenAI** | `OPENAI_API_KEY` | GPT-4o, GPT-4o mini, o3-mini |
-
-### Onde as Chaves São Armazenadas
-
-```
-C:\Users\[seu_usuario]\.agentic-ide\config.json
-```
-
-As chaves **nunca saem da sua máquina** — ficam em um arquivo JSON local dentro do seu perfil de usuário do Windows. O backend as lê diretamente do disco quando precisa fazer uma chamada de API. Não há nenhum servidor intermediário.
+Projetado para eliminar a sobrecarga de informações:
+- **Entrada Agrupada de Despejo (Brain Dump):** Cole trechos soltos de transcrições de vídeos, conversas encaminhadas de aplicativos de mensagens e anexe arquivos (PDF, CSV, imagens).
+- **Classificação e Decomposição Atômica:** O modelo especialista divide tópicos desconexos em notas atômicas separadas dentro de pastas correspondentes do Vault (ex: `00_Inbox`, `Estudos/`, `Projetos/`).
+- **Relatório de Auditoria:** Cada execução gera um relatório de transparência em `Relatórios de Organização/`, detalhando o raciocínio por trás de cada classificação.
 
 ---
 
-## 🛠️ Ferramentas do Agente (Tool Calling)
+## ☁️ 6. Sincronização em Nuvem Segura (Multi-PC Cloud Sync)
 
-| Ferramenta | O Que Faz |
-|---|---|
-| `read_file` | Lê o conteúdo de qualquer arquivo do projeto |
-| `write_file` | Cria ou sobrescreve um arquivo completamente |
-| `edit_file` | Edita trechos específicos de um arquivo |
-| `list_directory` | Lista o conteúdo de uma pasta do projeto |
-| `run_command` | Executa comandos de shell no diretório do projeto |
-| `screenshot_screen` | Captura a tela inteira ou janela específica |
-| `web_scrape` | Raspa o conteúdo de uma URL → Markdown/HTML |
-| `memory_update_context` | Atualiza o `active_context.md` |
-| `memory_write_page` | Cria nova página de decisão, procedimento ou gotcha |
-| `memory_query` | Busca na base de memória por relevância |
-| `memory_create_handoff` | Gera um snapshot de transição para o próximo agente |
+Para quem utiliza mais de um computador (ex: Desktop de desenvolvimento e Laptop pessoal):
+- **Criptografia Local Ponta a Ponta (E2EE):** Antes de qualquer arquivo sair da sua máquina para o Google Drive ou OneDrive, ele é cifrado com uma chave derivada via **PBKDF2** e criptografia simétrica autenticada **AES-256-GCM**.
+- **Chave Mestra / Segundo Fator (2FA):** O cofre remoto só pode ser descriptografado em outra máquina se a chave mestra cadastrada for fornecida. Provedores de nuvem visualizam apenas blocos binários ilegíveis.
+- **Resolução de Conflitos e Modo Offline:** Suporte a edições desconectadas com reconciliação por carimbo de data/hora (timestamp).
 
 ---
 
-## 🔒 Por Que É Seguro
+## 🧠 7. Orquestração Multi-Agente & Pipeline Mind Map
 
-### 1. Execução 100% Local
-O aplicativo roda inteiramente no seu computador. Não há nenhum servidor remoto nosso envolvido. Toda a lógica, armazenamento de memória, histórico de chats e arquivos do projeto ficam no seu disco.
-
-### 2. Suas Chaves, Seu Controle
-As chaves de API ficam em `~/.agentic-ide/config.json` — um arquivo de texto simples no seu perfil de usuário. Você pode abrir, editar ou deletar manualmente a qualquer momento. São enviadas apenas diretamente para as APIs dos provedores (OpenRouter, Google, Anthropic, OpenAI) que você já confia.
-
-### 3. Acesso a Arquivos Restrito ao Projeto Ativo
-As ferramentas `read_file`, `write_file` e `list_directory` são implementadas com sanitização que impede travessia de diretórios (`../`). O agente só pode tocar em arquivos dentro da pasta raiz do projeto atualmente aberto.
-
-### 4. Comandos de Terminal sob Sua Supervisão
-Os comandos via `run_command` são executados no diretório do projeto e os logs aparecem em tempo real no Terminal Integrado. Você vê tudo o que está acontecendo.
-
-### 5. Sem Telemetria ou Rastreamento
-Não há chamadas analíticas, sem logging de uso, sem identificadores de usuário. O app é completamente silencioso em termos de rede exceto pelas chamadas explícitas às APIs que você configurou.
+O Tellus distribui tarefas cognitivas entre papéis especializados:
+- **Planner / Architect:** Analisa a solicitação inicial e gera um plano de execução passo a passo.
+- **Deep Thinking Engine:** Processa desafios algorítmicos complexos, análise de gaps de arquitetura e lógica avançada.
+- **Fast Tools & Coder:** Executa manipulações rápidas no sistema de arquivos, comandos no terminal e edição pontual de código.
+- **AI Archivist:** Curadoria e estruturação contínua do conhecimento no Vault.
+- **Pipeline Mind Map:** Interface visual que exibe o fluxo em tempo real de mensagens e estados entre os modelos participantes.
 
 ---
 
-## 🎨 Funcionalidades da Interface
+## 🛠️ 8. Auto-Cura (Autonomous Self-Healing) & Testes
 
-### Barra Superior (Navbar)
-- **Seletor de Projeto**: Abre ou troca de pasta de projeto
-- **Seletor de Modelo**: Catálogo completo de modelos com preços e contexto
-- **Rotina Ativa**: Exibe qual especialista está ativo (Architect, Debugger, Fast Coder, etc.)
-- **Modo Sobreposto** ✨: Ativa o widget flutuante always-on-top sobre qualquer janela
-- **Abrir CLI**: Lança Claude Code, Gemini CLI, Antigravity CLI ou PowerShell no projeto
-- **Configurar Chaves**: Gerencia as chaves de API de todos os provedores
-
-### Barra Lateral (Sidebar) — Painéis Redimensionáveis
-- **Aba Conversas**: Lista todas as sessões de chat salvas com pré-visualização
-- **Aba Arquivos**: Explorador de arquivos do projeto com acesso ao editor Monaco
-- **Aba Memória**: Visualiza e edita as páginas da wiki de memória
-- **Aba Rotinas**: Lista os especialistas configurados com troca rápida
-
-### Área de Chat (ChatArea)
-- **Streaming em Tempo Real**: Tokens chegam progressivamente
-- **Blocos de Raciocínio** 🧠: Para modelos como DeepSeek R1 e Claude 3.7, o raciocínio interno aparece em um bloco expansível separado
-- **Cartões de Ferramenta**: Cada chamada de ferramenta aparece com nome, argumentos e resultado
-- **Citação entre Chats** (@): Cite qualquer mensagem de uma conversa anterior no prompt atual
-- **Importação Multimodal**: PDF (extração de texto), CSV, imagens (visão), MP3 (player)
-- **Captura de Tela / Escolher Janela**: Screenshot da tela inteira ou de uma janela específica
-
-### Painel Direito (Splitável e Redimensionável)
-- **Aba Código**: Editor Monaco integrado para ver e editar arquivos
-- **Aba Memória**: Inspector do Active Context com gerador de Handoff
-- **Aba Terminal**: Terminal integrado com execução de comandos e lançadores de CLI
-
-### Modo Sobreposto Flutuante (FloatingOverlay)
-- Widget sempre no topo que permanece visível sobre o VS Code, Chrome, Figma, etc.
-- Permite capturar a tela ou escolher uma janela e enviar um comando rápido sem trocar de janela
-- A IA inspeciona visualmente e aplica correções diretamente no código do projeto
+- **Mecanismo de Auto-Diagnóstico:** O Tellus inspeciona em tempo real a integridade da conexão com a API, status do sistema de arquivos e integridade das notas.
+- **Suíte de Testes Automatizados:** O backend conta com mais de 80 testes unitários e de integração (`npm test`) cobrindo sanitização de conteúdo, motor do cofre, criptografia e orquestração de chamadas.
 
 ---
 
-## 🚀 Como Executar
+## 🛡️ 9. Diretrizes de Versionamento e Segurança Local
 
-### Modo Desktop (Electron) — Recomendado
-```
-Duplo clique em: Agentic IDE.lnk
-```
-Ou via script:
-```
-AgenticIDE.vbs  →  Inicia silenciosamente (sem janela de CMD)
-start.bat       →  Alternativa via terminal
-```
+O repositório do Tellus segue regras estritas de higienização de código:
+1. **Zero Segredos no Controle de Versão:** Arquivos `.env`, chaves de API, tokens e senhas nunca são rastreados.
+2. **Privacidade Absoluta de Conversas:** As pastas de conversas pessoais e anotações privadas são 100% blindadas pelo `.gitignore`.
+3. **Caminhos Dinâmicos:** Nenhum caminho absoluto de diretórios locais é fixado em código-fonte; o sistema utiliza sempre caminhos relativos ao diretório do usuário (`os.homedir()`).
+4. **Build Limpo Obrigatório:** Todo commit exige compilação sem falhas no frontend (`vite build`) e no backend (`tsc`).
 
-### Modo Web (Desenvolvimento)
+---
+
+## 🚀 10. Executando o Projeto
+
+### Pré-requisitos
+- **Node.js** (v18.0.0 ou superior)
+- **npm** ou gerenciador de pacotes equivalente
+
+### Instalação e Execução
 ```bash
+# 1. Instalar dependências do Backend
+cd server
+npm install
+
+# 2. Instalar dependências do Frontend
+cd ../client
+npm install
+
+# 3. Executar o servidor de desenvolvimento
+# Terminal 1: Backend (porta 3001)
+cd server
+npm run dev
+
+# Terminal 2: Frontend (porta 5173)
+cd client
 npm run dev
 ```
-Abre em `http://localhost:5173` com hot-reload. O backend sobe automaticamente em paralelo.
 
-### Build de Produção
-```bash
-npm run build
-```
-Gera os assets em `client/dist/` (servidos pelo Express) e o servidor compilado em `server/dist/`.
+Acesse a interface no navegador através de `http://localhost:5173` ou inicialize o shell nativo via `npm run electron:dev`.
 
 ---
 
-## 💡 Alternativas para Melhorar o Projeto
-
-Organizadas por nível de esforço e impacto esperado:
-
----
-
-### 🟢 Baixo Esforço — Alto Impacto Imediato
-
-**1. Transcrição Automática de Áudio (Whisper)**  
-Quando um arquivo MP3 é importado, enviar automaticamente para o Whisper (OpenAI ou local) e exibir a transcrição como contexto para a conversa. Ideal para importar reuniões gravadas e pedir resumos de decisões.
-
-**2. Diff Visual Interativo (Aprovar Antes de Gravar)**  
-Antes de o agente aplicar um `write_file`, exibir um diff `antes/depois` lado a lado no painel direito. O usuário aprova ou rejeita cada mudança antes de ela ser salva em disco. Aumenta dramaticamente o controle e a confiança.
-
-**3. Atalho Global de Teclado para o Overlay**  
-Registrar um atalho global via Electron `globalShortcut` (ex: `Ctrl+Shift+A`) para ativar/desativar o widget flutuante sem precisar clicar na janela do Agentic IDE.
-
-**4. Histórico de Comandos no Terminal Integrado**  
-Tecla ↑ e ↓ para navegar no histórico de comandos executados, igual ao comportamento do terminal nativo.
-
-**5. Busca Semântica na Wiki de Memória**  
-A busca atual é léxica (palavras-chave). Usar embeddings locais (ex: `@xenova/transformers` com `all-MiniLM-L6-v2`) para busca por similaridade semântica, encontrando contextos relevantes mesmo quando as palavras exatas não coincidem.
-
----
-
-### 🟡 Médio Esforço — Alto Impacto Estratégico
-
-**6. Modo Multi-Agente (Painéis Paralelos)**  
-Abrir múltiplos painéis de chat onde cada um tem um modelo/rotina diferente. Ex: o Architect (Claude) planeja na esquerda enquanto o Fast Coder (Gemini Flash) implementa na direita, ambos compartilhando a mesma memória `.agentic/`.
-
-**7. Integração Nativa com Git**  
-Painel de diff git dentro do app. O agente pode criar branches, fazer commits com mensagens descritivas e abrir PRs diretamente pelo chat. Ex: *"Commita tudo que você fez hoje"*.
-
-**8. Captura de Tela Contínua (Auto-Pilot Mode)**  
-Modo onde o agente captura a tela periodicamente (ex: a cada 10 segundos) e monitora por erros, agindo automaticamente ao detectar algo crítico. Útil durante builds ou deploys em andamento.
-
-**9. Suporte a MCP (Model Context Protocol)**  
-Integrar o [protocolo MCP da Anthropic](https://modelcontextprotocol.io) como servidor local. Outros apps compatíveis (como Claude Desktop ou Cursor) poderiam se conectar ao Agentic IDE e usar suas ferramentas de arquivo e memória.
-
-**10. Detecção Automática de Stack do Projeto**  
-Ao abrir um projeto, detectar a stack automaticamente (`package.json` → Node.js, `requirements.txt` → Python, `Cargo.toml` → Rust) e carregar rotinas e prompts de sistema otimizados para aquela tecnologia.
-
----
-
-### 🔴 Alto Esforço — Impacto Transformador
-
-**11. Execução em Sandbox (Docker ou Windows Sandbox)**  
-Executar os comandos de terminal do agente dentro de um container Docker isolado. Zero risco de o agente modificar arquivos fora do projeto ou executar algo destrutivo no sistema.
-
-**12. Entrada por Voz (Speech-to-Text Local)**  
-Usar `whisper.cpp` via WebAssembly ou binário nativo para transcrever voz em texto diretamente na caixa de mensagem. Permite ditar instruções para o agente sem digitar.
-
-**13. Gravação e Replay de Sessões**  
-Gravar cada sessão com todos os tool calls, resultados e respostas como um replay reproduzível. Permite "voltar no tempo" e ver exatamente o que o agente fez e por quê, etapa por etapa.
-
-**14. Sistema de Plugins de Ferramentas**  
-Permitir que o usuário crie novas ferramentas em JavaScript que o agente usa automaticamente. Ex: `query_database`, `send_slack_message`, `deploy_to_vercel`. Transforma o Agentic IDE em uma plataforma extensível.
-
-**15. Modo Colaborativo em Rede Local**  
-Sincronizar o `active_context.md` e as sessões via um servidor local na rede (usando WebSockets). Uma equipe pequena poderia compartilhar o mesmo agente e contexto de projeto em tempo real, sem nenhum serviço na nuvem.
-
----
-
-## 📊 Dependências Principais
-
-| Pacote | Propósito |
-|---|---|
-| `electron` | Shell desktop nativo |
-| `express` | Servidor HTTP/SSE backend |
-| `react` + `vite` | Interface frontend moderna |
-| `typescript` | Tipagem estática em toda a stack |
-| `axios` | Requisições HTTP no backend (web scraping, APIs) |
-| `pdf-parse` | Extração de texto de arquivos PDF |
-| `sharp` | Processamento de imagens para geração de ícones |
-| `@monaco-editor/react` | Editor de código integrado |
-| `react-markdown` + `remark-gfm` | Renderização de Markdown nas mensagens |
-| `lucide-react` | Ícones consistentes na interface |
-
----
-
-## 🗂️ Dados e Privacidade
-
-| O Que | Onde Fica | Sai da Máquina? |
-|---|---|---|
-| Chaves de API | `~/.agentic-ide/config.json` | Nunca — apenas nas chamadas diretas aos provedores |
-| Histórico de Chats | `projeto/.agentic/sessions/` | Não |
-| Memória do Projeto | `projeto/.agentic/memory/` | Não (exceto ao injetar no contexto da IA) |
-| Arquivos Importados | `projeto/.agentic/attachments/` | Não (exceto ao enviar para a IA como contexto) |
-| Screenshots | `projeto/.agentic/attachments/` | Não (exceto ao enviar para a IA) |
-| Código do Projeto | No seu disco | Não (exceto quando o agente lê via `read_file`) |
-
----
-
-*Documentação gerada internamente pelo Agentic IDE — Agosto 2026.*
+<div align="center">
+  <sub>Tellus IDE v1.0.0 — Autonomia, Privacidade e Inteligência Local.</sub>
+</div>

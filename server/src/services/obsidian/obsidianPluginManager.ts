@@ -38,7 +38,7 @@ export interface RecommendedObsidianPlugin {
   whyUsefulForTellus: string;
 }
 
-const DEFAULT_VAULT_DIR = 'E:\\Die-Sonne\\Vault';
+const DEFAULT_VAULT_DIR = path.join(os.homedir(), 'Documents', 'Tellus Vault');
 const TELLUS_GLOBAL_PLUGINS_DIR = path.join(os.homedir(), '.tellus', 'obsidian_plugins');
 
 export class ObsidianPluginManager {

@@ -38,6 +38,137 @@ export interface AgentPipelineConfig {
   fastToolsModel?: string;
 }
 
+export type CloudProviderId = 'google_drive' | 'microsoft_onedrive' | 'dropbox' | 'custom_cloud';
+
+export interface CloudStorageMonitorReport {
+  provider: CloudProviderId;
+  providerLabel: string;
+  mirrorPath: string;
+  quotaSource: 'google_drive_api' | 'microsoft_graph_api' | 'cloud_drive_volume' | 'estimated';
+  accountTotalBytes: number;
+  accountUsedBytes: number;
+  accountFreeBytes: number;
+  usagePercent: number;
+  status: 'healthy' | 'warning' | 'critical';
+  isNearLimit: boolean;
+  isCriticalLimit: boolean;
+  warningMessage: string | null;
+  tellusBreakdown: {
+    notesBytes: number;
+    notesCount: number;
+    inkBytes: number;
+    inkCount: number;
+    attachmentsBytes: number;
+    attachmentsCount: number;
+    chatsBytes: number;
+    chatsCount: number;
+    cloudCapsuleBytes: number;
+    totalTellusBytes: number;
+  };
+}
+
+export interface GoogleAccountProfile {
+  email: string;
+  name: string;
+  provider?: CloudProviderId;
+  picture?: string;
+  sub?: string;
+  accountHash?: string;
+  authMethod?:
+    | 'google_oauth_pkce'
+    | 'microsoft_oauth_pkce'
+    | 'google_token_verified'
+    | 'microsoft_token_verified'
+    | 'cloud_desktop_verified'
+    | 'google_browser_vault_key';
+  verifiedByGoogle?: boolean;
+  verifiedByPlatform?: boolean;
+  twoFactorUnlocked?: boolean;
+  keyVerifier?: string;
+  encryptedVaultKey?: string;
+  connectedAt: number;
+}
+
+export interface VaultSecuritySummary {
+  totalFilesOnDisk: number;
+  accessibleNotesCount: number;
+  localPcNotesCount: number;
+  linkedToActiveAccountCount: number;
+  lockedForeignNotesCount: number;
+  activeAccountHash: string | null;
+  isVaultUnlocked: boolean;
+  vaultViewScope?: 'all_accessible' | 'account_only' | 'local_only';
+  countsByAccountHash?: Record<string, number>;
+}
+
+export interface CloudSyncConfig {
+  enabled: boolean;
+  cloudProvider?: CloudProviderId;
+  googleAccount?: GoogleAccountProfile | null;
+  savedAccounts?: GoogleAccountProfile[];
+  vaultViewScope?: 'all_accessible' | 'account_only' | 'local_only';
+  googleOAuthClientId?: string;
+  microsoftOAuthClientId?: string;
+  cloudMirrorPath?: string;
+  peerSyncUrl?: string;
+  peerSyncEnabled?: boolean;
+  autoSync: boolean;
+  syncNotes: boolean;
+  syncInk: boolean;
+  syncChats: boolean;
+  syncAiConfig: boolean;
+  e2eeEnabled?: boolean;
+  isolateAccountNotes?: boolean;
+  lastSyncedAt?: number;
+  deviceId?: string;
+  deviceName?: string;
+}
+
+export interface SyncReport {
+  success: boolean;
+  syncedAt: number;
+  mirrorPath: string;
+  notesPushed: number;
+  notesPulled: number;
+  inkPushed: number;
+  inkPulled: number;
+  chatsPushed: number;
+  chatsPulled: number;
+  configSynced: boolean;
+  e2eeActive?: boolean;
+  errors: string[];
+  error?: string;
+  syncConfig?: CloudSyncConfig;
+  vaultSecurity?: VaultSecuritySummary;
+}
+
+export interface InkPoint {
+  x: number;
+  y: number;
+  pressure?: number;
+  t?: number;
+}
+
+export interface InkStroke {
+  id: string;
+  tool: 'pen' | 'highlighter' | 'marker' | 'line' | 'arrow' | 'rect';
+  color: string;
+  width: number;
+  opacity: number;
+  points: InkPoint[];
+  createdAt: number;
+}
+
+export interface NoteInkData {
+  noteId: string;
+  version: number;
+  updatedAt: number;
+  canvasHeight: number;
+  backgroundPattern: 'none' | 'ruled' | 'grid' | 'dots';
+  overlayMode: 'hybrid' | 'canvas_only';
+  strokes: InkStroke[];
+}
+
 export interface AppConfig {
   keys: {
     openrouter?: string;
@@ -60,6 +191,8 @@ export interface AppConfig {
   pipeline?: AgentPipelineConfig;
   theme?: 'dark' | 'light';
   deletedNotesRetention?: '30_days' | '90_days' | '120_days' | '1_year' | 'never';
+  vaultPath?: string;
+  syncConfig?: CloudSyncConfig;
   locale?: 'pt-BR' | 'en-US' | 'es-ES' | string;
   language?: string;
   country?: string;
@@ -147,7 +280,7 @@ export interface OpenRouterCredits {
   remainingCredits: number;
 }
 
-export interface TelluNote {
+export interface TellusNote {
   id: string;
   title: string;
   filename: string;
@@ -161,11 +294,13 @@ export interface TelluNote {
   updatedAt: number;
   isProjectSpecific?: boolean;
   relativePath?: string;
+  hasInk?: boolean;
+  inkStrokeCount?: number;
 }
 
-export type TellusNote = TelluNote;
-export type TellusMDNote = TelluNote;
-export type FrankNote = TelluNote;
+export type TelluNote = TellusNote;
+export type TellusMDNote = TellusNote;
+export type FrankNote = TellusNote;
 
 export interface GraphNode {
   id: string;
@@ -234,6 +369,10 @@ export interface TellusSkill {
   isProjectSpecific?: boolean;
   isActive?: boolean;
   scope?: 'project' | 'global' | 'situational';
+  version?: string;
+  author?: string;
+  license?: string;
+  securitySanitized?: boolean;
   updatedAt: number;
 }
 
