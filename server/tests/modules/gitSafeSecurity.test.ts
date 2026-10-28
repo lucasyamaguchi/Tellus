@@ -73,4 +73,18 @@ console.log("Olá Mundo, Tellus está 100% seguro!");
     assert.ok(gitignoreItem);
     assert.equal(gitignoreItem?.passed, true);
   });
+
+  test('6. Verificação de Skill e Rotina GitSafe nativa no Tellus', async () => {
+    const { SkillManager } = await import('../../src/services/skills/skillManager.js');
+    const { ConfigManager } = await import('../../src/services/configManager.js');
+
+    const globalSkills = SkillManager.listSkills();
+    const gitsafeSkill = globalSkills.find((s: any) => s.id === 'gitsafe-routine');
+    assert.ok(gitsafeSkill, 'Skill gitsafe-routine deve estar nas skills globais do Tellus');
+    assert.strictEqual(gitsafeSkill.category, 'Security & Governance');
+
+    const config = ConfigManager.getConfig();
+    const gitsafeRoutine = config.customRoutines?.find((r: any) => r.id === 'gitsafe_auditor');
+    assert.ok(gitsafeRoutine, 'Rotina gitsafe_auditor deve estar registrada nas rotinas padrão do Tellus');
+  });
 });

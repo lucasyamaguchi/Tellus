@@ -78,6 +78,20 @@ const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
     updatedAt: Date.now()
   },
   {
+    id: 'gitsafe-routine',
+    name: 'GitSafe & Data Sanitization Routine',
+    category: 'Security & Governance',
+    agentAssigned: 'all',
+    description: 'Rotina mandatória de auditoria interna: higienização de conversas (Chats), dados sensíveis, segredos, caminhos locais e política estrita de versionamento.',
+    promptInstructions: 'Execute auditoria rigorosa de segurança: garanta zero vazamento de conversas particulares, currículos, vaults pessoais (.tellus/vault), chaves de API e caminhos absolutos locais. Valide o .gitignore, certifique-se de que nenhum executável ou binário esteja rastreado e exija compilação limpa com 100% dos testes aprovados.',
+    isProjectSpecific: false,
+    version: '1.0.0',
+    author: 'Tellus Core Team',
+    license: 'MIT',
+    securitySanitized: true,
+    updatedAt: Date.now()
+  },
+  {
     id: 'api-generator',
     name: 'RESTful API & Service Generator',
     category: 'Backend',

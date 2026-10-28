@@ -172,6 +172,14 @@ const DEFAULT_CONFIG: AppConfig = {
       provider: 'openrouter',
       model: 'openai/gpt-4o-mini',
       systemPrompt: 'Você é o curador de memória do projeto. Sintetize o progresso, atualize os registros de decisões (decisions/), dicas/erros (gotchas/) e garanta que a continuidade do contexto nunca seja perdida.'
+    },
+    {
+      id: 'gitsafe_auditor',
+      name: 'GitSafe & Data Sanitizer',
+      description: 'Auditoria pré-commit/push: verificação estrita de vazamento de chats, vaults, credenciais, segredos e conformidade de versionamento.',
+      provider: 'openrouter',
+      model: 'google/gemini-2.5-flash',
+      systemPrompt: 'Você é o Auditor de Segurança GitSafe e Higienização de Dados do Tellus. Sua missão é garantir zero vazamento de conversas particulares, currículos, vaults pessoais, chaves de API e caminhos locais antes de qualquer commit ou push. Valide status do git, arquivos rastreados, integridade de build e testes.'
     }
   ]
 };
@@ -203,6 +211,15 @@ export class ConfigManager {
       };
       const syncCfg: CloudSyncConfig = { ...DEFAULT_CONFIG.syncConfig!, ...(parsed.syncConfig || {}) };
 
+      // Ensure default system routines are always available even on existing configs
+      const existingRoutines: any[] = parsed.customRoutines || [];
+      const mergedRoutines = [...existingRoutines];
+      for (const defRoutine of DEFAULT_CONFIG.customRoutines) {
+        if (!mergedRoutines.some(r => r.id === defRoutine.id)) {
+          mergedRoutines.push(defRoutine);
+        }
+      }
+
       // Restore active Vault E2EE key in memory if user is logged in on this trusted PC
       if (syncCfg.googleAccount?.accountHash && syncCfg.encryptedSessionVaultKey && !SecurityShield.isVaultUnlocked()) {
         SecurityShield.restoreSessionFromEncryptedKey(syncCfg.googleAccount.accountHash, syncCfg.encryptedSessionVaultKey);
@@ -213,7 +230,8 @@ export class ConfigManager {
         ...parsed,
         vaultPath: parsed.vaultPath || DEFAULT_CONFIG.vaultPath,
         syncConfig: syncCfg,
-        keys: decryptedKeys
+        keys: decryptedKeys,
+        customRoutines: mergedRoutines
       };
     } catch {
       return DEFAULT_CONFIG;
