@@ -15,6 +15,7 @@
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:installer": "npm run build && electron-builder --win nsis",
     "generate-icons": "node scripts/generate-icons.js",
+    "build:launcher": "powershell -ExecutionPolicy Bypass -Command \"& 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe' /target:winexe /win32icon:Tellus.ico /out:Tellus.exe scripts/Launcher.cs\"",
     "create-shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-shortcut.ps1"
   },
   "build": {
