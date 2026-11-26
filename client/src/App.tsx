@@ -239,9 +239,12 @@ export const App: React.FC = () => {
       const list = await api.listSessions(true);
       setSessions(list);
       if (list.length > 0 && !activeSessionId) {
-        handleSelectSession(list[0].id);
+        handleSelectSession(list[0].id, false);
       } else if (list.length === 0) {
-        await handleNewSession();
+        const newId = 'session_' + Math.random().toString(36).substring(2, 9);
+        setActiveSessionId(newId);
+        activeSessionIdRef.current = newId;
+        setMessages([]);
       }
     } catch {
       // ignore
@@ -476,7 +479,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSelectSession = async (sessionId: string) => {
+  const handleSelectSession = async (sessionId: string, switchToAgent: boolean = true) => {
     // If previous active session has messages, persist it under its own ID before switching
     if (activeSessionIdRef.current && messages.length > 0) {
       saveCurrentSession(messages, isLiveVoiceActiveInChat, chatLiveVoiceMode, chatExecutionMode, activeSessionIdRef.current);
@@ -490,7 +493,9 @@ export const App: React.FC = () => {
     try {
       voiceService.stopAll();
     } catch {}
-    setMainViewMode('agent');
+    if (switchToAgent) {
+      setMainViewMode('agent');
+    }
     try {
       const session = await api.getSession(sessionId);
       if (session) {
