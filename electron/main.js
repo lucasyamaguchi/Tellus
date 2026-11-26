@@ -82,15 +82,22 @@ function startBackendServer() {
   // Terminate any stale orphan server holding the port
   killPortProcess(SERVER_PORT);
 
-  const hasBuiltServer = fs.existsSync(serverDistScript);
-  // Use Electron's embedded Node runtime when running built dist/index.js so target PCs don't need Node installed
-  const useEmbeddedNode = hasBuiltServer && app.isPackaged;
-  const execPath = useEmbeddedNode ? process.execPath : 'node';
-  const execArgs = hasBuiltServer 
-    ? [serverDistScript] 
-    : ['--loader', 'ts-node/esm', 'src/index.ts'];
+  const srcIndex = path.join(serverDir, 'src', 'index.ts');
+  const isSrcNewer = fs.existsSync(srcIndex) && (!fs.existsSync(serverDistScript) || fs.statSync(srcIndex).mtimeMs > fs.statSync(serverDistScript).mtimeMs);
 
-  console.log(`[Electron] Inicializando backend server (${useEmbeddedNode ? 'Embedded Node' : 'System Node'})...`);
+  const hasBuiltServer = fs.existsSync(serverDistScript);
+  // Use built dist if packaged OR if dist is newer than src in dev
+  const useBuilt = app.isPackaged || (hasBuiltServer && !isSrcNewer);
+  const useEmbeddedNode = useBuilt && app.isPackaged;
+  const execPath = useEmbeddedNode ? process.execPath : 'node';
+  
+  const tsxCli = path.join(serverDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const hasTsx = fs.existsSync(tsxCli);
+  const execArgs = useBuilt
+    ? [serverDistScript]
+    : (hasTsx ? [tsxCli, 'src/index.ts'] : [serverDistScript]);
+
+  console.log(`[Electron] Inicializando backend server (${useBuilt ? (useEmbeddedNode ? 'Embedded Node' : 'Built dist/index.js') : 'Live TypeScript src/index.ts via tsx'})...`);
 
   // Ensure log directory exists
   const logDir = app.getPath('userData');
@@ -106,6 +113,9 @@ function startBackendServer() {
     env: {
       ...process.env,
       PORT: String(SERVER_PORT),
+      TELLUS_APP_DIR: rootDir,
+      TELLUS_VAULT_DIR: path.join(rootDir, 'vault'),
+      TELLUS_SKILLS_DIR: path.join(rootDir, 'skills'),
       ...(useEmbeddedNode ? { ELECTRON_RUN_AS_NODE: '1' } : {})
     },
     stdio: ['ignore', 'pipe', 'pipe']

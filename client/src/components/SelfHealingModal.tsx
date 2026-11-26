@@ -20,7 +20,7 @@ interface SelfHealingModalProps {
   onClose: () => void;
   currentProject: ProjectOverview | null;
   activeModel: string;
-  currentViewMode: 'agent' | 'notes' | 'skills';
+  currentViewMode: 'home' | 'conversations' | 'agent' | 'notes' | 'skills';
   activeNoteTitle?: string | null;
   onTriggerSelfHealing: (userDescription: string, contextSnapshot: string) => void;
 }
@@ -71,7 +71,7 @@ export const SelfHealingModal: React.FC<SelfHealingModalProps> = ({
     const finalDescription = description.trim() || 'Execute um auto-diagnóstico completo do sistema Tellus, verifique integridade de testes e corrija eventuais bugs identificados.';
     
     const contextSnapshot = `
-- Visão Atual: ${currentViewMode === 'notes' ? `TellusMD Notas (Nota ativa: "${activeNoteTitle || 'Nenhuma'}")` : currentViewMode === 'skills' ? 'Skills & Artefatos' : 'Workspace do Agente'}
+- Visão Atual: ${currentViewMode === 'notes' ? `TellusMD Notas (Nota ativa: "${activeNoteTitle || 'Nenhuma'}")` : currentViewMode === 'skills' ? 'Skills & Artefatos' : currentViewMode === 'conversations' ? 'Central de Conversas' : 'Workspace do Agente'}
 - Projeto Ativo: ${currentProject?.name || 'Tellus'} (${currentProject?.path || 'Local'})
 - Modelo Principal: ${activeModel}
 `.trim();

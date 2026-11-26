@@ -29,6 +29,22 @@ import { CloudSyncEngine } from './services/sync/cloudSyncEngine.js';
 import { SecurityShield } from './services/sync/securityShield.js';
 import prettier from 'prettier';
 
+// Connect TellusNoteEngine deletion and save hooks to CloudSyncEngine (Tombstones & Remote cleanup)
+TellusNoteEngine.registerDeletionHook((relativePath, isFolder) => {
+  try {
+    CloudSyncEngine.recordDeletion(relativePath, isFolder);
+  } catch (err) {
+    console.error('[CloudSync Hook] Falha ao registrar exclusão no cloud mirror:', err);
+  }
+});
+TellusNoteEngine.registerSaveHook((relativePath) => {
+  try {
+    CloudSyncEngine.clearTombstone(relativePath);
+  } catch (err) {
+    console.error('[CloudSync Hook] Falha ao limpar tombstone:', err);
+  }
+});
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -250,6 +266,29 @@ app.post('/api/projects/close', (req, res) => {
   }
 });
 
+app.get('/api/projects/discovered', (req, res) => {
+  try {
+    const projectsRoot = ProjectManager.getProjectsRoot();
+    const projects = ProjectManager.listDiscoveredProjects();
+    res.json({ projectsRoot, projects });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/set-root', (req, res) => {
+  try {
+    const { projectsRoot } = req.body;
+    if (!projectsRoot) {
+      return res.status(400).json({ error: 'Diretório raiz de projetos é obrigatório' });
+    }
+    const result = ProjectManager.setProjectsRoot(projectsRoot);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 3.1 Project Settings & Execution Security Endpoints
 app.get('/api/project/settings', (req, res) => {
   try {
@@ -276,7 +315,8 @@ app.get('/api/project/effective-security', (req, res) => {
   try {
     const targetPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
     const chatMode = req.query.chatMode as any;
-    const effective = ProjectSettingsManager.resolveEffectiveSecurity(chatMode, targetPath);
+    const chatDirectoryPolicy = req.query.chatDirectoryPolicy as any;
+    const effective = ProjectSettingsManager.resolveEffectiveSecurity(chatMode, targetPath, chatDirectoryPolicy);
     res.json(effective);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -870,6 +910,79 @@ app.post('/api/notes/folders/move', (req, res) => {
   }
 });
 
+app.post('/api/notes/folders/rename', (req, res) => {
+  try {
+    const { oldName, newName } = req.body;
+    if (!oldName || !newName) {
+      return res.status(400).json({ error: 'oldName e newName são obrigatórios' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const result = TellusNoteEngine.renameFolder(oldName, newName, currentPath);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/folders/merge', (req, res) => {
+  try {
+    const { sourceFolders, targetFolder } = req.body;
+    if (!sourceFolders || !Array.isArray(sourceFolders) || !targetFolder) {
+      return res.status(400).json({ error: 'sourceFolders (array) e targetFolder são obrigatórios' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const result = TellusNoteEngine.mergeFolders(sourceFolders, targetFolder, currentPath);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/bulk-move', (req, res) => {
+  try {
+    const { noteIds, targetFolder } = req.body;
+    if (!noteIds || !Array.isArray(noteIds) || targetFolder === undefined) {
+      return res.status(400).json({ error: 'noteIds (array) e targetFolder são obrigatórios' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const result = TellusNoteEngine.bulkMoveNotes(noteIds, targetFolder, currentPath);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/bulk-delete', (req, res) => {
+  try {
+    const { noteIds } = req.body;
+    if (!noteIds || !Array.isArray(noteIds)) {
+      return res.status(400).json({ error: 'noteIds (array) é obrigatório' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const result = TellusNoteEngine.bulkDeleteNotes(noteIds, currentPath);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notes/merge', (req, res) => {
+  try {
+    const { noteIds, title, targetFolder, deleteSources } = req.body;
+    if (!noteIds || !Array.isArray(noteIds) || noteIds.length < 2) {
+      return res.status(400).json({ error: 'noteIds deve conter pelo menos 2 notas para unificação' });
+    }
+    const currentPath = ProjectManager.getCurrentProject();
+    const mergedNote = TellusNoteEngine.mergeNotes(noteIds, { title, targetFolder, deleteSources }, currentPath);
+    if (!mergedNote) {
+      return res.status(404).json({ error: 'Não foi possível encontrar as notas especificadas para mesclar' });
+    }
+    res.json(mergedNote);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/notes/folders', (req, res) => {
   try {
     const folderName = (req.query.name as string) || req.body?.name;
@@ -878,6 +991,9 @@ app.delete('/api/notes/folders', (req, res) => {
     }
     const currentPath = ProjectManager.getCurrentProject();
     const result = TellusNoteEngine.deleteFolder(folderName, currentPath);
+    if (result.protected) {
+      return res.status(403).json({ error: 'Pastas e arquivos internos do sistema são protegidos contra exclusão acidental.' });
+    }
 
     // Auto-sync Active Context: if current project's active_context.md references this deleted folder/study,
     // clear the stale reference so AI never presumes notes/modules exist.
@@ -1116,6 +1232,20 @@ app.post('/api/notes/pick-vault-directory', async (req, res) => {
       vaultPath: updatedConfig.vaultPath || picked,
       config: updatedConfig
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Retrieve single note by ID, title, or relative path
+app.get('/api/notes/:id', (req, res) => {
+  try {
+    const currentPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
+    const note = TellusNoteEngine.getNote(req.params.id, currentPath);
+    if (!note) {
+      return res.status(404).json({ error: 'Nota não encontrada' });
+    }
+    res.json(note);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2161,7 +2291,15 @@ app.delete('/api/notes/:id', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
     const isProjectSpecific = req.query.isProjectSpecific === 'true';
-    const success = TellusNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath);
+    const force = req.query.force === 'true';
+    const success = TellusNoteEngine.deleteNote(req.params.id, isProjectSpecific, currentPath, force);
+    if (!success) {
+      const note = TellusNoteEngine.getNote(req.params.id, currentPath);
+      if (note && note.isInternal && !force) {
+        return res.status(403).json({ error: 'Arquivos internos do projeto/sistema são protegidos contra exclusão acidental.' });
+      }
+      return res.status(400).json({ error: 'Não foi possível encontrar ou excluir a nota especificada.' });
+    }
 
     // Auto-clean active_context if it specifically mentions this deleted note ID
     try {
@@ -2340,7 +2478,7 @@ app.delete('/api/skills/:id', (req, res) => {
 
 app.get('/api/artifacts', (req, res) => {
   try {
-    const currentPath = ProjectManager.getCurrentProject();
+    const currentPath = (req.query.projectPath as string) || ProjectManager.getCurrentProject();
     const artifacts = SkillManager.listArtifacts(currentPath);
     res.json(artifacts);
   } catch (err: any) {
@@ -2397,17 +2535,28 @@ app.get('/api/sessions', (req, res) => {
         currentPath,
         ...(config.openProjects || []),
         ...(config.recentProjects || [])
-      ])).filter(p => fs.existsSync(p));
+      ])).filter(p => p && fs.existsSync(p));
 
-      const allSessions: any[] = [];
+      // Include standalone conversations first
+      const allSessions: any[] = [...SessionManager.listSessions(null)];
       for (const p of allPaths) {
         const sessions = SessionManager.listSessions(p);
         allSessions.push(...sessions);
       }
-      return res.json(allSessions);
+
+      // Deduplicate by sessionId
+      const seenIds = new Set<string>();
+      const deduplicated: any[] = [];
+      for (const s of allSessions) {
+        if (!seenIds.has(s.id)) {
+          seenIds.add(s.id);
+          deduplicated.push(s);
+        }
+      }
+      return res.json(deduplicated);
     }
 
-    const currentPath = requestedPath || ProjectManager.getCurrentProject();
+    const currentPath = requestedPath !== undefined ? requestedPath : ProjectManager.getCurrentProject();
     const sessions = SessionManager.listSessions(currentPath);
     res.json(sessions);
   } catch (err: any) {
@@ -2477,6 +2626,19 @@ app.delete('/api/sessions/:id', (req, res) => {
   }
 });
 
+app.post('/api/sessions/:id/move', (req, res) => {
+  try {
+    const { targetProjectPath, sourceProjectPath } = req.body;
+    const session = SessionManager.moveSession(req.params.id, targetProjectPath, sourceProjectPath);
+    if (!session) {
+      return res.status(404).json({ error: 'Sessão não encontrada para movimentação' });
+    }
+    res.json({ success: true, session });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/sessions/search-messages', (req, res) => {
   try {
     const currentPath = ProjectManager.getCurrentProject();
@@ -2517,12 +2679,14 @@ app.get('/api/terminal/tasks', (req, res) => {
 
 // 9. Streaming Agent Chat SSE Endpoint
 app.post('/api/chat/stream', async (req, res) => {
-  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode, sessionId, sessionTitle } = req.body;
-  const projectPath = ProjectManager.getCurrentProject();
+  const { messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode, directoryAccessPolicy, sessionId, sessionTitle, isStandalone, projectPath: reqProjectPath, isSkillArchitect } = req.body;
+  const isSkillArchitectSession = !!isSkillArchitect || routineId === 'skill_architect';
+  const isStandaloneSession = isSkillArchitectSession || !!isStandalone || reqProjectPath === '' || reqProjectPath === 'standalone';
+  const projectPath = (isStandaloneSession || isSkillArchitectSession) ? '' : (reqProjectPath || ProjectManager.getCurrentProject() || '');
   const config = ConfigManager.getConfig();
 
-  // Resolve Effective Security Preset and Plan Review Policy
-  const effectiveSecurity = ProjectSettingsManager.resolveEffectiveSecurity(executionMode, projectPath);
+  // Resolve Effective Security Preset, Plan Review Policy and Directory Access Policy
+  const effectiveSecurity = ProjectSettingsManager.resolveEffectiveSecurity(executionMode, projectPath, directoryAccessPolicy);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -2533,11 +2697,52 @@ app.post('/api/chat/stream', async (req, res) => {
     res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // Find system prompt based on routine
-  let systemPrompt = 'Você é o Tellus Agent, um assistente de engenharia de software de elite. Você executa tarefas completas usando ferramentas locais sem necessidade de intervenção por terminal manual.';
+  // Find system prompt based on routine & specialized modes
+  let systemPrompt = (isStandaloneSession || !projectPath)
+    ? 'Você é o Tellus Mind, um assistente avançado de inteligência, estudos, pesquisa e brainstorming. Esta é uma Conversa Livre (Sem Projeto Vinculado). Você pode responder dúvidas técnicas e conceituais, orientar estudos, formular hipóteses e registrar anotações no Tellus Vault usando a ferramenta note_save sempre que oportuno.'
+    : 'Você é o Tellus Agent, um assistente de engenharia de software de elite. Você executa tarefas completas usando ferramentas locais sem necessidade de intervenção por terminal manual.';
   if (routineId) {
     const routine = config.customRoutines.find(r => r.id === routineId);
     if (routine) systemPrompt = routine.systemPrompt;
+  }
+
+  // Specialized Skill Architect Mode Guardrails
+  if (isSkillArchitect || routineId === 'skill_architect') {
+    systemPrompt = '[🛠️ MODO EXCLUSIVO: ARQUITETO DE SKILLS DO TELLUS & SKILL FORGE]\n' +
+      'Você é o Arquiteto de Skills especialista do Tellus. Seu único propósito nesta sessão é conceber, estruturar, iterar, lapidar e forjar novas Skills profissionais para os agentes de IA do Tellus com base nos pedidos do usuário.\n\n' +
+      '[RÉDEAS DE EXECUÇÃO & DIRETRIZES FUNDAMENTAIS]:\n' +
+      '1. **ESCOPO & FORMATO DE UMA SKILL TELLUS**:\n' +
+      '   Uma Skill no Tellus é um arquivo JSON persistido em \'skills/<id>.json\' (ou \'.agentic/skills/\' se for de projeto específico):\n' +
+      '   - id: identificador único em kebab-case (ex: \'react-perf-optimizer\', \'security-reviewer\', \'test-driven-development\')\n' +
+      '   - name: Nome legível e expressivo\n' +
+      '   - category: Categoria (ex: Frontend, Backend, DevSecOps, Arquitetura, Testes, Estudo, Automação, Performance)\n' +
+      '   - description: 1 a 2 frases resumindo a utilidade exata e os gatilhos de ativação\n' +
+      '   - scope: \'global\' (padrão) ou \'project\' (se for restrita a um projeto)\n' +
+      '   - promptInstructions: O manual de conduta completo e rigoroso que guiará qualquer agente do Tellus quando a skill estiver ativa.\n\n' +
+      '2. **FLUXO ITERATIVO CONVERSACIONAL (FEEDBACK DO USUÁRIO)**:\n' +
+      '   - Dialogue ativamente com o usuário: entenda o que ele quer alcançar, que problemas essa skill deve evitar e como deve agir.\n' +
+      '   - Sempre que o usuário pedir para incluir, alterar ou retirar itens (ex: \'tira a validação de KaTeX\', \'adicione regras de Clean Architecture\', \'mude o tom para mais conciso\'), aplique a alteração no esboço imediatamente e mostre as diferenças.\n\n' +
+      '3. **ESTRUTURA DE RETORNO OBRIGATÓRIA EM CADA RESPOSTA**:\n' +
+      '   Em cada turno de desenvolvimento, apresente de forma visual, elegante e estruturada:\n' +
+      '   A) 📋 **Status & Modificações**: Explique objetivamente o que foi adicionado ou removido com base no último pedido do usuário.\n' +
+      '   B) 🛠️ **Ficha Técnica da Skill**:\n' +
+      '   ```yaml\n' +
+      '   id: <id-kebab-case>\n' +
+      '   name: <Nome da Skill>\n' +
+      '   category: <Categoria>\n' +
+      '   scope: <global | project>\n' +
+      '   description: <Descrição concisa>\n' +
+      '   ```\n' +
+      '   C) 📜 **Diretrizes e Regras (promptInstructions)**:\n' +
+      '   Exiba as regras claras que o agente seguirá (Passo a passo, o que fazer, e regras negativas: O que NUNCA fazer).\n' +
+      '   D) 🧪 **SIMULAÇÃO PRÁTICA EM ROTINA REAL** (OBRIGATÓRIO):\n' +
+      '   Demonstre exatamente como um agente comum do Tellus se comportaria executando um pedido hipotético do usuário com essa skill ativa:\n' +
+      '   * **Cenário de Teste**: "Prompt hipotético do usuário..."\n' +
+      '   * **Comportamento do Agente com a Skill**:\n' +
+      '     [Exemplo realista da resposta ou ações do agente com as diretrizes da skill aplicadas].\n\n' +
+      '4. **FERRAMENTA \'skill_save\'**:\n' +
+      '   - Assim que o formato estiver amadurecido ou quando o usuário aprovar (ex: \'pode salvar\', \'salvar skill\', \'gostei\', \'finalizar\'), chame imediatamente a ferramenta \'skill_save\' passando os campos estruturados (id, name, category, description, prompt_instructions, scope).\n' +
+      '   - Ao salvar, confirme com entusiasmo e informe que a skill já está cadastrada no Tellus, visível na aba de Skills e pronta para uso imediato em todos os agentes!';
   }
 
   // Inject Token Efficiency strict instructions if active
@@ -2596,11 +2801,12 @@ app.post('/api/chat/stream', async (req, res) => {
       (event) => {
         sendSSE(event.type, event.data);
       },
-      12,
+      50,
       abortController.signal,
       effectiveSecurity.preset,
       effectiveSecurity.planReviewPolicy,
-      { sessionId, sessionTitle }
+      { sessionId, sessionTitle, directoryAccessPolicy: effectiveSecurity.directoryAccessPolicy },
+      pipeline
     );
 
     sendSSE('done', { status: 'completed' });

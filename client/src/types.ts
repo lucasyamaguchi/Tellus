@@ -296,6 +296,7 @@ export interface TellusNote {
   relativePath?: string;
   hasInk?: boolean;
   inkStrokeCount?: number;
+  isInternal?: boolean;
 }
 
 export type TelluNote = TellusNote;
@@ -305,16 +306,21 @@ export type FrankNote = TellusNote;
 export interface GraphNode {
   id: string;
   label: string;
-  type: 'note' | 'subject' | 'tag' | 'skill' | 'category' | 'agent' | 'project' | 'module' | 'memory' | 'routine' | string;
+  type: 'note' | 'subject' | 'tag' | 'macro_category' | 'keyword' | 'skill' | 'category' | 'agent' | 'project' | 'module' | 'memory' | 'routine' | string;
   val: number;
   color?: string;
   details?: string;
+  level?: 1 | 2 | 3 | 4;
+  hotness?: number;
+  macroCategory?: string;
+  linkedNoteIds?: string[];
+  parentId?: string;
 }
 
 export interface GraphLink {
   source: string;
   target: string;
-  type: 'wikilink' | 'tag' | 'subject' | 'skill_category' | 'skill_agent' | 'synergy' | 'proj_module' | 'proj_memory' | 'proj_routine' | string;
+  type: 'wikilink' | 'tag' | 'subject' | 'macro_subject' | 'keyword' | 'skill_category' | 'skill_agent' | 'synergy' | 'proj_module' | 'proj_memory' | 'proj_routine' | string;
 }
 
 export interface GraphData {
@@ -421,12 +427,20 @@ export interface QuotedMessage {
   timestamp: number;
 }
 
+export interface TaskStepItem {
+  id?: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'done' | 'failed' | 'skipped';
+  reason?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoning?: string;
   toolCalls?: ToolCallItem[];
+  taskSteps?: TaskStepItem[];
   modelUsed?: string;
   timestamp: number;
   attachments?: Attachment[];
@@ -441,11 +455,15 @@ export interface ChatSessionMetadata {
   model: string;
   messageCount: number;
   preview: string;
+  routineId?: string;
   isLiveVoice?: boolean;
   liveVoiceMode?: 'voice_only' | 'mixed' | 'voice_output_only';
   projectPath?: string;
   projectName?: string;
   executionMode?: ExecutionSecurityPreset;
+  directoryAccessPolicy?: DirectoryAccessPolicy | 'inherit';
+  isStandalone?: boolean;
+  isSkillArchitect?: boolean;
 }
 
 export interface ChatSession {
@@ -463,10 +481,14 @@ export interface ChatSession {
   projectPath?: string;
   projectName?: string;
   executionMode?: ExecutionSecurityPreset;
+  directoryAccessPolicy?: DirectoryAccessPolicy | 'inherit';
+  isStandalone?: boolean;
+  isSkillArchitect?: boolean;
 }
 
 export type ExecutionSecurityPreset = 'request_review' | 'default' | 'turbo' | 'inherit';
 export type PlanReviewPolicy = 'always_proceed' | 'always_review';
+export type DirectoryAccessPolicy = 'ask_permission' | 'unrestricted';
 
 export interface FileAccessRules {
   readAllowed: boolean;
@@ -491,6 +513,7 @@ export interface SandboxAndMcpRules {
 export interface ProjectSettings {
   securityPreset: ExecutionSecurityPreset;
   planReviewPolicy: PlanReviewPolicy;
+  directoryAccessPolicy?: DirectoryAccessPolicy;
   fileAccess: FileAccessRules;
   network: NetworkAccessRules;
   terminal: TerminalExecutionRules;
@@ -500,6 +523,7 @@ export interface ProjectSettings {
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   securityPreset: 'default',
   planReviewPolicy: 'always_review',
+  directoryAccessPolicy: 'ask_permission',
   fileAccess: {
     readAllowed: true,
     writeAllowed: true,

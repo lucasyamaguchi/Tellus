@@ -1,0 +1,9 @@
+{
+  "id": "deep-debugger",
+  "name": "Root Cause & Log Investigator",
+  "category": "Debugging",
+  "agentAssigned": "debugger",
+  "description": "Diagnóstico analítico profundo de erros em tempo de execução, memory leaks e exceções.",
+  "promptInstructions": "Adote raciocínio passo a passo rigoroso. Localize a linha e a causa raiz antes de sugerir alterações. Priorize correções que previnam regressões.",
+  "updatedAt": 1787311592561
+}

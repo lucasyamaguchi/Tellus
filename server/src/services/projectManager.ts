@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
-import { ConfigManager } from './configManager.js';
+import { ConfigManager, resolveDefaultProjectsRoot } from './configManager.js';
 import { MemoryEngine } from './memory/memoryEngine.js';
 import { FileTools } from './tools/fileTools.js';
 
@@ -66,6 +66,111 @@ export class ProjectManager {
     return raw.filter(p => fs.existsSync(p));
   }
 
+  public static getProjectsRoot(): string {
+    if (process.env.TELLUS_PROJECTS_DIR && fs.existsSync(process.env.TELLUS_PROJECTS_DIR)) {
+      return path.resolve(process.env.TELLUS_PROJECTS_DIR);
+    }
+    const config = ConfigManager.getConfig();
+    if (config.projectsRoot && fs.existsSync(config.projectsRoot)) {
+      return path.resolve(config.projectsRoot);
+    }
+    return resolveDefaultProjectsRoot();
+  }
+
+  public static setProjectsRoot(newRoot: string): { success: boolean; projectsRoot: string } {
+    const resolved = path.resolve(newRoot);
+    if (!fs.existsSync(resolved)) {
+      fs.mkdirSync(resolved, { recursive: true });
+    }
+    ConfigManager.updateConfig({ projectsRoot: resolved });
+    return { success: true, projectsRoot: resolved };
+  }
+
+  public static listDiscoveredProjects(): Array<{
+    name: string;
+    path: string;
+    isCurrent: boolean;
+    isOpen: boolean;
+    hasAgentic: boolean;
+    lastModified: number;
+    modulesCount: number;
+    artifactsCount: number;
+  }> {
+    const rootDir = this.getProjectsRoot();
+    const currentPath = path.resolve(this.getCurrentProject()).toLowerCase();
+    const config = ConfigManager.getConfig();
+    const openSet = new Set((config.openProjects || []).map(p => path.resolve(p).toLowerCase()));
+
+    const candidatePaths = new Map<string, string>();
+
+    // 1. Scan default projects root
+    if (fs.existsSync(rootDir)) {
+      try {
+        const entries = fs.readdirSync(rootDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== '$RECYCLE.BIN') {
+            const fullPath = path.join(rootDir, entry.name);
+            candidatePaths.set(fullPath.toLowerCase(), fullPath);
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Include current, open, and recent projects
+    const extra = [
+      this.getCurrentProject(),
+      ...(config.openProjects || []),
+      ...(config.recentProjects || [])
+    ];
+    for (const p of extra) {
+      if (p && fs.existsSync(p)) {
+        const resolved = path.resolve(p);
+        candidatePaths.set(resolved.toLowerCase(), resolved);
+      }
+    }
+
+    const result = [];
+    for (const [, fullPath] of candidatePaths) {
+      try {
+        const stat = fs.statSync(fullPath);
+        const name = path.basename(fullPath);
+        const hasAgentic = fs.existsSync(path.join(fullPath, '.agentic'));
+        let modulesCount = 0;
+        try {
+          const subs = fs.readdirSync(fullPath, { withFileTypes: true });
+          modulesCount = subs.filter(s => s.isDirectory() && !s.name.startsWith('.') && s.name !== 'node_modules' && s.name !== 'dist').length;
+        } catch {}
+
+        let artifactsCount = 0;
+        const artifactsDir = path.join(fullPath, '.agentic', 'artifacts');
+        if (fs.existsSync(artifactsDir)) {
+          try {
+            artifactsCount = fs.readdirSync(artifactsDir).filter(f => f.endsWith('.md')).length;
+          } catch {}
+        }
+
+        result.push({
+          name,
+          path: fullPath,
+          isCurrent: fullPath.toLowerCase() === currentPath,
+          isOpen: openSet.has(fullPath.toLowerCase()) || fullPath.toLowerCase() === currentPath,
+          hasAgentic,
+          lastModified: stat.mtimeMs,
+          modulesCount,
+          artifactsCount
+        });
+      } catch {}
+    }
+
+    return result.sort((a, b) => {
+      if (a.isCurrent) return -1;
+      if (b.isCurrent) return 1;
+      if (a.isOpen && !b.isOpen) return -1;
+      if (!a.isOpen && b.isOpen) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
   public static async pickDirectory(): Promise<string | null> {
     return new Promise((resolve) => {
       // Use PowerShell to open Windows FolderBrowserDialog
@@ -116,34 +221,30 @@ export class ProjectManager {
 
   // Generate Interactive Projects & Architecture Graph
   public static getProjectsGraphData(): {
-    nodes: Array<{ id: string; label: string; type: string; val: number; color?: string; details?: string }>;
+    nodes: Array<{ id: string; label: string; type: string; val: number; color?: string; details?: string; path?: string }>;
     links: Array<{ source: string; target: string; type: string }>;
   } {
     const config = ConfigManager.getConfig();
-    const currentPath = this.getCurrentProject();
-    const allProjectPaths = Array.from(new Set([
-      currentPath,
-      ...(config.openProjects || []),
-      ...(config.recentProjects || [])
-    ])).filter(p => fs.existsSync(p));
+    const currentPath = path.resolve(this.getCurrentProject()).toLowerCase();
+    const discovered = this.listDiscoveredProjects();
 
-    const nodes: Array<{ id: string; label: string; type: string; val: number; color?: string; details?: string }> = [];
+    const nodes: Array<{ id: string; label: string; type: string; val: number; color?: string; details?: string; path?: string }> = [];
     const links: Array<{ source: string; target: string; type: string }> = [];
 
-    for (const projPath of allProjectPaths) {
-      const resolved = path.resolve(projPath);
-      const projName = path.basename(resolved);
-      const isCurrent = resolved.toLowerCase() === currentPath.toLowerCase();
-      const projId = 'proj_' + projName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    for (const proj of discovered) {
+      const resolved = path.resolve(proj.path);
+      const isCurrent = resolved.toLowerCase() === currentPath;
+      const projId = 'proj_' + proj.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
       // 1. Central Project Node
       nodes.push({
         id: projId,
-        label: isCurrent ? `⭐ ${projName} (Ativo)` : `🚀 ${projName}`,
+        label: isCurrent ? `⭐ ${proj.name} (Ativo)` : (proj.isOpen ? `🚀 ${proj.name}` : `📁 ${proj.name}`),
         type: 'project',
-        val: isCurrent ? 24 : 18,
-        color: isCurrent ? '#6366f1' : '#3b82f6',
-        details: `Caminho do projeto: ${resolved}`
+        val: isCurrent ? 26 : (proj.isOpen ? 20 : 16),
+        color: isCurrent ? '#6366f1' : (proj.isOpen ? '#3b82f6' : '#64748b'),
+        details: `Caminho do projeto: ${resolved}\n${proj.modulesCount} pastas/módulos • ${proj.artifactsCount} artefatos/anotações`,
+        path: resolved
       });
 
       // 2. Project Modules & Top-Level Folders
@@ -154,14 +255,14 @@ export class ProjectManager {
           .slice(0, 8);
 
         for (const folder of topFolders) {
-          const modId = `${projId}_mod_${folder.name}`;
+          const modId = `${projId}_mod_${folder.name.replace(/[^a-z0-9]/gi, '_')}`;
           nodes.push({
             id: modId,
             label: `📁 ${folder.name}`,
             type: 'module',
-            val: 12,
+            val: 11,
             color: '#38bdf8',
-            details: `Módulo / Diretório de ${projName}: ${folder.name}`
+            details: `Módulo / Diretório de ${proj.name}: ${folder.name}`
           });
 
           links.push({
@@ -186,7 +287,8 @@ export class ProjectManager {
             type: 'memory',
             val: 10,
             color: '#ec4899',
-            details: `Decisão de memória arquitetural gravada para ${projName}: ${mem.title}`
+            details: `Decisão de memória arquitetural de ${proj.name}: ${mem.title}`,
+            path: path.join(resolved, '.agentic', 'memory', mem.filename)
           });
 
           links.push({
@@ -198,9 +300,46 @@ export class ProjectManager {
       } catch {
         // ignore
       }
+
+      // 4. Project Artifacts & Plans (.agentic/artifacts)
+      try {
+        const artifactsDir = path.join(resolved, '.agentic', 'artifacts');
+        if (fs.existsSync(artifactsDir)) {
+          const artFiles = fs.readdirSync(artifactsDir).filter(f => f.endsWith('.md'));
+          for (const artFile of artFiles.slice(0, 6)) {
+            const safeArtName = artFile.replace(/\.md$/i, '').replace(/[^a-z0-9]/gi, '_');
+            const artId = `${projId}_art_${safeArtName}`;
+            const artPath = path.join(artifactsDir, artFile);
+            let artTitle = artFile.replace(/\.md$/i, '').replace(/[-_]/g, ' ');
+            try {
+              const headLine = fs.readFileSync(artPath, 'utf-8').split('\n')[0] || '';
+              const headMatch = headLine.match(/^#+\s*(.*)/);
+              if (headMatch) artTitle = headMatch[1].trim();
+            } catch {}
+
+            nodes.push({
+              id: artId,
+              label: `📄 ${artTitle}`,
+              type: 'artifact',
+              val: 12,
+              color: '#10b981',
+              details: `Plano / Artefato de ${proj.name}: ${artTitle}\n${artPath}`,
+              path: artPath
+            });
+
+            links.push({
+              source: projId,
+              target: artId,
+              type: 'proj_artifact'
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
 
-    // 4. Global / Configured Routines connected to Projects
+    // 5. Global / Configured Routines connected to Projects
     const routines = config.customRoutines || [];
     for (const routine of routines) {
       const routineId = `routine_${routine.id}`;
@@ -209,14 +348,13 @@ export class ProjectManager {
         label: `⚡ ${routine.name}`,
         type: 'routine',
         val: 13,
-        color: '#10b981',
+        color: '#f59e0b',
         details: `Rotina automatizada de desenvolvimento: ${routine.name}`
       });
 
-      // Connect routine to all open projects
-      for (const projPath of allProjectPaths) {
-        const projName = path.basename(projPath);
-        const projId = 'proj_' + projName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      // Connect routine to open projects
+      for (const proj of discovered.filter(p => p.isOpen || p.isCurrent)) {
+        const projId = 'proj_' + proj.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
         links.push({
           source: routineId,
           target: projId,

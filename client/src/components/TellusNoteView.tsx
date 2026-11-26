@@ -173,6 +173,8 @@ export const TellusNoteView: React.FC<TellusNoteViewProps> = ({
       return false;
     }
   });
+  // Separation between Casual Personal Notes & Protected Project/System Internal Files
+  const [noteScopeTab, setNoteScopeTab] = useState<'personal' | 'internal'>('personal');
   const [isCreditsOpen, setIsCreditsOpen] = useState<boolean>(false);
   const [activeNote, setActiveNote] = useState<TelluNote | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -280,9 +282,31 @@ export const TellusNoteView: React.FC<TellusNoteViewProps> = ({
     id: string;
     name?: string;
     note?: TelluNote;
+    notes?: TelluNote[];
+    notebooks?: string[];
     x: number;
     y: number;
   } | null>(null);
+
+  // Multi-selection states (Ctrl + Click and Right-Click batch operations)
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [selectedNotebookNames, setSelectedNotebookNames] = useState<string[]>([]);
+
+  // QoL Modals for Notes & Notebooks
+  const [isMergeNotesModalOpen, setIsMergeNotesModalOpen] = useState<boolean>(false);
+  const [mergeNotesTitle, setMergeNotesTitle] = useState<string>('');
+  const [mergeNotesTargetFolder, setMergeNotesTargetFolder] = useState<string>('Geral');
+  const [mergeNotesDeleteSources, setMergeNotesDeleteSources] = useState<boolean>(true);
+
+  const [isBulkMoveModalOpen, setIsBulkMoveModalOpen] = useState<boolean>(false);
+  const [bulkMoveTargetFolder, setBulkMoveTargetFolder] = useState<string>('Geral');
+
+  const [isRenameFolderModalOpen, setIsRenameFolderModalOpen] = useState<boolean>(false);
+  const [renameFolderOldName, setRenameFolderOldName] = useState<string>('');
+  const [renameFolderNewName, setRenameFolderNewName] = useState<string>('');
+
+  const [isMergeNotebooksModalOpen, setIsMergeNotebooksModalOpen] = useState<boolean>(false);
+  const [mergeNotebooksTarget, setMergeNotebooksTarget] = useState<string>('');
 
   const toggleStarNote = useCallback((noteId: string) => {
     setStarredNoteIds(prev => {
@@ -741,6 +765,53 @@ export const TellusNoteView: React.FC<TellusNoteViewProps> = ({
     const raw = n.folder || 'Geral';
     return normalizeFolderPath(raw);
   }, [normalizeFolderPath]);
+
+  // Internal Files & System Folders Shield Helpers
+  const isInternalFolderName = useCallback((folderName: string): boolean => {
+    const clean = (folderName || '').replace(/\\/g, '/').trim();
+    const top = clean.split('/')[0].trim().toLowerCase();
+    const internalTops = [
+      'artefatos do projeto',
+      'documentação do projeto',
+      'documentacao do projeto',
+      'notas do projeto',
+      '_attachments',
+      'backend',
+      'frontend',
+      'criptografia',
+      'engenharia',
+      'infra',
+      'handoffs'
+    ];
+    return internalTops.includes(top) || clean.toLowerCase().startsWith('_attachments');
+  }, []);
+
+  const isInternalNotebookId = useCallback((notebookId: string): boolean => {
+    const lower = (notebookId || '').toLowerCase().trim();
+    const internalTops = [
+      'artefatos do projeto',
+      'documentação do projeto',
+      'documentacao do projeto',
+      'notas do projeto',
+      '_attachments',
+      'backend',
+      'frontend',
+      'criptografia',
+      'engenharia',
+      'infra',
+      'handoffs'
+    ];
+    return internalTops.includes(lower) || lower.startsWith('_attachments');
+  }, []);
+
+  const isNoteInternal = useCallback((n: TelluNote): boolean => {
+    if (n.isInternal !== undefined) return Boolean(n.isInternal);
+    const f = getNoteFolder(n);
+    return isInternalFolderName(f);
+  }, [getNoteFolder, isInternalFolderName]);
+
+  const personalNotes = useMemo(() => notes.filter(n => !isNoteInternal(n)), [notes, isNoteInternal]);
+  const internalNotes = useMemo(() => notes.filter(n => isNoteInternal(n)), [notes, isNoteInternal]);
 
   // Mouse Drag Handlers for Resizing Sidebar
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -1363,7 +1434,7 @@ export const TellusNoteView: React.FC<TellusNoteViewProps> = ({
     // Background Co-Editing & Multi-Device Poll (refreshes notes list & open note if updated on 2nd device)
     const coEditInterval = setInterval(async () => {
       try {
-        const latestNotes = await api.listNotes();
+        const latestNotes = await api.listNotes(currentProjectPath);
         setNotes(prev => {
           if (
             prev.length !== latestNotes.length ||
@@ -2249,6 +2320,10 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
 
   const handleDeleteNote = async (id: string, isProjectSpecific?: boolean) => {
     const targetNote = notes.find(n => n.id === id);
+    if (targetNote && isNoteInternal(targetNote)) {
+      alert(`O arquivo "${targetNote.title}" é um arquivo interno do projeto/sistema e está protegido contra exclusão acidental.`);
+      return;
+    }
     const title = targetNote?.title || id;
     if (!confirm(`Deseja mover a nota "${title}" para a lixeira?\n\n🛡️ Um backup de segurança será preservado automaticamente em .backups.`)) return;
     try {
@@ -2273,6 +2348,10 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       alert('A pasta padrão "Geral" não pode ser excluída.');
       return;
     }
+    if (isInternalFolderName(folderName)) {
+      alert(`A pasta "${folderName}" é uma pasta interna do sistema/projeto e está protegida contra exclusão acidental.`);
+      return;
+    }
     const cleanFolder = normalizeFolderPath(folderName);
     const folderNotes = notes.filter(n => {
       const f = getNoteFolder(n);
@@ -2292,7 +2371,8 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
       if (viewMode === 'graph') {
         fetchGraph();
       }
-      if (selectedNotebookId === folderName) {
+      const normSelected = normalizeFolderPath(selectedNotebookId);
+      if (normSelected === cleanFolder || normSelected.startsWith(cleanFolder + '/') || selectedNotebookId === folderName) {
         setSelectedNotebookId('all');
       }
       if (activeNote) {
@@ -2415,6 +2495,267 @@ Por favor, revise o conteúdo, organize com títulos hierárquicos, tabelas comp
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
+  // --- Handlers para Multi-Seleção (Ctrl+Click) e Menu de Contexto (Right-Click) ---
+  const handleNoteClick = useCallback((note: TelluNote, e?: React.MouseEvent) => {
+    if (e && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedNoteIds(prev => prev.includes(note.id) ? prev.filter(id => id !== note.id) : [...prev, note.id]);
+    } else {
+      setSelectedNoteIds([]);
+      selectNote(note);
+    }
+  }, [selectNote]);
+
+  const handleNoteContextMenu = useCallback((note: TelluNote, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let currentSelection = selectedNoteIds;
+    if (!selectedNoteIds.includes(note.id)) {
+      currentSelection = [note.id];
+      setSelectedNoteIds([note.id]);
+    }
+    const targetNotes = notes.filter(n => currentSelection.includes(n.id));
+    setActiveContextMenu({
+      type: 'note',
+      id: note.id,
+      note,
+      notes: targetNotes.length > 0 ? targetNotes : [note],
+      x: Math.min(e.clientX, window.innerWidth - 260),
+      y: Math.min(e.clientY, window.innerHeight - 340)
+    });
+  }, [selectedNoteIds, notes]);
+
+  const handleNotebookClick = useCallback((nbName: string, e?: React.MouseEvent) => {
+    if (e && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedNotebookNames(prev => prev.includes(nbName) ? prev.filter(n => n !== nbName) : [...prev, nbName]);
+    } else {
+      setSelectedNotebookNames([]);
+      openNotebook(nbName);
+    }
+  }, [openNotebook]);
+
+  const handleNotebookContextMenu = useCallback((folderOrNotebookName: string, type: 'notebook' | 'folder', e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let currentSelection = selectedNotebookNames;
+    if (!selectedNotebookNames.includes(folderOrNotebookName)) {
+      currentSelection = [folderOrNotebookName];
+      setSelectedNotebookNames([folderOrNotebookName]);
+    }
+    setActiveContextMenu({
+      type,
+      id: folderOrNotebookName,
+      name: folderOrNotebookName,
+      notebooks: currentSelection,
+      x: Math.min(e.clientX, window.innerWidth - 260),
+      y: Math.min(e.clientY, window.innerHeight - 340)
+    });
+  }, [selectedNotebookNames]);
+
+  // Conversar no Chat com Agente sobre notas selecionadas
+  const handleStartChatWithSelectedNotes = useCallback((targetNotes: TelluNote[]) => {
+    if (targetNotes.length === 0) return;
+    const titles = targetNotes.map(n => `[[${n.title}]]`).join(', ');
+    const bodies = targetNotes.slice(0, 8).map(n => `### Nota: [[${n.title}]]\n**Pasta:** ${getNoteFolder(n)}\n\n${n.content.slice(0, 1500)}`).join('\n\n---\n\n');
+    const prompt = `Olá Tellus! Gostaria de analisar e dialogar sobre as seguintes notas selecionadas (${titles}):\n\n${bodies}\n\nPor favor, faça uma síntese integrada, aponte conexões entre essas notas e me diga o que podemos extrair ou construir a partir delas.`;
+    onSearchInNewChat?.(prompt);
+    setActiveContextMenu(null);
+  }, [onSearchInNewChat, getNoteFolder]);
+
+  // Live Voice com Agente sobre notas selecionadas
+  const handleStartVoiceWithSelectedNotes = useCallback((targetNotes: TelluNote[]) => {
+    if (targetNotes.length === 0) return;
+    const topic = targetNotes.length === 1 
+      ? targetNotes[0].title 
+      : `Estudo: ${targetNotes.slice(0, 3).map(n => n.title).join(' + ')}${targetNotes.length > 3 ? ` (+${targetNotes.length - 3})` : ''}`;
+    const content = targetNotes.slice(0, 6).map(n => `[[${n.title}]]: ${n.content.slice(0, 500)}`).join('\n\n');
+    onStartLiveVoice?.(topic, content);
+    setActiveContextMenu(null);
+  }, [onStartLiveVoice]);
+
+  // Conversar no Chat com Agente sobre cadernos ou pastas selecionados
+  const handleStartChatWithNotebooks = useCallback((nbNames: string[]) => {
+    const relatedNotes = notes.filter(n => nbNames.some(name => {
+      const folder = getNoteFolder(n);
+      return folder === name || folder.startsWith(`${name}/`);
+    }));
+    const titles = relatedNotes.slice(0, 10).map(n => `[[${n.title}]]`).join(', ');
+    const bodies = relatedNotes.slice(0, 6).map(n => `### Nota: [[${n.title}]]\n${n.content.slice(0, 1000)}`).join('\n\n---\n\n');
+    const prompt = `Olá Tellus! Quero analisar o conteúdo do(s) caderno(s) / pasta(s) "${nbNames.join(', ')}", que contém ${relatedNotes.length} anotações (${titles}).\n\nPrincipais conteúdos:\n${bodies}\n\nPor favor, forneça uma visão geral executiva, tópicos fundamentais e insights para aprofundamento.`;
+    onSearchInNewChat?.(prompt);
+    setActiveContextMenu(null);
+  }, [notes, getNoteFolder, onSearchInNewChat]);
+
+  // Live Voice com Agente sobre cadernos ou pastas
+  const handleStartVoiceWithNotebooks = useCallback((nbNames: string[]) => {
+    const relatedNotes = notes.filter(n => nbNames.some(name => {
+      const folder = getNoteFolder(n);
+      return folder === name || folder.startsWith(`${name}/`);
+    }));
+    const topic = `Caderno(s): ${nbNames.join(', ')}`;
+    const content = relatedNotes.slice(0, 5).map(n => `[[${n.title}]]: ${n.content.slice(0, 400)}`).join('\n\n');
+    onStartLiveVoice?.(topic, content || `Discussão sobre o caderno ${nbNames.join(', ')}`);
+    setActiveContextMenu(null);
+  }, [notes, getNoteFolder, onStartLiveVoice]);
+
+  // Abertura e execução de Mesclar Notas
+  const handleOpenMergeNotesModal = useCallback((targetNotes: TelluNote[]) => {
+    const defaultFolder = targetNotes.length > 0 ? getNoteFolder(targetNotes[0]) : 'Geral';
+    setMergeNotesTitle(`Notas Consolidadas - ${new Date().toLocaleDateString('pt-BR')}`);
+    setMergeNotesTargetFolder(defaultFolder);
+    setMergeNotesDeleteSources(true);
+    setIsMergeNotesModalOpen(true);
+    setActiveContextMenu(null);
+  }, [getNoteFolder]);
+
+  const handleExecuteMergeNotes = useCallback(async () => {
+    if (selectedNoteIds.length < 2) {
+      alert('Selecione pelo menos 2 notas para juntar.');
+      return;
+    }
+    try {
+      const merged = await api.mergeNotes(selectedNoteIds, {
+        title: mergeNotesTitle.trim() || undefined,
+        targetFolder: mergeNotesTargetFolder.trim() || 'Geral',
+        deleteSources: mergeNotesDeleteSources
+      });
+      await fetchNotesAndFolders();
+      setSelectedNoteIds([]);
+      setIsMergeNotesModalOpen(false);
+      selectNote(merged);
+      setExportToast({
+        message: 'Notas unificadas com sucesso em uma só nota!',
+        filename: merged.filename
+      });
+      setTimeout(() => setExportToast(null), 4000);
+    } catch (err: any) {
+      alert(`Erro ao mesclar notas: ${err.message}`);
+    }
+  }, [selectedNoteIds, mergeNotesTitle, mergeNotesTargetFolder, mergeNotesDeleteSources, selectNote]);
+
+  // Abertura e execução de Mover Notas em Lote
+  const handleOpenBulkMoveModal = useCallback((targetNotes: TelluNote[]) => {
+    const defaultFolder = targetNotes.length > 0 ? getNoteFolder(targetNotes[0]) : 'Geral';
+    setBulkMoveTargetFolder(defaultFolder);
+    setIsBulkMoveModalOpen(true);
+    setActiveContextMenu(null);
+  }, [getNoteFolder]);
+
+  const handleExecuteBulkMove = useCallback(async () => {
+    if (selectedNoteIds.length === 0) return;
+    try {
+      const result = await api.bulkMoveNotes(selectedNoteIds, bulkMoveTargetFolder);
+      await fetchNotesAndFolders();
+      setSelectedNoteIds([]);
+      setIsBulkMoveModalOpen(false);
+      setExportToast({
+        message: `${result.successCount} nota(s) movida(s) para "${bulkMoveTargetFolder}" com sucesso!`,
+        filename: ''
+      });
+      setTimeout(() => setExportToast(null), 4000);
+    } catch (err: any) {
+      alert(`Erro ao mover notas em lote: ${err.message}`);
+    }
+  }, [selectedNoteIds, bulkMoveTargetFolder]);
+
+  // Execução de Deletar Notas em Lote
+  const handleExecuteBulkDelete = useCallback(async (noteIds: string[]) => {
+    if (noteIds.length === 0) return;
+
+    const notesToDelete = notes.filter(n => noteIds.includes(n.id));
+    const eligibleNotes = notesToDelete.filter(n => !isNoteInternal(n));
+    const internalCount = notesToDelete.length - eligibleNotes.length;
+
+    if (eligibleNotes.length === 0) {
+      alert('Todas as notas selecionadas são arquivos internos protegidos do projeto/sistema e não podem ser excluídas.');
+      return;
+    }
+
+    const confirmMsg = internalCount > 0
+      ? `Mover ${eligibleNotes.length} nota(s) para a lixeira? (${internalCount} arquivo(s) interno(s) serão preservados com segurança)`
+      : `Tem certeza que deseja mover as ${eligibleNotes.length} nota(s) selecionada(s) para a lixeira?`;
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const result = await api.bulkDeleteNotes(eligibleNotes.map(n => n.id));
+      await fetchNotesAndFolders();
+      await fetchDeletedNotes();
+      setSelectedNoteIds([]);
+      setActiveContextMenu(null);
+      let toastMsg = `${result.successCount} nota(s) movida(s) para a lixeira (.backups)`;
+      if (internalCount > 0 || (result.protectedCount && result.protectedCount > 0)) {
+        toastMsg += `. ${internalCount || result.protectedCount} arquivo(s) interno(s) foram protegidos e preservados!`;
+      }
+      setExportToast({
+        message: toastMsg,
+        filename: ''
+      });
+      setTimeout(() => setExportToast(null), 4500);
+    } catch (err: any) {
+      alert(`Erro ao excluir notas em lote: ${err.message}`);
+    }
+  }, [notes, isNoteInternal, fetchNotesAndFolders, fetchDeletedNotes]);
+
+  // Abertura e execução de Renomear/Editar Pasta ou Caderno
+  const handleOpenRenameFolderModal = useCallback((folderName: string) => {
+    setRenameFolderOldName(folderName);
+    setRenameFolderNewName(folderName);
+    setIsRenameFolderModalOpen(true);
+    setActiveContextMenu(null);
+  }, []);
+
+  const handleExecuteRenameFolder = useCallback(async () => {
+    if (!renameFolderOldName.trim() || !renameFolderNewName.trim() || renameFolderOldName === renameFolderNewName) {
+      setIsRenameFolderModalOpen(false);
+      return;
+    }
+    try {
+      const res = await api.renameFolder(renameFolderOldName.trim(), renameFolderNewName.trim());
+      await fetchNotesAndFolders();
+      setIsRenameFolderModalOpen(false);
+      setSelectedNotebookNames([]);
+      setExportToast({
+        message: `Caderno renomeado para "${renameFolderNewName.trim()}" (${res.movedNotesCount} notas atualizadas)`,
+        filename: ''
+      });
+      setTimeout(() => setExportToast(null), 4000);
+    } catch (err: any) {
+      alert(`Erro ao renomear caderno: ${err.message}`);
+    }
+  }, [renameFolderOldName, renameFolderNewName]);
+
+  // Abertura e execução de Agregar Cadernos (Merge Folders sem juntar os textos das notas)
+  const handleOpenMergeNotebooksModal = useCallback((nbNames: string[]) => {
+    setMergeNotebooksTarget(nbNames[0] || 'Geral');
+    setIsMergeNotebooksModalOpen(true);
+    setActiveContextMenu(null);
+  }, []);
+
+  const handleExecuteMergeNotebooks = useCallback(async () => {
+    const sources = selectedNotebookNames.filter(n => n !== mergeNotebooksTarget);
+    if (sources.length === 0 || !mergeNotebooksTarget) {
+      alert('Selecione pelo menos um caderno de origem diferente do destino.');
+      return;
+    }
+    try {
+      const res = await api.mergeFolders(sources, mergeNotebooksTarget);
+      await fetchNotesAndFolders();
+      setIsMergeNotebooksModalOpen(false);
+      setSelectedNotebookNames([]);
+      setExportToast({
+        message: `Cadernos agregados em "${mergeNotebooksTarget}" (${res.movedNotesCount} notas consolidadas)`,
+        filename: ''
+      });
+      setTimeout(() => setExportToast(null), 4000);
+    } catch (err: any) {
+      alert(`Erro ao agregar cadernos: ${err.message}`);
+    }
+  }, [selectedNotebookNames, mergeNotebooksTarget]);
 
   const handleTextSelection = () => {
     setTimeout(() => {
@@ -2650,14 +2991,29 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
     setTimeout(() => setCopiedHighlightId(null), 2000);
   }, []);
 
-  const filteredNotes = notes.filter(n => {
-    const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
-    const noteFolder = getNoteFolder(n);
-    const matchesFolder = selectedFolderFilter === 'all' || noteFolder === selectedFolderFilter;
-    return matchesQuery && matchesFolder;
-  });
+  const filteredNotes = useMemo(() => {
+    const pool = noteScopeTab === 'personal' ? personalNotes : internalNotes;
+    return pool.filter(n => {
+      const matchesQuery = !searchQuery.trim() ||
+        n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        n.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
+      const noteFolder = getNoteFolder(n);
+      const matchesFolder = selectedFolderFilter === 'all' || noteFolder === selectedFolderFilter;
+      return matchesQuery && matchesFolder;
+    });
+  }, [noteScopeTab, personalNotes, internalNotes, searchQuery, selectedFolderFilter, getNoteFolder]);
+
+  // Active Scope Folders (Excludes _attachments and separates Personal from Internal)
+  const activeScopeFolderNames = useMemo(() => {
+    const rawFolders = noteScopeTab === 'personal'
+      ? folders.filter(f => !isInternalFolderName(f)).map(normalizeFolderPath)
+      : folders.filter(f => isInternalFolderName(f)).map(normalizeFolderPath);
+    return Array.from(new Set([
+      ...rawFolders,
+      ...filteredNotes.map(n => getNoteFolder(n))
+    ])).filter(f => f && !f.startsWith('.') && f !== '_attachments').sort();
+  }, [noteScopeTab, folders, filteredNotes, getNoteFolder, normalizeFolderPath, isInternalFolderName]);
 
   // Notebook styling and visual details
   const getNotebookDetails = (notebookName: string) => {
@@ -2736,7 +3092,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
     allNotes: TelluNote[];
   }>();
 
-  allFolderNames.forEach(folderPath => {
+  activeScopeFolderNames.forEach(folderPath => {
     const segments = folderPath.split('/');
     const notebookId = segments[0] || 'Geral';
     if (!notebooksMap.has(notebookId)) {
@@ -2792,7 +3148,19 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
     }
   });
 
-  const notebooksList = Array.from(notebooksMap.values()).map(nb => {
+  const notebooksList = Array.from(notebooksMap.values())
+    .filter(nb => {
+      if (nb.id === '_attachments') return false;
+      if (noteScopeTab === 'personal') {
+        if (isInternalNotebookId(nb.id)) return false;
+        if (nb.id === '00_Quick-Notes' && nb.allNotes.length === 0) return false;
+        if (nb.id === 'Geral' && nb.allNotes.length === 0 && notebooksMap.size > 1) return false;
+      } else {
+        if (!isInternalNotebookId(nb.id) && nb.id !== 'Geral') return false;
+      }
+      return true;
+    })
+    .map(nb => {
     const sortedSubfolders = Array.from(nb.subfolders.values()).map(sub => ({
       ...sub,
       notes: sub.notes.slice().sort((a, b) => {
@@ -4224,6 +4592,34 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
 
               {sidebarTab === 'folders' ? (
                 <>
+                  {/* Scope Switcher: Minhas Notas vs Arquivos Internos */}
+                  <div className="flex items-center p-0.5 bg-card/90 rounded-lg border border-card-border text-[10px] w-full">
+                    <button
+                      type="button"
+                      onClick={() => setNoteScopeTab('personal')}
+                      className={`flex-1 py-1 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                        noteScopeTab === 'personal'
+                          ? 'bg-accent/25 text-accent-light border border-accent/40 shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <BookOpen className="w-3 h-3 shrink-0" />
+                      <span>Minhas Notas ({personalNotes.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNoteScopeTab('internal')}
+                      className={`flex-1 py-1 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                        noteScopeTab === 'internal'
+                          ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40 shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <ShieldCheck className="w-3 h-3 shrink-0 text-amber-400" />
+                      <span>Internos ({internalNotes.length})</span>
+                    </button>
+                  </div>
+
                   {/* Folders & Notebooks Header + View Switcher */}
                   <div className="flex items-center justify-between flex-wrap gap-1.5">
                     {/* View Switcher: Árvore (Notion) vs Estante (Goodnotes) */}
@@ -4585,15 +4981,18 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                           const details = getNotebookDetails(nb.id);
                           const NbIcon = details.icon;
                           const previewNotes = nb.allNotes.slice(0, 2);
+                          const isSelectedNb = selectedNotebookNames.includes(nb.id);
 
                           return (
                             <div
                               key={nb.id}
-                              onClick={() => {
-                                setSelectedNotebookId(nb.id);
-                                setActiveNote(null);
-                              }}
-                              className={`p-3 rounded-2xl border transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between space-y-2.5 ${details.bg} hover:border-accent hover:shadow-lg`}
+                              onClick={(e) => handleNotebookClick(nb.id, e)}
+                              onContextMenu={(e) => handleNotebookContextMenu(nb.id, 'notebook', e)}
+                              className={`p-3 rounded-2xl border transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between space-y-2.5 ${details.bg} ${
+                                isSelectedNb
+                                  ? 'ring-2 ring-accent bg-accent/20 border-accent shadow-xl'
+                                  : 'hover:border-accent hover:shadow-lg'
+                              }`}
                               style={{ borderLeftWidth: '5px' }}
                             >
                               <div className="flex items-start justify-between gap-2">
@@ -4621,14 +5020,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                    setActiveContextMenu({
-                                      type: 'notebook',
-                                      id: nb.id,
-                                      name: nb.id,
-                                      x: Math.min(rect.right + 6, window.innerWidth - 220),
-                                      y: Math.min(rect.top, window.innerHeight - 280)
-                                    });
+                                    handleNotebookContextMenu(nb.id, 'notebook', e);
                                   }}
                                   className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-card-border/60 text-slate-400 hover:text-white transition-opacity cursor-pointer"
                                   title="Ações do Caderno"
@@ -4640,19 +5032,24 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                               {/* Recent Notes Preview */}
                               {previewNotes.length > 0 && (
                                 <div className="space-y-1 pt-1.5 border-t border-card-border/40">
-                                  {previewNotes.map(pn => (
-                                    <div 
-                                      key={pn.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        selectNote(pn);
-                                      }}
-                                      className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-200 truncate cursor-pointer py-0.5"
-                                    >
-                                      <FileText className="w-3 h-3 text-slate-500 shrink-0" />
-                                      <span className="truncate">{pn.title}</span>
-                                    </div>
-                                  ))}
+                                  {previewNotes.map(pn => {
+                                    const isSelectedPn = selectedNoteIds.includes(pn.id);
+                                    return (
+                                      <div 
+                                        key={pn.id}
+                                        onClick={(e) => handleNoteClick(pn, e)}
+                                        onContextMenu={(e) => handleNoteContextMenu(pn, e)}
+                                        className={`flex items-center gap-1.5 text-[10px] truncate cursor-pointer py-0.5 rounded px-1 transition-colors ${
+                                          isSelectedPn
+                                            ? 'text-accent-light font-bold bg-accent/20'
+                                            : 'text-slate-400 hover:text-slate-200'
+                                        }`}
+                                      >
+                                        <FileText className={`w-3 h-3 shrink-0 ${isSelectedPn ? 'text-accent-light' : 'text-slate-500'}`} />
+                                        <span className="truncate">{pn.title}</span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -4716,18 +5113,22 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                               {curNb.directNotes.map(n => {
                                 const isActive = activeNote?.id === n.id;
                                 const isStarred = starredNoteIds.includes(n.id);
+                                const isSelectedNote = selectedNoteIds.includes(n.id);
                                 return (
                                   <div
                                     key={n.id}
-                                    onClick={() => selectNote(n)}
+                                    onClick={(e) => handleNoteClick(n, e)}
+                                    onContextMenu={(e) => handleNoteContextMenu(n, e)}
                                     className={`p-2 rounded-xl border transition-all cursor-pointer group flex items-center justify-between gap-2 ${
-                                      isActive
+                                      isSelectedNote
+                                        ? 'bg-accent/30 border-accent ring-2 ring-accent text-white shadow-md'
+                                        : isActive
                                         ? 'bg-accent/20 border-accent text-white shadow-sm'
                                         : 'bg-card/70 border-card-border/80 text-slate-300 hover:bg-card hover:text-white'
                                     }`}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                      <FileText className={`w-3.5 h-3.5 shrink-0 ${isSelectedNote ? 'text-accent-light' : 'text-slate-400'}`} />
                                       <span className="text-xs truncate font-medium">{n.title}</span>
                                     </div>
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4773,6 +5174,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                       const NbIcon = nbDetails.icon;
                       const isNbCollapsed = collapsedFolders[`nb:${nb.id}`];
                       const isDragTargetNb = dragOverFolder === nb.id;
+                      const isSelectedNb = selectedNotebookNames.includes(nb.id);
 
                       return (
                         <div
@@ -4803,13 +5205,24 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                           className={`space-y-1 rounded-2xl border p-2 transition-all duration-200 ${
                             isDragTargetNb
                               ? 'bg-accent/20 border-accent ring-2 ring-accent scale-[1.01] shadow-lg'
+                              : isSelectedNb
+                              ? 'bg-accent/20 border-accent ring-2 ring-accent shadow-md'
                               : `${nbDetails.bg} border-card-border/80`
                           }`}
                         >
                           {/* Notebook Header (Notion Style with Hover Actions) */}
-                          <div className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group cursor-pointer">
+                          <div 
+                            onContextMenu={(e) => handleNotebookContextMenu(nb.id, 'notebook', e)}
+                            className="flex items-center justify-between p-1.5 rounded-xl hover:bg-card-border/40 transition-colors group cursor-pointer"
+                          >
                             <div
-                              onClick={() => toggleFolderCollapse(`nb:${nb.id}`)}
+                              onClick={(e) => {
+                                if (e.ctrlKey || e.metaKey) {
+                                  handleNotebookClick(nb.id, e);
+                                } else {
+                                  toggleFolderCollapse(`nb:${nb.id}`);
+                                }
+                              }}
                               className="flex items-center space-x-2 cursor-pointer flex-1 truncate select-none"
                             >
                               {isNbCollapsed ? (
@@ -4850,14 +5263,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                  setActiveContextMenu({
-                                    type: 'notebook',
-                                    id: nb.id,
-                                    name: nb.id,
-                                    x: Math.min(rect.right + 6, window.innerWidth - 220),
-                                    y: Math.min(rect.top, window.innerHeight - 280)
-                                  });
+                                  handleNotebookContextMenu(nb.id, 'notebook', e);
                                 }}
                                 className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white cursor-pointer"
                                 title="Mais Ações do Caderno"
@@ -4874,6 +5280,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                               {nb.subfolders.map((sub) => {
                                 const isSubCollapsed = collapsedFolders[sub.path] !== undefined ? collapsedFolders[sub.path] : true;
                                 const isDragTargetSub = dragOverFolder === sub.path;
+                                const isSelectedSub = selectedNotebookNames.includes(sub.path);
 
                                 return (
                                   <div
@@ -4917,13 +5324,24 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                     className={`rounded-xl border p-1.5 transition-all ${
                                       isDragTargetSub
                                         ? 'bg-accent/20 border-accent ring-2 ring-accent'
+                                        : isSelectedSub
+                                        ? 'bg-accent/20 border-accent ring-2 ring-accent shadow-md'
                                         : 'bg-panel/50 border-card-border/70'
                                     }`}
                                   >
                                     {/* Subfolder Header (Notion Style with Hover Actions) */}
-                                    <div className="flex items-center justify-between p-1 rounded-lg hover:bg-card-border/40 transition-colors group cursor-grab active:cursor-grabbing">
+                                    <div 
+                                      onContextMenu={(e) => handleNotebookContextMenu(sub.path, 'folder', e)}
+                                      className="flex items-center justify-between p-1 rounded-lg hover:bg-card-border/40 transition-colors group cursor-grab active:cursor-grabbing"
+                                    >
                                       <div
-                                        onClick={() => toggleFolderCollapse(sub.path)}
+                                        onClick={(e) => {
+                                          if (e.ctrlKey || e.metaKey) {
+                                            handleNotebookClick(sub.path, e);
+                                          } else {
+                                            toggleFolderCollapse(sub.path);
+                                          }
+                                        }}
                                         className="flex items-center space-x-1.5 cursor-pointer flex-1 truncate select-none"
                                       >
                                         {isSubCollapsed ? (
@@ -4957,14 +5375,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                           type="button"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                            setActiveContextMenu({
-                                              type: 'folder',
-                                              id: sub.path,
-                                              name: sub.name,
-                                              x: Math.min(rect.right + 6, window.innerWidth - 220),
-                                              y: Math.min(rect.top, window.innerHeight - 280)
-                                            });
+                                            handleNotebookContextMenu(sub.path, 'folder', e);
                                           }}
                                           className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white cursor-pointer"
                                           title="Ações da Pasta"
@@ -4987,6 +5398,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                             const isBeingDragged = draggedNoteId === n.id;
                                             const isBibliography = n.title.includes('Referencias') || n.title.includes('Bibliografias') || n.filename.includes('99_');
                                             const isStarred = starredNoteIds.includes(n.id);
+                                            const isSelectedNote = selectedNoteIds.includes(n.id);
 
                                             return (
                                               <div
@@ -5002,10 +5414,13 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                                   setDraggedNoteId(null);
                                                   setDragOverFolder(null);
                                                 }}
-                                                onClick={() => selectNote(n)}
+                                                onClick={(e) => handleNoteClick(n, e)}
+                                                onContextMenu={(e) => handleNoteContextMenu(n, e)}
                                                 className={`p-2 rounded-xl border transition-all cursor-grab active:cursor-grabbing flex flex-col space-y-1 group/card ${
                                                   isBeingDragged
                                                     ? 'opacity-40 border-dashed border-accent scale-95'
+                                                    : isSelectedNote
+                                                    ? 'bg-accent/30 border-accent ring-2 ring-accent text-white shadow-md'
                                                     : isActive
                                                     ? 'bg-sky-500/20 border-sky-500 text-white shadow-sm ring-1 ring-sky-500/30'
                                                     : isBibliography
@@ -5019,7 +5434,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                                     {isBibliography ? (
                                                       <BookOpen className="w-3 h-3 text-sky-400 shrink-0" />
                                                     ) : (
-                                                      <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                                                      <FileText className={`w-3 h-3 shrink-0 ${isSelectedNote ? 'text-accent-light' : 'text-slate-400'}`} />
                                                     )}
                                                     <span className="truncate font-semibold text-xs" title={n.title}>{n.title}</span>
                                                   </span>
@@ -5040,14 +5455,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                                       type="button"
                                                       onClick={(e) => {
                                                         e.stopPropagation();
-                                                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                                        setActiveContextMenu({
-                                                          type: 'note',
-                                                          id: n.id,
-                                                          note: n,
-                                                          x: Math.min(rect.right + 6, window.innerWidth - 220),
-                                                          y: Math.min(rect.top, window.innerHeight - 280)
-                                                        });
+                                                        handleNoteContextMenu(n, e);
                                                       }}
                                                       className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white cursor-pointer"
                                                       title="Ações da Nota"
@@ -5076,6 +5484,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                 const isBeingDragged = draggedNoteId === n.id;
                                 const isBibliography = n.title.includes('Referencias') || n.title.includes('Bibliografias') || n.filename.includes('99_');
                                 const isStarred = starredNoteIds.includes(n.id);
+                                const isSelectedNote = selectedNoteIds.includes(n.id);
 
                                 return (
                                   <div
@@ -5091,10 +5500,13 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                       setDraggedNoteId(null);
                                       setDragOverFolder(null);
                                     }}
-                                    onClick={() => selectNote(n)}
+                                    onClick={(e) => handleNoteClick(n, e)}
+                                    onContextMenu={(e) => handleNoteContextMenu(n, e)}
                                     className={`p-2 rounded-xl border transition-all cursor-grab active:cursor-grabbing flex flex-col space-y-1 group/card ${
                                       isBeingDragged
                                         ? 'opacity-40 border-dashed border-accent scale-95'
+                                        : isSelectedNote
+                                        ? 'bg-accent/30 border-accent ring-2 ring-accent text-white shadow-md'
                                         : isActive
                                         ? 'bg-sky-500/20 border-sky-500 text-white shadow-sm ring-1 ring-sky-500/30'
                                         : isBibliography
@@ -5108,7 +5520,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                         {isBibliography ? (
                                           <BookOpen className="w-3 h-3 text-sky-400 shrink-0" />
                                         ) : (
-                                          <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                                          <FileText className={`w-3 h-3 shrink-0 ${isSelectedNote ? 'text-accent-light' : 'text-slate-400'}`} />
                                         )}
                                         <span className="truncate font-semibold text-xs" title={n.title}>{n.title}</span>
                                       </span>
@@ -5129,14 +5541,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                           type="button"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                            setActiveContextMenu({
-                                              type: 'note',
-                                              id: n.id,
-                                              note: n,
-                                              x: Math.min(rect.right + 6, window.innerWidth - 220),
-                                              y: Math.min(rect.top, window.innerHeight - 280)
-                                            });
+                                            handleNoteContextMenu(n, e);
                                           }}
                                           className="p-1 rounded hover:bg-card-border text-slate-400 hover:text-white cursor-pointer"
                                           title="Ações da Nota"
@@ -5171,20 +5576,80 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                   <div
                     id="tellus-sidebar-context-menu"
                     style={{ left: `${activeContextMenu.x}px`, top: `${activeContextMenu.y}px` }}
-                    className="fixed z-50 bg-[#141820] border border-card-border/90 rounded-2xl p-1.5 shadow-2xl text-xs space-y-0.5 min-w-[210px] animate-in fade-in zoom-in-95 backdrop-blur-md"
+                    className="fixed z-50 bg-[#141820] border border-card-border/90 rounded-2xl p-1.5 shadow-2xl text-xs space-y-0.5 min-w-[220px] animate-in fade-in zoom-in-95 backdrop-blur-md"
                   >
-                    {activeContextMenu.type === 'notebook' && (
+                    {/* BATCH NOTEBOOKS / CADERNOS SELECIONADOS */}
+                    {(activeContextMenu.type === 'notebook' || activeContextMenu.type === 'folder') && activeContextMenu.notebooks && activeContextMenu.notebooks.length > 1 ? (
+                      <>
+                        <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-accent-light border-b border-card-border/50 font-mono">
+                          📚 {activeContextMenu.notebooks.length} Cadernos Selecionados
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMergeNotebooksModal(activeContextMenu.notebooks!)}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-amber-300 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Juntar / Agregar Cadernos</span>
+                        </button>
+                        {onSearchInNewChat && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartChatWithNotebooks(activeContextMenu.notebooks!)}
+                            className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-accent-light flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                            <span>Conversar com Agente (IA)</span>
+                          </button>
+                        )}
+                        {onStartLiveVoice && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartVoiceWithNotebooks(activeContextMenu.notebooks!)}
+                            className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-red-400 flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <Mic className="w-3.5 h-3.5 text-red-400" />
+                            <span>Live Voice com Agente</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedNotebookNames([]);
+                            setActiveContextMenu(null);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-400 hover:text-white flex items-center gap-2 transition-colors cursor-pointer border-t border-card-border/40 mt-1"
+                        >
+                          <span>✕ Desmarcar Seleção</span>
+                        </button>
+                      </>
+                    ) : activeContextMenu.type === 'notebook' ? (
                       <>
                         <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 border-b border-card-border/50 font-mono">
                           Caderno: {activeContextMenu.name}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRenameFolderModal(activeContextMenu.name!)}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-amber-300 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <PenTool className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Renomear / Editar Caderno</span>
+                        </button>
+                        {onSearchInNewChat && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartChatWithNotebooks([activeContextMenu.name!])}
+                            className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-accent-light flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                            <span>Conversar com Agente (IA)</span>
+                          </button>
+                        )}
                         {onStartLiveVoice && (
                           <button
                             type="button"
-                            onClick={() => {
-                              onStartLiveVoice(`Caderno: ${activeContextMenu.name}`, `Estudo e diálogo por voz sobre o caderno ${activeContextMenu.name}`);
-                              setActiveContextMenu(null);
-                            }}
+                            onClick={() => handleStartVoiceWithNotebooks([activeContextMenu.name!])}
                             className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-red-400 flex items-center gap-2 transition-colors cursor-pointer"
                           >
                             <Mic className="w-3.5 h-3.5 text-red-400" />
@@ -5250,20 +5715,33 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                           </button>
                         )}
                       </>
-                    )}
-
-                    {activeContextMenu.type === 'folder' && (
+                    ) : activeContextMenu.type === 'folder' ? (
                       <>
                         <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 border-b border-card-border/50 font-mono">
                           Pasta: {activeContextMenu.name}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRenameFolderModal(activeContextMenu.id)}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-amber-300 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <PenTool className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Renomear / Editar Pasta</span>
+                        </button>
+                        {onSearchInNewChat && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartChatWithNotebooks([activeContextMenu.id])}
+                            className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-accent-light flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                            <span>Conversar com Agente (IA)</span>
+                          </button>
+                        )}
                         {onStartLiveVoice && (
                           <button
                             type="button"
-                            onClick={() => {
-                              onStartLiveVoice(`Pasta: ${activeContextMenu.name}`, `Estudo por voz sobre a pasta ${activeContextMenu.id}`);
-                              setActiveContextMenu(null);
-                            }}
+                            onClick={() => handleStartVoiceWithNotebooks([activeContextMenu.id])}
                             className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-red-400 flex items-center gap-2 transition-colors cursor-pointer"
                           >
                             <Mic className="w-3.5 h-3.5 text-red-400" />
@@ -5315,9 +5793,70 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                           <span>Excluir Pasta</span>
                         </button>
                       </>
-                    )}
+                    ) : null}
 
-                    {activeContextMenu.type === 'note' && activeContextMenu.note && (
+                    {/* BATCH NOTES / NOTAS SELECIONADAS */}
+                    {activeContextMenu.type === 'note' && activeContextMenu.notes && activeContextMenu.notes.length > 1 ? (
+                      <>
+                        <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-accent-light border-b border-card-border/50 font-mono">
+                          📑 {activeContextMenu.notes.length} Notas Selecionadas
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMergeNotesModal(activeContextMenu.notes!)}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-emerald-300 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Juntar notas em uma só (Mesclar)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenBulkMoveModal(activeContextMenu.notes!)}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-cyan-300 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <FolderInput className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Mover notas selecionadas...</span>
+                        </button>
+                        {onSearchInNewChat && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartChatWithSelectedNotes(activeContextMenu.notes!)}
+                            className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-accent-light flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                            <span>Conversar com Agente (IA)</span>
+                          </button>
+                        )}
+                        {onStartLiveVoice && (
+                          <button
+                            type="button"
+                            onClick={() => handleStartVoiceWithSelectedNotes(activeContextMenu.notes!)}
+                            className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-200 hover:text-red-400 flex items-center gap-2 transition-colors cursor-pointer"
+                          >
+                            <Mic className="w-3.5 h-3.5 text-red-400" />
+                            <span>Live Voice com Agente</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleExecuteBulkDelete(activeContextMenu.notes!.map(n => n.id))}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-rose-500/20 text-left text-rose-400 flex items-center gap-2 transition-colors cursor-pointer border-t border-card-border/40 mt-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Excluir notas selecionadas</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedNoteIds([]);
+                            setActiveContextMenu(null);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-xl hover:bg-card text-left text-slate-400 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <span>✕ Desmarcar Seleção</span>
+                        </button>
+                      </>
+                    ) : activeContextMenu.type === 'note' && activeContextMenu.note ? (
                       <>
                         <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 border-b border-card-border/50 font-mono truncate">
                           {activeContextMenu.note.title}
@@ -5393,7 +5932,7 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                           <span>Excluir Nota</span>
                         </button>
                       </>
-                    )}
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -6776,12 +7315,18 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                     <div className="pb-4 border-b border-card-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex items-center space-x-3.5">
                         <div className="p-2.5 rounded-2xl bg-card border border-card-border/80 text-slate-200 shrink-0">
-                          <NbIcon className="w-6 h-6 text-accent-light" />
+                          {isAll && noteScopeTab === 'internal' ? (
+                            <ShieldCheck className="w-6 h-6 text-amber-400" />
+                          ) : (
+                            <NbIcon className="w-6 h-6 text-accent-light" />
+                          )}
                         </div>
                         <div>
                           <div className="flex items-center space-x-2">
                             <h1 className="text-xl font-semibold text-slate-100 tracking-tight">
-                              {isAll ? 'Meus Cadernos' : currentNb?.id}
+                              {isAll 
+                                ? (noteScopeTab === 'personal' ? 'Meus Cadernos' : 'Arquivos & Documentação Interna') 
+                                : currentNb?.id}
                             </h1>
                             <span className="text-[11px] font-mono text-slate-500">
                               {dashboardNotes.length} {dashboardNotes.length === 1 ? 'nota' : 'notas'} • {subfoldersList.length} {subfoldersList.length === 1 ? 'pasta' : 'pastas'}
@@ -6789,57 +7334,139 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                           </div>
                           <p className="text-xs text-slate-400 mt-0.5">
                             {isAll
-                              ? 'Selecione um caderno abaixo ou clique em Ferramentas & Grafo para expandir recursos avançados.'
+                              ? (noteScopeTab === 'personal'
+                                  ? 'Seu espaço casual de estudos, ideias e anotações rápidas.'
+                                  : 'Documentação do repositório, artefatos gerados pelo agente e esquemas técnicos protegidos.')
                               : `Notas e subpastas do caderno ${currentNb?.id}.`}
                           </p>
                         </div>
                       </div>
 
-                      {/* Clean Action Pills + Click-to-Expand Tools Toggle */}
-                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {/* Header Scope Switcher (Minhas Notas vs Arquivos Internos) */}
+                      {isAll && (
+                        <div className="flex items-center space-x-1.5 p-1 rounded-2xl bg-card/80 border border-card-border self-start sm:self-auto">
+                          <button
+                            type="button"
+                            onClick={() => setNoteScopeTab('personal')}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                              noteScopeTab === 'personal'
+                                ? 'bg-accent text-white shadow-xs'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            <span>Minhas Notas ({personalNotes.length})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNoteScopeTab('internal')}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                              noteScopeTab === 'internal'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Arquivos Internos ({internalNotes.length})</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Prominent Action Bar with Clear Direct Icons */}
+                      <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                         {!isAll && (
                           <button
                             onClick={goToHome}
-                            className="px-3 py-1.5 rounded-full bg-card hover:bg-panel border border-card-border text-xs text-slate-300 hover:text-white font-medium flex items-center space-x-1.5 transition-all cursor-pointer"
+                            className="px-3.5 py-2 rounded-2xl bg-card hover:bg-panel border border-card-border text-xs text-slate-300 hover:text-white font-medium flex items-center space-x-2 transition-all cursor-pointer shadow-xs"
                           >
-                            <Home className="w-3.5 h-3.5 text-slate-400" />
+                            <Home className="w-4 h-4 text-cyan-400" />
                             <span>Todos os Cadernos</span>
                           </button>
                         )}
 
                         <button
-                          onClick={() => setIsHomeToolsExpanded(!isHomeToolsExpanded)}
-                          className={`px-3.5 py-1.5 rounded-full border text-xs font-medium flex items-center space-x-1.5 transition-all cursor-pointer ${
-                            isHomeToolsExpanded
-                              ? 'bg-accent/20 border-accent text-accent-light'
-                              : 'bg-card hover:bg-panel border-card-border text-slate-300 hover:text-white'
-                          }`}
-                          title="Clique para expandir ou recolher Smart Dropzone, Grafo Interativo, OCR de Caderno e Exportação"
+                          onClick={() => setViewMode('graph')}
+                          className="px-3.5 py-2 rounded-2xl bg-card hover:bg-panel border border-card-border text-slate-200 hover:text-cyan-300 text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer shadow-xs hover:border-cyan-500/40"
+                          title="Abrir Grafo Interativo de Conhecimento em Tela Cheia"
                         >
-                          <Layers className="w-3.5 h-3.5" />
-                          <span>Ferramentas & Grafo</span>
-                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isHomeToolsExpanded ? 'rotate-180' : 'opacity-60'}`} />
+                          <Network className="w-4 h-4 text-cyan-400" />
+                          <span>Grafo</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setInitialHomeDropFiles(null);
+                            setIsDropzoneOpen(true);
+                          }}
+                          className="px-3.5 py-2 rounded-2xl bg-card hover:bg-panel border border-card-border text-slate-200 hover:text-emerald-300 text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer shadow-xs hover:border-emerald-500/40"
+                          title="Importar documentos, imagens ou fotos de anotações físicas via Smart Drop"
+                        >
+                          <Upload className="w-4 h-4 text-emerald-400" />
+                          <span>Smart Drop</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSidebarTab('trash');
+                            setIsSidebarCollapsed(false);
+                            fetchDeletedNotes();
+                          }}
+                          className="px-3.5 py-2 rounded-2xl bg-card hover:bg-rose-500/10 border border-card-border hover:border-rose-500/40 text-slate-300 hover:text-rose-300 text-xs font-semibold flex items-center space-x-2 transition-all cursor-pointer shadow-xs"
+                          title="Abrir Lixeira de Notas e Backups"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-400" />
+                          <span>Lixeira</span>
+                          {deletedNotes.length > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                              {deletedNotes.length}
+                            </span>
+                          )}
                         </button>
 
                         {isAll && (
                           <button
                             onClick={() => setIsCreatingNotebook(true)}
-                            className="px-3.5 py-1.5 rounded-full bg-card hover:bg-panel border border-card-border text-slate-200 hover:text-white font-medium text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                            className="px-3.5 py-2 rounded-2xl bg-card hover:bg-panel border border-card-border text-slate-100 hover:text-white font-semibold text-xs flex items-center space-x-2 transition-all cursor-pointer shadow-xs hover:border-cyan-500/40"
                           >
-                            <Folder className="w-3.5 h-3.5 text-slate-400" />
+                            <FolderPlus className="w-4 h-4 text-cyan-400" />
                             <span>Novo Caderno</span>
                           </button>
                         )}
 
                         <button
                           onClick={() => handleCreateNoteInFolder(isAll ? 'Geral' : currentNb?.id || 'Geral')}
-                          className="px-3.5 py-1.5 rounded-full bg-accent hover:bg-accent-hover text-white font-medium text-xs flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+                          className="px-4 py-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs flex items-center space-x-2 transition-all shadow-md shadow-cyan-500/20 cursor-pointer"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-4 h-4" />
                           <span>Nova Nota</span>
+                        </button>
+
+                        <button
+                          onClick={() => setIsHomeToolsExpanded(!isHomeToolsExpanded)}
+                          className={`p-2 rounded-2xl border text-xs font-medium flex items-center transition-all cursor-pointer ${
+                            isHomeToolsExpanded
+                              ? 'bg-accent/20 border-accent text-accent-light'
+                              : 'bg-card hover:bg-panel border-card-border text-slate-400 hover:text-white'
+                          }`}
+                          title="Mais opções avançadas (Exportar, OCR, Plugins)"
+                        >
+                          <Layers className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
+
+                    {/* Informative Shield Banner for Protected Internal Files */}
+                    {isAll && noteScopeTab === 'internal' && (
+                      <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start space-x-3 text-xs text-amber-200 animate-in fade-in duration-200">
+                        <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-amber-300">Arquivos Internos Protegidos do Projeto & Tellus</p>
+                          <p className="text-amber-200/80 leading-relaxed">
+                            Estes documentos, esquemas e artefatos foram gerados pelo Tellus e pelo agente para manter o contexto técnico e a memória dos seus projetos. Eles estão blindados contra exclusão acidental ou em lote para garantir a integridade dos seus repositórios.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Expandable Tools, Actions, Smart Dropzone & Embedded Graph (Progressive Disclosure) */}
                     {isHomeToolsExpanded && (
@@ -7025,12 +7652,51 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                             const nbDet = getNotebookDetails(nb.id);
                             const IconComp = nbDet.icon;
                             const previewSubnotes = nb.allNotes.slice(0, 3);
+                            const isSelectedNb = selectedNotebookNames.includes(nb.id);
 
                             return (
                               <div
                                 key={nb.id}
-                                className={`p-5 rounded-3xl border ${nbDet.bg} hover:border-accent/60 transition-all duration-200 hover:-translate-y-0.5 shadow-lg flex flex-col justify-between space-y-4 group`}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setDragOverFolder(nb.id);
+                                }}
+                                onDragLeave={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (dragOverFolder === nb.id) setDragOverFolder(null);
+                                }}
+                                onDrop={async (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const droppedNoteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                                  const droppedFolder = e.dataTransfer.getData('application/x-tellus-folder') || draggedFolderName;
+                                  setDragOverFolder(null);
+                                  setDraggedNoteId(null);
+                                  setDraggedFolderName(null);
+                                  if (droppedNoteId) {
+                                    await handleMoveNote(droppedNoteId, nb.id);
+                                  } else if (droppedFolder && droppedFolder !== nb.id) {
+                                    await handleMoveFolder(droppedFolder, nb.id);
+                                  }
+                                }}
+                                onClick={(e) => handleNotebookClick(nb.id, e)}
+                                onContextMenu={(e) => handleNotebookContextMenu(nb.id, 'notebook', e)}
+                                className={`p-5 rounded-3xl border ${nbDet.bg} transition-all duration-200 hover:-translate-y-0.5 shadow-lg flex flex-col justify-between space-y-4 group cursor-pointer ${
+                                  dragOverFolder === nb.id
+                                    ? 'ring-4 ring-cyan-400 bg-cyan-950/60 border-cyan-400 scale-[1.02] shadow-2xl'
+                                    : isSelectedNb
+                                    ? 'ring-2 ring-accent bg-accent/20 border-accent shadow-xl'
+                                    : 'hover:border-accent/60'
+                                }`}
                               >
+                                {dragOverFolder === nb.id && (
+                                  <div className="p-3 rounded-2xl bg-cyan-500/20 border-2 border-dashed border-cyan-400 flex items-center justify-center space-x-2 text-cyan-200 font-medium text-xs animate-pulse">
+                                    <FolderInput className="w-4 h-4 text-cyan-300" />
+                                    <span>Soltar aqui para mover nota para "{nb.id}"</span>
+                                  </div>
+                                )}
                                 <div className="space-y-3">
                                   {/* Notebook Card Header */}
                                   <div className="flex items-start justify-between gap-3 min-w-0">
@@ -7040,7 +7706,14 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                       </div>
                                       <div className="min-w-0 flex-1">
                                         <h3 
-                                          onClick={() => openNotebook(nb.id)}
+                                          onClick={(e) => {
+                                            if (e.ctrlKey || e.metaKey) {
+                                              e.stopPropagation();
+                                              handleNotebookClick(nb.id, e);
+                                            } else {
+                                              openNotebook(nb.id);
+                                            }
+                                          }}
                                           className="font-bold text-base text-slate-100 group-hover:text-accent-light transition-colors truncate cursor-pointer"
                                           title={`Abrir caderno ${nb.id}`}
                                         >
@@ -7067,16 +7740,25 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                         <Download className="w-3.5 h-3.5" />
                                       </button>
                                       {nb.id !== 'Geral' && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleDeleteFolder(nb.id);
-                                          }}
-                                          className="p-1.5 rounded-xl bg-panel hover:bg-rose-500/20 border border-card-border hover:border-rose-500/40 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
-                                          title={`Excluir caderno "${nb.id}" e mover para a lixeira`}
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
+                                        isInternalNotebookId(nb.id) ? (
+                                          <span
+                                            className="p-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400/80"
+                                            title="Caderno interno protegido do projeto"
+                                          >
+                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                          </span>
+                                        ) : (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteFolder(nb.id);
+                                            }}
+                                            className="p-1.5 rounded-xl bg-panel hover:bg-rose-500/20 border border-card-border hover:border-rose-500/40 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                                            title={`Excluir caderno "${nb.id}" e mover para a lixeira`}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )
                                       )}
                                     </div>
                                   </div>
@@ -7091,7 +7773,35 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                         {nb.subfolders.slice(0, 4).map(sub => (
                                           <div
                                             key={sub.path}
-                                            className="inline-flex items-center rounded-lg bg-panel/80 hover:bg-card border border-card-border text-[10px] text-amber-300 font-mono transition-colors pl-2 pr-1 py-0.5 group/subpill max-w-full"
+                                            onDragOver={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              setDragOverFolder(sub.path);
+                                            }}
+                                            onDragLeave={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              if (dragOverFolder === sub.path) setDragOverFolder(null);
+                                            }}
+                                            onDrop={async (e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              const droppedNoteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                                              const droppedFolder = e.dataTransfer.getData('application/x-tellus-folder') || draggedFolderName;
+                                              setDragOverFolder(null);
+                                              setDraggedNoteId(null);
+                                              setDraggedFolderName(null);
+                                              if (droppedNoteId) {
+                                                await handleMoveNote(droppedNoteId, sub.path);
+                                              } else if (droppedFolder && droppedFolder !== sub.path) {
+                                                await handleMoveFolder(droppedFolder, sub.path);
+                                              }
+                                            }}
+                                            className={`inline-flex items-center rounded-lg border text-[10px] font-mono transition-all pl-2 pr-1 py-0.5 group/subpill max-w-full ${
+                                              dragOverFolder === sub.path
+                                                ? 'bg-amber-500/30 border-amber-400 ring-2 ring-amber-400 text-amber-200 scale-105'
+                                                : 'bg-panel/80 hover:bg-card border-card-border text-amber-300'
+                                            }`}
                                           >
                                             <button
                                               onClick={(e) => {
@@ -7150,14 +7860,38 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                           const subfolderPart = noteFolderPath.includes('/')
                                             ? noteFolderPath.split('/').slice(1).join('/')
                                             : null;
+                                          const isSelectedNote = selectedNoteIds.includes(note.id);
+                                          const isBeingDragged = draggedNoteId === note.id;
 
                                           return (
                                             <div
                                               key={note.id}
-                                              onClick={() => selectNote(note)}
-                                              className="px-2.5 py-1.5 rounded-xl bg-card/60 hover:bg-card border border-card-border/60 hover:border-accent/40 text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between group/note min-w-0"
+                                              draggable={true}
+                                              onDragStart={(e) => {
+                                                e.stopPropagation();
+                                                e.dataTransfer.setData('text/plain', note.id);
+                                                e.dataTransfer.effectAllowed = 'move';
+                                                setDraggedNoteId(note.id);
+                                              }}
+                                              onDragEnd={() => {
+                                                setDraggedNoteId(null);
+                                                setDragOverFolder(null);
+                                              }}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleNoteClick(note, e);
+                                              }}
+                                              onContextMenu={(e) => handleNoteContextMenu(note, e)}
+                                              className={`px-2.5 py-1.5 rounded-xl border text-xs text-slate-200 cursor-grab active:cursor-grabbing transition-all flex items-center justify-between group/note min-w-0 ${
+                                                isBeingDragged
+                                                  ? 'opacity-40 border-dashed border-accent scale-95'
+                                                  : isSelectedNote
+                                                  ? 'bg-accent/30 border-accent ring-2 ring-accent text-white shadow-md'
+                                                  : 'bg-card/60 hover:bg-card border-card-border/60 hover:border-accent/40'
+                                              }`}
                                             >
-                                              <span className="truncate flex items-center space-x-2 min-w-0 flex-1">
+                                              <span className="truncate flex items-center space-x-1.5 min-w-0 flex-1">
+                                                <GripVertical className="w-3 h-3 text-slate-500 opacity-50 group-hover/note:opacity-100 shrink-0" />
                                                 <FileText className="w-3 h-3 text-accent-light shrink-0" />
                                                 <span className="truncate font-medium group-hover/note:text-accent-light">{note.title}</span>
                                               </span>
@@ -7171,16 +7905,25 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                                     <span className="truncate">{subfolderPart}</span>
                                                   </span>
                                                 )}
-                                                <button
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteNote(note.id, note.isProjectSpecific);
-                                                  }}
-                                                  className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                                                  title={`Excluir nota "${note.title}"`}
-                                                >
-                                                  <Trash2 className="w-3 h-3" />
-                                                </button>
+                                                {isNoteInternal(note) ? (
+                                                  <span
+                                                    className="p-0.5 rounded bg-amber-500/10 text-amber-400/80"
+                                                    title="Arquivo interno protegido"
+                                                  >
+                                                    <ShieldCheck className="w-3 h-3" />
+                                                  </span>
+                                                ) : (
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleDeleteNote(note.id, note.isProjectSpecific);
+                                                    }}
+                                                    className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                                    title={`Excluir nota "${note.title}"`}
+                                                  >
+                                                    <Trash2 className="w-3 h-3" />
+                                                  </button>
+                                                )}
                                                 <ChevronRight className="w-3 h-3 text-slate-500 group-hover/note:text-accent-light shrink-0" />
                                               </div>
                                             </div>
@@ -7237,18 +7980,53 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                          {subfoldersList.map(sub => (
-                            <div
-                              key={sub.path}
-                              onClick={() => {
-                                if (sub.notes.length > 0) {
-                                  selectNote(sub.notes[0]);
-                                } else {
-                                  handleCreateNoteInFolder(sub.path);
-                                }
-                              }}
-                              className="p-3 rounded-2xl bg-card/70 border border-card-border/80 hover:border-amber-500/50 hover:bg-card cursor-pointer transition-all duration-200 flex items-center justify-between group min-w-0"
-                            >
+                          {subfoldersList.map(sub => {
+                            const isSelectedSub = selectedNotebookNames.includes(sub.path);
+                            return (
+                              <div
+                                key={sub.path}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setDragOverFolder(sub.path);
+                                }}
+                                onDragLeave={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (dragOverFolder === sub.path) setDragOverFolder(null);
+                                }}
+                                onDrop={async (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const droppedNoteId = e.dataTransfer.getData('text/plain') || draggedNoteId;
+                                  const droppedFolder = e.dataTransfer.getData('application/x-tellus-folder') || draggedFolderName;
+                                  setDragOverFolder(null);
+                                  setDraggedNoteId(null);
+                                  setDraggedFolderName(null);
+                                  if (droppedNoteId) {
+                                    await handleMoveNote(droppedNoteId, sub.path);
+                                  } else if (droppedFolder && droppedFolder !== sub.path) {
+                                    await handleMoveFolder(droppedFolder, sub.path);
+                                  }
+                                }}
+                                onClick={(e) => {
+                                  if (e.ctrlKey || e.metaKey) {
+                                    handleNotebookClick(sub.path, e);
+                                  } else if (sub.notes.length > 0) {
+                                    selectNote(sub.notes[0]);
+                                  } else {
+                                    handleCreateNoteInFolder(sub.path);
+                                  }
+                                }}
+                                onContextMenu={(e) => handleNotebookContextMenu(sub.path, 'folder', e)}
+                                className={`p-3 rounded-2xl border transition-all duration-200 flex items-center justify-between group min-w-0 cursor-pointer ${
+                                  dragOverFolder === sub.path
+                                    ? 'bg-amber-500/30 border-amber-400 ring-2 ring-amber-400 shadow-xl scale-[1.02]'
+                                    : isSelectedSub
+                                    ? 'bg-accent/20 border-accent ring-2 ring-accent shadow-lg'
+                                    : 'bg-card/70 border-card-border/80 hover:border-amber-500/50 hover:bg-card'
+                                }`}
+                              >
                               <div className="flex items-center space-x-2.5 truncate min-w-0 flex-1">
                                 <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
                                   <Folder className="w-4 h-4" />
@@ -7285,7 +8063,8 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                                 </button>
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -7333,34 +8112,64 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
                               .trim()
                               .slice(0, 160);
 
+                            const isSelectedNote = selectedNoteIds.includes(n.id);
+                            const isBeingDragged = draggedNoteId === n.id;
                             return (
                               <div
                                 key={n.id}
-                                onClick={() => {
-                                  selectNote(n);
+                                draggable={true}
+                                onDragStart={(e) => {
+                                  e.stopPropagation();
+                                  e.dataTransfer.setData('text/plain', n.id);
+                                  e.dataTransfer.effectAllowed = 'move';
+                                  setDraggedNoteId(n.id);
                                 }}
-                                className="p-4 rounded-2xl border border-card-border/80 bg-card/60 hover:bg-card hover:border-accent/50 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-md flex flex-col justify-between space-y-3 group"
+                                onDragEnd={() => {
+                                  setDraggedNoteId(null);
+                                  setDragOverFolder(null);
+                                }}
+                                onClick={(e) => handleNoteClick(n, e)}
+                                onContextMenu={(e) => handleNoteContextMenu(n, e)}
+                                className={`p-4 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 shadow-md flex flex-col justify-between space-y-3 group cursor-grab active:cursor-grabbing ${
+                                  isBeingDragged
+                                    ? 'opacity-40 border-dashed border-accent scale-95'
+                                    : isSelectedNote
+                                    ? 'bg-accent/20 border-accent ring-2 ring-accent shadow-xl'
+                                    : 'border-card-border/80 bg-card/60 hover:bg-card hover:border-accent/50'
+                                }`}
                               >
                                 <div className="space-y-2">
                                   {/* Folder Badge + Date + Delete Button */}
                                   <div className="flex items-center justify-between text-[10px] font-mono">
-                                    <span className={`px-2 py-0.5 rounded-md font-semibold truncate max-w-[160px] ${nbDet.badgeBg}`} title={folderName}>
-                                      📂 {folderName}
-                                    </span>
+                                    <div className="flex items-center space-x-1.5 min-w-0">
+                                      <GripVertical className="w-3.5 h-3.5 text-slate-500 opacity-50 group-hover:opacity-100 shrink-0" />
+                                      <span className={`px-2 py-0.5 rounded-md font-semibold truncate max-w-[160px] ${nbDet.badgeBg}`} title={folderName}>
+                                        📂 {folderName}
+                                      </span>
+                                    </div>
                                     <div className="flex items-center space-x-1.5 shrink-0">
                                       <span className="text-slate-500">
                                         {n.updatedAt ? new Date(n.updatedAt).toLocaleDateString('pt-BR') : ''}
                                       </span>
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDeleteNote(n.id, n.isProjectSpecific);
-                                        }}
-                                        className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                                        title={`Excluir nota "${n.title}"`}
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
+                                      {isNoteInternal(n) ? (
+                                        <span
+                                          className="p-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400/80"
+                                          title="Arquivo interno protegido contra exclusão"
+                                        >
+                                          <ShieldCheck className="w-3.5 h-3.5" />
+                                        </span>
+                                      ) : (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteNote(n.id, n.isProjectSpecific);
+                                          }}
+                                          className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                          title={`Excluir nota "${n.title}"`}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
 
@@ -7434,6 +8243,417 @@ ${highlights.map((h, idx) => `### ${idx + 1}. Trecho da nota [[${h.noteTitle}]] 
         isOpen={isObsidianPluginsOpen}
         onClose={() => setIsObsidianPluginsOpen(false)}
       />
+
+      {/* Floating Action Bar for Batch Multi-Selection */}
+      {(selectedNoteIds.length > 1 || selectedNotebookNames.length > 1) && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-[#161b24]/95 border border-accent/60 shadow-2xl rounded-2xl px-4 py-2.5 flex items-center gap-3 backdrop-blur-md animate-in fade-in slide-in-from-bottom-4">
+          {selectedNoteIds.length > 1 && (
+            <>
+              <div className="flex items-center gap-2 pr-2 border-r border-card-border/60">
+                <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
+                <span className="font-bold text-xs text-accent-light font-mono">
+                  {selectedNoteIds.length} notas selecionadas
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenMergeNotesModal(notes.filter(n => selectedNoteIds.includes(n.id)))}
+                className="px-3 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Juntar Notas</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenBulkMoveModal(notes.filter(n => selectedNoteIds.includes(n.id)))}
+                className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <FolderInput className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Mover</span>
+              </button>
+              {onSearchInNewChat && (
+                <button
+                  type="button"
+                  onClick={() => handleStartChatWithSelectedNotes(notes.filter(n => selectedNoteIds.includes(n.id)))}
+                  className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                  <span>Chat IA</span>
+                </button>
+              )}
+              {onStartLiveVoice && (
+                <button
+                  type="button"
+                  onClick={() => handleStartVoiceWithSelectedNotes(notes.filter(n => selectedNoteIds.includes(n.id)))}
+                  className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Mic className="w-3.5 h-3.5 text-red-400" />
+                  <span>Live Voice</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleExecuteBulkDelete(selectedNoteIds)}
+                className="px-3 py-1.5 rounded-xl hover:bg-rose-500/20 text-rose-400 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedNoteIds([])}
+                className="p-1 rounded-lg hover:bg-card text-slate-400 hover:text-white text-xs ml-1 cursor-pointer"
+                title="Limpar seleção"
+              >
+                ✕
+              </button>
+            </>
+          )}
+
+          {selectedNotebookNames.length > 1 && (
+            <>
+              <div className="flex items-center gap-2 pr-2 border-r border-card-border/60">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                <span className="font-bold text-xs text-amber-300 font-mono">
+                  {selectedNotebookNames.length} cadernos selecionados
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenMergeNotebooksModal(selectedNotebookNames)}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Agregar Cadernos</span>
+              </button>
+              {onSearchInNewChat && (
+                <button
+                  type="button"
+                  onClick={() => handleStartChatWithNotebooks(selectedNotebookNames)}
+                  className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-accent-light" />
+                  <span>Chat IA</span>
+                </button>
+              )}
+              {onStartLiveVoice && (
+                <button
+                  type="button"
+                  onClick={() => handleStartVoiceWithNotebooks(selectedNotebookNames)}
+                  className="px-3 py-1.5 rounded-xl bg-card hover:bg-card-border text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Mic className="w-3.5 h-3.5 text-red-400" />
+                  <span>Live Voice</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectedNotebookNames([])}
+                className="p-1 rounded-lg hover:bg-card text-slate-400 hover:text-white text-xs ml-1 cursor-pointer"
+                title="Limpar seleção"
+              >
+                ✕
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Modal: Juntar e Mesclar Notas */}
+      {isMergeNotesModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#141820] border border-card-border rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-card-border pb-3">
+              <div className="flex items-center gap-2 text-slate-100">
+                <Layers className="w-5 h-5 text-accent-light" />
+                <h3 className="font-bold text-sm">Juntar Notas em uma Só</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMergeNotesModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              As <strong>{selectedNoteIds.length}</strong> anotações selecionadas serão consolidadas em uma nova nota unificada, preservando seções, títulos, formatação e tags.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Título da Nota Consolidada
+                </label>
+                <input
+                  type="text"
+                  value={mergeNotesTitle}
+                  onChange={(e) => setMergeNotesTitle(e.target.value)}
+                  placeholder="Ex: Resumo Geral de Engenharia"
+                  className="w-full bg-card border border-card-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Caderno / Pasta de Destino
+                </label>
+                <select
+                  value={mergeNotesTargetFolder}
+                  onChange={(e) => setMergeNotesTargetFolder(e.target.value)}
+                  className="w-full bg-card border border-card-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                >
+                  {allFolderNames.map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mergeNotesDeleteSources}
+                  onChange={(e) => setMergeNotesDeleteSources(e.target.checked)}
+                  className="rounded border-card-border text-accent focus:ring-0"
+                />
+                <span className="text-xs text-slate-300">
+                  Arquivar/excluir as notas originais após juntar (enviar para a lixeira/backups)
+                </span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-card-border">
+              <button
+                type="button"
+                onClick={() => setIsMergeNotesModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteMergeNotes}
+                className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center gap-1.5"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Juntar e Criar Nota</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Mover Notas em Lote */}
+      {isBulkMoveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#141820] border border-card-border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-card-border pb-3">
+              <div className="flex items-center gap-2 text-slate-100">
+                <FolderInput className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-bold text-sm">Mover {selectedNoteIds.length} Anotações</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Selecione o Caderno ou Pasta de Destino
+                </label>
+                <select
+                  value={bulkMoveTargetFolder}
+                  onChange={(e) => setBulkMoveTargetFolder(e.target.value)}
+                  className="w-full bg-card border border-card-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                >
+                  {allFolderNames.map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Ou digite um novo caminho de pasta
+                </label>
+                <input
+                  type="text"
+                  value={bulkMoveTargetFolder}
+                  onChange={(e) => setBulkMoveTargetFolder(e.target.value)}
+                  placeholder="Ex: Engenharia/Arquitetura"
+                  className="w-full bg-card border border-card-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-card-border">
+              <button
+                type="button"
+                onClick={() => setIsBulkMoveModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBulkMove}
+                className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5"
+              >
+                <MoveRight className="w-3.5 h-3.5" />
+                <span>Mover Anotações</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Renomear / Editar Caderno */}
+      {isRenameFolderModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#141820] border border-card-border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-card-border pb-3">
+              <div className="flex items-center gap-2 text-slate-100">
+                <PenTool className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-sm">Renomear Caderno ou Pasta</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRenameFolderModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Nome Atual
+                </label>
+                <div className="px-3 py-2 rounded-xl bg-card border border-card-border text-xs text-slate-400 font-mono">
+                  {renameFolderOldName}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Novo Nome do Caderno
+                </label>
+                <input
+                  type="text"
+                  value={renameFolderNewName}
+                  onChange={(e) => setRenameFolderNewName(e.target.value)}
+                  placeholder="Novo nome..."
+                  className="w-full bg-card border border-card-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-card-border">
+              <button
+                type="button"
+                onClick={() => setIsRenameFolderModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteRenameFolder}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Salvar Alterações</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Agregar / Juntar Cadernos (Merge Folders) */}
+      {isMergeNotebooksModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#141820] border border-card-border rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-card-border pb-3">
+              <div className="flex items-center gap-2 text-slate-100">
+                <Layers className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-sm">Agregar Cadernos & Pastas</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMergeNotebooksModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Todas as anotações presentes nos cadernos selecionados serão reunidas no caderno de destino. 
+              <span className="text-emerald-300 font-semibold block mt-1">
+                ✓ Os textos e conteúdos das notas não serão mesclados, permanecendo intactos.
+              </span>
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Cadernos Selecionados para Agregar:
+                </label>
+                <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-card border border-card-border">
+                  {selectedNotebookNames.map(nb => (
+                    <span key={nb} className="px-2 py-0.5 rounded-lg bg-panel border border-card-border text-[11px] font-mono text-amber-300">
+                      📂 {nb}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase text-slate-400 font-semibold mb-1">
+                  Selecione o Caderno de Destino (para onde todas as notas irão):
+                </label>
+                <select
+                  value={mergeNotebooksTarget}
+                  onChange={(e) => setMergeNotebooksTarget(e.target.value)}
+                  className="w-full bg-card border border-card-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-accent"
+                >
+                  {selectedNotebookNames.map(nb => (
+                    <option key={nb} value={nb}>{nb} (Manter este)</option>
+                  ))}
+                  {allFolderNames.filter(f => !selectedNotebookNames.includes(f)).map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-card-border">
+              <button
+                type="button"
+                onClick={() => setIsMergeNotebooksModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteMergeNotebooks}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold flex items-center gap-1.5"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Agregar Cadernos</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Export Toast Notification */}
       {exportToast && (

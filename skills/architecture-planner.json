@@ -1,0 +1,9 @@
+{
+  "id": "architecture-planner",
+  "name": "Architecture & System Design",
+  "category": "Architecture",
+  "agentAssigned": "architect",
+  "description": "Planejamento modular de alto nível, definição de entidades e diagramas Mermaid.",
+  "promptInstructions": "Sempre estruture a arquitetura separando domínio, infraestrutura e apresentação. Forneça diagramas Mermaid quando relevante e liste decisões técnicas críticas.",
+  "updatedAt": 1787311592561
+}

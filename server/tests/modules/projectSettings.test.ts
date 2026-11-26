@@ -162,4 +162,35 @@ test('🛡️ Módulo: Project Settings & Execution Security Presets', async (t)
     const cmdRes = await AgentLoop.executeTool(tempDir, 'run_command', JSON.stringify({ command: 'echo hello' }), 'test-model');
     assert.ok(cmdRes.error);
   });
+
+  await t.test('7. Controle de Escopo de Diretórios (ask_permission vs unrestricted)', async () => {
+    // 7a. No modo padrão ask_permission, caminhos dentro do projeto são permitidos
+    ProjectSettingsManager.saveSettings(tempDir, {
+      directoryAccessPolicy: 'ask_permission',
+      fileAccess: { readAllowed: true, writeAllowed: true, deniedPaths: [] }
+    });
+
+    const localCheck = ProjectSettingsManager.checkFileAccess(tempDir, 'src/components/MyCode.tsx', 'write');
+    assert.equal(localCheck.allowed, true);
+
+    // 7b. No modo ask_permission, caminhos externos fora do projeto requerem autorização
+    const externalCheck = ProjectSettingsManager.checkFileAccess(tempDir, '../outside/other-project/file.ts', 'write');
+    assert.equal(externalCheck.allowed, false);
+    assert.equal(externalCheck.requiresPermission, true);
+    assert.ok(externalCheck.reason?.includes('permissão antes de acessar ou inserir arquivos em outros diretórios'));
+
+    // 7c. No modo unrestricted (seguir com tudo), caminhos externos são autorizados
+    ProjectSettingsManager.saveSettings(tempDir, {
+      directoryAccessPolicy: 'unrestricted',
+      fileAccess: { readAllowed: true, writeAllowed: true, deniedPaths: [] }
+    });
+
+    const unrestrictedCheck = ProjectSettingsManager.checkFileAccess(tempDir, '../outside/other-project/file.ts', 'write');
+    assert.equal(unrestrictedCheck.allowed, true);
+
+    // 7d. Resolução de política: chat 'unrestricted' sobrepõe projeto 'ask_permission'
+    ProjectSettingsManager.saveSettings(tempDir, { directoryAccessPolicy: 'ask_permission' });
+    const resolved = ProjectSettingsManager.resolveEffectiveSecurity(undefined, tempDir, 'unrestricted');
+    assert.equal(resolved.directoryAccessPolicy, 'unrestricted');
+  });
 });

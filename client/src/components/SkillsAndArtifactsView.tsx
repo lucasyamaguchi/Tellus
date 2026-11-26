@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
+  MessageSquare,
   Sparkles, 
   Layers, 
   FileCheck, 
@@ -35,7 +36,11 @@ import { TellusSkill, TellusArtifact, ProjectOverview } from '../types';
 import { api } from '../api';
 import { InteractiveGraphCanvas } from './InteractiveGraphCanvas';
 
-export const SkillsAndArtifactsView: React.FC = () => {
+interface SkillsAndArtifactsViewProps {
+  onStartSkillArchitectChat?: (initialIdea?: string) => void;
+}
+
+export const SkillsAndArtifactsView: React.FC<SkillsAndArtifactsViewProps> = ({ onStartSkillArchitectChat }) => {
   const [activeTab, setActiveTab] = useState<'skills' | 'artifacts' | 'graph'>('skills');
   const [skills, setSkills] = useState<TellusSkill[]>([]);
   const [artifacts, setArtifacts] = useState<TellusArtifact[]>([]);
@@ -82,18 +87,19 @@ export const SkillsAndArtifactsView: React.FC = () => {
 
   const loadData = async (projectPath?: string) => {
     try {
+      const activeProj = projectPath || selectedProjectId || undefined;
       const [skillsList, artifactsList, openProjs] = await Promise.all([
-        api.listSkills(projectPath || selectedProjectId || undefined),
-        api.listArtifacts(),
+        api.listSkills(activeProj),
+        api.listArtifacts(activeProj),
         api.getOpenProjects().catch(() => [])
       ]);
-      setSkills(skillsList);
-      setArtifacts(artifactsList);
+      setSkills(Array.isArray(skillsList) ? skillsList : []);
+      setArtifacts(Array.isArray(artifactsList) ? artifactsList : []);
       setProjects(openProjs);
       if (!selectedProjectId && openProjs.length > 0) {
         setSelectedProjectId(openProjs[0].path);
       }
-      if (artifactsList.length > 0 && !selectedArtifact) {
+      if (Array.isArray(artifactsList) && artifactsList.length > 0 && !selectedArtifact) {
         setSelectedArtifact(artifactsList[0]);
       }
     } catch {
@@ -542,11 +548,20 @@ export const SkillsAndArtifactsView: React.FC = () => {
               <span>Importar Skill (.md)</span>
             </button>
             <button
+              onClick={() => onStartSkillArchitectChat?.()}
+              className="px-3 py-1 rounded-lg bg-gradient-to-r from-purple-600/30 to-cyan-600/30 hover:from-purple-600/50 hover:to-cyan-600/50 border border-purple-500/40 text-xs text-purple-200 hover:text-white flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+              title="Abrir chat interativo com o Arquiteto de Skills para desenhar, moldar regras, simular rotinas reais e salvar a skill"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span>Desenvolver com IA</span>
+            </button>
+            <button
               onClick={() => setIsCreatingSkill(true)}
-              className="px-3 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition-all"
+              className="px-3 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition-all cursor-pointer"
+              title="Criar skill manualmente via formulário estruturado"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Nova Skill</span>
+              <span>Nova Skill Manual</span>
             </button>
           </div>
         ) : activeTab === 'artifacts' ? (
@@ -723,6 +738,32 @@ export const SkillsAndArtifactsView: React.FC = () => {
               onSubmit={handleSaveNewSkill}
               className="p-4 rounded-2xl bg-card border-2 border-accent/40 shadow-xl space-y-3.5 animate-in fade-in shrink-0"
             >
+              {/* Option to switch to Interactive AI Chat */}
+              <div className="p-3 rounded-xl bg-gradient-to-r from-purple-950/40 via-cyan-950/30 to-panel border border-purple-500/30 flex items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300">
+                    <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">Prefere desenvolver conversando?</span>
+                    <span className="text-[11px] text-slate-400">
+                      O Arquiteto de Skills ajuda a conceber o escopo, definir regras estritas e simular o resultado em rotinas comuns.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreatingSkill(false);
+                    onStartSkillArchitectChat?.(newSkillName || newSkillDesc);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition-all cursor-pointer shrink-0"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Abrir no Chat</span>
+                </button>
+              </div>
+
               <div className="flex items-center justify-between border-b border-card-border pb-2">
                 <span className="font-bold text-xs text-slate-100 flex items-center space-x-1.5">
                   <Sparkles className="w-4 h-4 text-accent-light" />

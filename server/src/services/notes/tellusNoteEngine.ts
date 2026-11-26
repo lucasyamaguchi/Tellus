@@ -4,6 +4,7 @@ import os from 'os';
 import { PrivacySanitizer } from '../security/privacySanitizer.js';
 import { ConfigManager } from '../configManager.js';
 import { SecurityShield } from '../sync/securityShield.js';
+import { getDefaultVaultDir } from '../../utils/appPaths.js';
 
 // Diretório padrão do cofre Obsidian usado pelo TellusMD.
 // Caso não exista na máquina atual (ex: outro notebook), utiliza Documents/Tellus Vault ou o caminho escolhido nas Configurações.
@@ -64,6 +65,7 @@ export interface TellusNote {
   inkStrokeCount?: number;
   ownerAccountHash?: string | null;
   isAccountProtected?: boolean;
+  isInternal?: boolean;
 }
 
 export type TelluNote = TellusNote;
@@ -73,15 +75,21 @@ export type FrankNote = TellusNote;
 export interface GraphNode {
   id: string;
   label: string;
-  type: 'note' | 'subject' | 'tag';
+  type: 'note' | 'subject' | 'tag' | 'macro_category' | 'keyword' | string;
   val: number; // size/weight
   color?: string;
+  details?: string;
+  level?: 1 | 2 | 3 | 4;
+  hotness?: number;
+  macroCategory?: string;
+  linkedNoteIds?: string[];
+  parentId?: string;
 }
 
 export interface GraphLink {
   source: string;
   target: string;
-  type: 'wikilink' | 'tag' | 'subject';
+  type: 'wikilink' | 'tag' | 'subject' | 'macro_subject' | 'keyword' | string;
 }
 
 export interface GraphData {
@@ -105,14 +113,17 @@ function getGlobalNotesDir(): string {
   }
   try {
     const config = ConfigManager.getConfig();
-    if (config.vaultPath && config.vaultPath.trim()) {
+    if (config.vaultPath && config.vaultPath.trim() && fs.existsSync(config.vaultPath.trim())) {
       return config.vaultPath.trim();
     }
   } catch {}
+  if (fs.existsSync(getDefaultVaultDir())) {
+    return getDefaultVaultDir();
+  }
   if (fs.existsSync(OBSIDIAN_VAULT_DIR)) {
     return OBSIDIAN_VAULT_DIR;
   }
-  return path.join(os.homedir(), 'Documents', 'Tellus Vault');
+  return getDefaultVaultDir();
 }
 
 function getBackupsDir(): string {
@@ -127,11 +138,25 @@ export class TellusNoteEngine {
   public static get VAULT_DIR(): string {
     return getGlobalNotesDir();
   }
+  public static get BACKUPS_DIR(): string {
+    return getBackupsDir();
+  }
   public static get ATTACHMENTS_DIR(): string {
     return path.join(getGlobalNotesDir(), '_attachments');
   }
   public static get INK_DIR(): string {
     return getInkDir();
+  }
+
+  private static deletionHooks: Array<(relativePath: string, isFolder: boolean) => void> = [];
+  private static saveHooks: Array<(relativePath: string) => void> = [];
+
+  public static registerDeletionHook(hook: (relativePath: string, isFolder: boolean) => void): void {
+    this.deletionHooks.push(hook);
+  }
+
+  public static registerSaveHook(hook: (relativePath: string) => void): void {
+    this.saveHooks.push(hook);
   }
 
   private static ensureDirs(projectPath?: string) {
@@ -235,10 +260,16 @@ export class TellusNoteEngine {
   }
 
   // Extract subject / category from frontmatter or default to "Geral"
-  private static parseNote(filePath: string, folderName: string = 'Geral', isProjectSpecific: boolean = false): TelluNote | null {
+  private static parseNote(
+    filePath: string, 
+    folderName: string = 'Geral', 
+    isProjectSpecific: boolean = false, 
+    preloadedCfg?: any,
+    customRelativePath?: string
+  ): TelluNote | null {
     const rawFileContent = fs.readFileSync(filePath, 'utf-8');
     // Ensure config is loaded so active session vault key is restored if present
-    const cfg = ConfigManager.getConfig();
+    const cfg = preloadedCfg || ConfigManager.getConfig();
     const viewScope = cfg.syncConfig?.vaultViewScope || 'all_accessible';
     const securityCheck = SecurityShield.inspectAndUnwrapNote(rawFileContent);
     if (!securityCheck.canAccess) {
@@ -258,7 +289,9 @@ export class TellusNoteEngine {
     const stat = fs.statSync(filePath);
     const filename = path.basename(filePath);
     const id = filename.replace(/\.md$/i, '');
-    const relativePath = path.relative(getGlobalNotesDir(), filePath).replace(/\\/g, '/');
+    const relativePath = customRelativePath 
+      ? customRelativePath 
+      : path.relative(getGlobalNotesDir(), filePath).replace(/\\/g, '/');
 
     // Extract title from first Markdown heading, or fallback to filename
     const lines = content.split('\n');
@@ -277,8 +310,10 @@ export class TellusNoteEngine {
     }
 
     // Extract folder from physical directory or comment
-    const dirRelative = path.relative(getGlobalNotesDir(), path.dirname(filePath)).replace(/\\/g, '/');
-    const physicalFolder = dirRelative && dirRelative !== '.' ? dirRelative : 'Geral';
+    const dirRelative = customRelativePath
+      ? path.dirname(customRelativePath).replace(/\\/g, '/')
+      : path.relative(getGlobalNotesDir(), path.dirname(filePath)).replace(/\\/g, '/');
+    const physicalFolder = (folderName && folderName !== 'Geral') ? folderName : (dirRelative && dirRelative !== '.' ? dirRelative : 'Geral');
 
     const subjectMatch = content.match(/<!--\s*subject:\s*(.*?)\s*-->/i);
     let rawSubject = subjectMatch ? subjectMatch[1].trim() : (physicalFolder.includes('/') ? physicalFolder.split('/').slice(1).join('/') : physicalFolder);
@@ -288,6 +323,25 @@ export class TellusNoteEngine {
     }
     const subject = this.normalizePortuguese(rawSubject);
     const folder = this.sanitizePath(physicalFolder !== 'Geral' ? physicalFolder : (folderName !== 'Geral' ? folderName : 'Geral'));
+
+    const sanitizedFolder = this.sanitizePath(folder);
+    const topFolder = sanitizedFolder.split('/')[0].trim().toLowerCase();
+    const internalFolderNames = [
+      'artefatos do projeto',
+      'documentação do projeto',
+      'notas do projeto',
+      '_attachments',
+      'backend',
+      'frontend',
+      'criptografia',
+      'engenharia',
+      'infra',
+      'handoffs'
+    ];
+    const isInternalFolder = internalFolderNames.includes(topFolder) || sanitizedFolder.toLowerCase().startsWith('_attachments');
+    const internalMatch = content.match(/<!--\s*internal:\s*(true|false)\s*-->/i);
+    const isExplicitlyInternal = internalMatch ? internalMatch[1].toLowerCase() === 'true' : false;
+    const isInternal = Boolean(isProjectSpecific || isInternalFolder || isExplicitlyInternal);
 
     const tags = this.extractTags(content);
     const links = this.extractWikilinks(content);
@@ -327,13 +381,15 @@ export class TellusNoteEngine {
       hasInk,
       inkStrokeCount,
       ownerAccountHash: securityCheck.ownerAccountHash,
-      isAccountProtected: Boolean(securityCheck.ownerAccountHash)
+      isAccountProtected: Boolean(securityCheck.ownerAccountHash),
+      isInternal
     };
   }
 
   public static listNotes(projectPath?: string): TelluNote[] {
     this.ensureDirs(projectPath);
     const notes: TelluNote[] = [];
+    const cfg = ConfigManager.getConfig();
 
     const scanDir = (currentDir: string) => {
       if (!fs.existsSync(currentDir)) return;
@@ -348,7 +404,7 @@ export class TellusNoteEngine {
         } else if (entry.isFile() && entry.name.endsWith('.md')) {
           const relativeDir = path.relative(getGlobalNotesDir(), currentDir).replace(/\\/g, '/');
           const folderName = relativeDir && relativeDir !== '.' ? relativeDir : 'Geral';
-          const parsedNote = this.parseNote(fullPath, folderName, false);
+          const parsedNote = this.parseNote(fullPath, folderName, false, cfg);
           if (parsedNote) {
             notes.push(parsedNote);
           }
@@ -357,6 +413,79 @@ export class TellusNoteEngine {
     };
 
     scanDir(getGlobalNotesDir());
+
+    // 2. Scan active project directories if projectPath is provided
+    if (projectPath && fs.existsSync(projectPath)) {
+      const resolvedProj = path.resolve(projectPath);
+
+      // 2a. Scan .agentic/artifacts (e.g. visao_inicial_kentron.md)
+      const artifactsDir = path.join(resolvedProj, '.agentic', 'artifacts');
+      if (fs.existsSync(artifactsDir)) {
+        try {
+          const files = fs.readdirSync(artifactsDir);
+          for (const file of files) {
+            if (file.endsWith('.md')) {
+              const fullPath = path.join(artifactsDir, file);
+              const rel = path.join('.agentic', 'artifacts', file).replace(/\\/g, '/');
+              const parsed = this.parseNote(fullPath, 'Artefatos do Projeto', true, cfg, rel);
+              if (parsed) {
+                parsed.subject = 'Artefatos';
+                notes.push(parsed);
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 2b. Scan project notes and anotacoes folders
+      const projectNotesDirs = [
+        path.join(resolvedProj, 'notes'),
+        path.join(resolvedProj, 'anotacoes'),
+        path.join(resolvedProj, '.agentic', 'notes')
+      ];
+
+      for (const pDir of projectNotesDirs) {
+        if (fs.existsSync(pDir)) {
+          const scanProjNotes = (curDir: string) => {
+            try {
+              const entries = fs.readdirSync(curDir, { withFileTypes: true });
+              for (const entry of entries) {
+                if (entry.name.startsWith('.')) continue;
+                const full = path.join(curDir, entry.name);
+                if (entry.isDirectory()) {
+                  scanProjNotes(full);
+                } else if (entry.isFile() && entry.name.endsWith('.md')) {
+                  const relToProj = path.relative(resolvedProj, full).replace(/\\/g, '/');
+                  const relDir = path.relative(pDir, curDir).replace(/\\/g, '/');
+                  const folderName = relDir && relDir !== '.' ? `Notas do Projeto/${relDir}` : 'Notas do Projeto';
+                  const parsed = this.parseNote(full, folderName, true, cfg, relToProj);
+                  if (parsed) {
+                    parsed.subject = 'Projeto';
+                    notes.push(parsed);
+                  }
+                }
+              }
+            } catch {}
+          };
+          scanProjNotes(pDir);
+        }
+      }
+
+      // 2c. Scan root documentation markdown files (e.g. README.md, ROADMAP.md, PLAN.md)
+      try {
+        const rootEntries = fs.readdirSync(resolvedProj, { withFileTypes: true });
+        for (const entry of rootEntries) {
+          if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.startsWith('.')) {
+            const full = path.join(resolvedProj, entry.name);
+            const parsed = this.parseNote(full, 'Documentação do Projeto', true, cfg, entry.name);
+            if (parsed) {
+              parsed.subject = 'Documentação';
+              notes.push(parsed);
+            }
+          }
+        }
+      } catch {}
+    }
 
     // 3. Compute Backlinks
     for (const note of notes) {
@@ -389,6 +518,65 @@ export class TellusNoteEngine {
     }
 
     return notes.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  // Retrieve a specific note by ID, title, filename, or relative path
+  public static getNote(idOrTitleOrPath: string, projectPath?: string): TelluNote | null {
+    if (!idOrTitleOrPath) return null;
+    const clean = idOrTitleOrPath.trim();
+    const cleanLower = clean.toLowerCase();
+    const cleanNoExt = clean.replace(/\.md$/i, '').toLowerCase();
+
+    // 1. Search in all listed notes (vault + project)
+    const notes = this.listNotes(projectPath);
+    for (const n of notes) {
+      if (
+        n.id.toLowerCase() === cleanLower ||
+        n.id.toLowerCase() === cleanNoExt ||
+        n.title.toLowerCase() === cleanLower ||
+        n.filename.toLowerCase() === cleanLower ||
+        n.filename.toLowerCase() === `${cleanNoExt}.md` ||
+        n.relativePath.toLowerCase() === cleanLower ||
+        n.relativePath.toLowerCase().endsWith('/' + cleanLower) ||
+        n.relativePath.toLowerCase().endsWith('/' + cleanNoExt + '.md')
+      ) {
+        return n;
+      }
+    }
+
+    // 2. Direct filesystem lookup fallback
+    const candidatePaths: string[] = [];
+    if (projectPath) {
+      candidatePaths.push(
+        path.resolve(projectPath, clean),
+        path.resolve(projectPath, `${cleanNoExt}.md`),
+        path.resolve(projectPath, '.agentic', 'artifacts', clean),
+        path.resolve(projectPath, '.agentic', 'artifacts', `${cleanNoExt}.md`),
+        path.resolve(projectPath, 'notes', clean),
+        path.resolve(projectPath, 'notes', `${cleanNoExt}.md`)
+      );
+    }
+    candidatePaths.push(
+      path.resolve(getGlobalNotesDir(), clean),
+      path.resolve(getGlobalNotesDir(), `${cleanNoExt}.md`),
+      path.resolve(clean)
+    );
+
+    for (const cand of candidatePaths) {
+      if (fs.existsSync(cand) && fs.statSync(cand).isFile() && cand.endsWith('.md')) {
+        const isProj = projectPath ? cand.toLowerCase().startsWith(path.resolve(projectPath).toLowerCase()) : false;
+        const rel = isProj && projectPath 
+          ? path.relative(projectPath, cand).replace(/\\/g, '/') 
+          : path.relative(getGlobalNotesDir(), cand).replace(/\\/g, '/');
+        const folder = isProj 
+          ? (cand.includes('artifacts') ? 'Artefatos do Projeto' : 'Notas do Projeto')
+          : 'Geral';
+        const parsed = this.parseNote(cand, folder, isProj, undefined, rel);
+        if (parsed) return parsed;
+      }
+    }
+
+    return null;
   }
 
   // List all folders in vault (including nested subfolders)
@@ -465,12 +653,34 @@ export class TellusNoteEngine {
     return true;
   }
 
+  public static isInternalFolder(folderName: string): boolean {
+    const clean = (folderName || '').replace(/\\/g, '/').trim();
+    const top = clean.split('/')[0].trim().toLowerCase();
+    const internalTops = [
+      'artefatos do projeto',
+      'documentação do projeto',
+      'notas do projeto',
+      '_attachments',
+      'backend',
+      'frontend',
+      'criptografia',
+      'engenharia',
+      'infra',
+      'handoffs'
+    ];
+    return internalTops.includes(top) || clean.toLowerCase().startsWith('_attachments');
+  }
+
   // Delete an entire folder and all its notes (with safety backups)
-  public static deleteFolder(folderName: string, projectPath?: string): { success: boolean; deletedNotesCount: number } {
+  public static deleteFolder(folderName: string, projectPath?: string): { success: boolean; deletedNotesCount: number; protected?: boolean } {
     this.ensureDirs(projectPath);
     const cleanPath = this.sanitizePath(folderName).normalize('NFC');
     if (!cleanPath || cleanPath === 'Geral') {
       return { success: false, deletedNotesCount: 0 };
+    }
+
+    if (this.isInternalFolder(cleanPath)) {
+      return { success: false, deletedNotesCount: 0, protected: true };
     }
 
     const folderPath = path.join(getGlobalNotesDir(), cleanPath);
@@ -484,7 +694,13 @@ export class TellusNoteEngine {
     });
 
     for (const note of notesToDelete) {
-      const filePath = path.join(getGlobalNotesDir(), note.relativePath);
+      let filePath = path.join(getGlobalNotesDir(), note.relativePath);
+      if (!fs.existsSync(filePath) && projectPath) {
+        const pPath = path.join(projectPath, note.relativePath);
+        if (fs.existsSync(pPath)) {
+          filePath = pPath;
+        }
+      }
       if (fs.existsSync(filePath)) {
         try {
           const existingContent = fs.readFileSync(filePath, 'utf-8');
@@ -528,7 +744,223 @@ export class TellusNoteEngine {
       }
     }
 
+    // 3. Trigger deletion hooks (Cloud Sync tombstones & remote mirror cleanup)
+    for (const hook of this.deletionHooks) {
+      try {
+        hook(cleanPath, true);
+      } catch {}
+    }
+
     return { success: true, deletedNotesCount: count };
+  }
+
+  // Rename a notebook / folder across all notes and disk
+  public static renameFolder(
+    oldName: string,
+    newName: string,
+    projectPath?: string
+  ): { success: boolean; movedNotesCount: number } {
+    this.ensureDirs(projectPath);
+    const cleanOld = this.sanitizePath(oldName).normalize('NFC');
+    const cleanNew = this.sanitizePath(newName).normalize('NFC');
+
+    if (!cleanOld || !cleanNew || cleanOld === cleanNew || cleanOld === 'Geral') {
+      return { success: false, movedNotesCount: 0 };
+    }
+
+    const oldPath = path.join(getGlobalNotesDir(), cleanOld);
+    const newPath = path.join(getGlobalNotesDir(), cleanNew);
+
+    let movedNotesCount = 0;
+    const notes = this.listNotes(projectPath);
+
+    for (const note of notes) {
+      const noteFolder = (note.folder || 'Geral').normalize('NFC');
+      if (noteFolder === cleanOld || noteFolder.startsWith(`${cleanOld}/`)) {
+        const subSuffix = noteFolder === cleanOld ? '' : noteFolder.slice(cleanOld.length);
+        const updatedTargetFolder = `${cleanNew}${subSuffix}`;
+        this.moveNote(note.id, updatedTargetFolder, projectPath);
+        movedNotesCount++;
+      }
+    }
+
+    if (fs.existsSync(oldPath)) {
+      try {
+        if (!fs.existsSync(newPath)) {
+          fs.renameSync(oldPath, newPath);
+        } else {
+          try { fs.rmSync(oldPath, { recursive: true, force: true }); } catch {}
+        }
+      } catch {}
+    }
+
+    return { success: true, movedNotesCount };
+  }
+
+  // Merge multiple notebooks/folders into a single notebook/folder (aggregates notes without merging note bodies)
+  public static mergeFolders(
+    sourceFolders: string[],
+    targetFolder: string,
+    projectPath?: string
+  ): { success: boolean; movedNotesCount: number } {
+    this.ensureDirs(projectPath);
+    const cleanTarget = this.sanitizePath(targetFolder).normalize('NFC');
+    if (!cleanTarget || !sourceFolders || sourceFolders.length === 0) {
+      return { success: false, movedNotesCount: 0 };
+    }
+
+    let movedNotesCount = 0;
+    const notes = this.listNotes(projectPath);
+
+    for (const src of sourceFolders) {
+      const cleanSrc = this.sanitizePath(src).normalize('NFC');
+      if (!cleanSrc || cleanSrc === cleanTarget) continue;
+
+      for (const note of notes) {
+        const noteFolder = (note.folder || 'Geral').normalize('NFC');
+        if (noteFolder === cleanSrc || noteFolder.startsWith(`${cleanSrc}/`)) {
+          const subSuffix = noteFolder === cleanSrc ? '' : noteFolder.slice(cleanSrc.length);
+          const updatedTargetFolder = `${cleanTarget}${subSuffix}`;
+          const moved = this.moveNote(note.id, updatedTargetFolder, projectPath);
+          if (moved) movedNotesCount++;
+        }
+      }
+
+      const oldPath = path.join(getGlobalNotesDir(), cleanSrc);
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.rmSync(oldPath, { recursive: true, force: true });
+        } catch {}
+      }
+    }
+
+    return { success: true, movedNotesCount };
+  }
+
+  // Bulk move notes to target folder
+  public static bulkMoveNotes(
+    noteIds: string[],
+    targetFolder: string,
+    projectPath?: string
+  ): { successCount: number; updatedNotes: TelluNote[] } {
+    this.ensureDirs(projectPath);
+    let successCount = 0;
+    const updatedNotes: TelluNote[] = [];
+
+    for (const id of noteIds) {
+      const res = this.moveNote(id, targetFolder, projectPath);
+      if (res) {
+        successCount++;
+        updatedNotes.push(res);
+      }
+    }
+
+    return { successCount, updatedNotes };
+  }
+
+  // Bulk delete notes with safe backups
+  public static bulkDeleteNotes(
+    noteIds: string[],
+    projectPath?: string
+  ): { successCount: number; failedCount: number; protectedCount: number } {
+    this.ensureDirs(projectPath);
+    let successCount = 0;
+    let failedCount = 0;
+    let protectedCount = 0;
+
+    const allNotes = this.listNotes(projectPath);
+    const notesMap = new Map(allNotes.map(n => [n.id, n]));
+
+    for (const id of noteIds) {
+      const note = notesMap.get(id);
+      if (note && note.isInternal) {
+        protectedCount++;
+        continue; // PROTECT: never delete internal files during bulk operations!
+      }
+      const success = this.deleteNote(id, false, projectPath);
+      if (success) {
+        successCount++;
+      } else {
+        failedCount++;
+      }
+    }
+
+    return { successCount, failedCount, protectedCount };
+  }
+
+  // Merge multiple notes into a single unified note
+  public static mergeNotes(
+    noteIds: string[],
+    options: {
+      title?: string;
+      targetFolder?: string;
+      deleteSources?: boolean;
+    } = {},
+    projectPath?: string
+  ): TelluNote | null {
+    this.ensureDirs(projectPath);
+    if (!noteIds || noteIds.length < 2) return null;
+
+    const notes = this.listNotes(projectPath);
+    const selectedNotes = noteIds
+      .map(id => notes.find(n => n.id === id || n.filename === `${id}.md`))
+      .filter((n): n is TelluNote => Boolean(n));
+
+    if (selectedNotes.length < 2) return null;
+
+    const targetTitle = (options.title && options.title.trim())
+      ? options.title.trim()
+      : selectedNotes.map(n => n.title).join(' & ');
+
+    const targetFolder = (options.targetFolder && options.targetFolder.trim())
+      ? options.targetFolder.trim()
+      : (selectedNotes[0].folder || 'Geral');
+
+    const allTags = new Set<string>();
+    selectedNotes.forEach(n => (n.tags || []).forEach(t => allTags.add(t)));
+
+    let mergedBody = `# ${targetTitle}\n\n`;
+    mergedBody += `> ℹ️ **Nota Unificada:** Consolidação das seguintes anotações:\n`;
+    for (const n of selectedNotes) {
+      mergedBody += `> - [[${n.title}]]\n`;
+    }
+    if (allTags.size > 0) {
+      mergedBody += `>\n> **Tags:** ${Array.from(allTags).join(' ')}\n`;
+    }
+    mergedBody += `\n---\n\n`;
+
+    for (let i = 0; i < selectedNotes.length; i++) {
+      const n = selectedNotes[i];
+      mergedBody += `## [[${n.title}]]\n\n`;
+      let sectionContent = n.content.trim();
+      sectionContent = sectionContent.replace(/^<!--[\s\S]*?-->\r?\n?/gm, '').trim();
+      const firstLine = sectionContent.split('\n')[0] || '';
+      if (firstLine.replace(/^#+\s*/, '').trim().toLowerCase() === n.title.toLowerCase()) {
+        sectionContent = sectionContent.slice(firstLine.length).trim();
+      }
+      mergedBody += sectionContent;
+      if (i < selectedNotes.length - 1) {
+        mergedBody += `\n\n---\n\n`;
+      }
+    }
+
+    const saved = this.saveNote({
+      title: targetTitle,
+      folder: targetFolder,
+      subject: targetFolder.includes('/') ? targetFolder.split('/')[0] : targetFolder,
+      content: mergedBody,
+      isProjectSpecific: selectedNotes[0].isProjectSpecific
+    }, projectPath);
+
+    if (options.deleteSources) {
+      for (const n of selectedNotes) {
+        if (n.id !== saved.id) {
+          this.deleteNote(n.id, n.isProjectSpecific, projectPath, true);
+        }
+      }
+    }
+
+    return saved;
   }
 
   public static saveNote(data: {
@@ -599,6 +1031,15 @@ export class TellusNoteEngine {
     }
 
     fs.writeFileSync(filePath, finalContent, 'utf-8');
+
+    // Trigger save hooks (Clear tombstone if note was recreated or saved)
+    try {
+      const rel = path.relative(getGlobalNotesDir(), filePath).replace(/\\/g, '/');
+      for (const hook of TellusNoteEngine.saveHooks) {
+        try { hook(rel); } catch {}
+      }
+    } catch {}
+
     const parsed = this.parseNote(filePath, folder, data.isProjectSpecific);
     if (!parsed) {
       return {
@@ -751,17 +1192,37 @@ export class TellusNoteEngine {
     return results.slice(0, limit);
   }
 
-  public static deleteNote(id: string, isProjectSpecific?: boolean, projectPath?: string): boolean {
+  public static deleteNote(id: string, isProjectSpecific?: boolean, projectPath?: string, forceInternal: boolean = false): boolean {
     const notes = this.listNotes(projectPath);
     const note = notes.find(n => n.id === id || n.filename === `${id}.md`);
     if (!note) return false;
 
-    const filePath = path.join(getGlobalNotesDir(), note.relativePath);
+    // Shield: Protect internal/system/project files from accidental deletion
+    if (note.isInternal && !forceInternal) {
+      return false;
+    }
+
+    let filePath = path.join(getGlobalNotesDir(), note.relativePath);
+    if (!fs.existsSync(filePath) && projectPath) {
+      const pPath = path.join(projectPath, note.relativePath);
+      if (fs.existsSync(pPath)) {
+        filePath = pPath;
+      }
+    }
+
     if (fs.existsSync(filePath)) {
       const existingContent = fs.readFileSync(filePath, 'utf-8');
       const backupFilename = `${id}_deleted_${Date.now()}.md`;
       fs.writeFileSync(path.join(getBackupsDir(), backupFilename), existingContent, 'utf-8');
       fs.unlinkSync(filePath);
+
+      // Trigger deletion hooks (Cloud Sync tombstones & remote mirror cleanup)
+      for (const hook of TellusNoteEngine.deletionHooks) {
+        try {
+          hook(note.relativePath, false);
+        } catch {}
+      }
+
       return true;
     }
     return false;
@@ -774,7 +1235,14 @@ export class TellusNoteEngine {
     const note = notes.find(n => n.id === id || n.filename === `${id}.md`);
     if (!note) return null;
 
-    const currentFilePath = path.join(getGlobalNotesDir(), note.relativePath);
+    let currentFilePath = path.join(getGlobalNotesDir(), note.relativePath);
+    if (!fs.existsSync(currentFilePath) && projectPath) {
+      const pPath = path.join(projectPath, note.relativePath);
+      if (fs.existsSync(pPath)) {
+        currentFilePath = pPath;
+      }
+    }
+
     if (!fs.existsSync(currentFilePath)) return null;
 
     const cleanTargetFolder = this.sanitizePath(targetFolder) || 'Geral';
@@ -835,44 +1303,146 @@ export class TellusNoteEngine {
     return { importedCount: count };
   }
 
-  // Generate Obsidian-style Interactive Graph
+  // Generate Obsidian-style Hierarchical & Semantic Interactive Graph (Progressive Levels & Hot Terms)
   public static getGraphData(projectPath?: string): GraphData {
     const notes = this.listNotes(projectPath);
     const nodes: GraphNode[] = [];
     const links: GraphLink[] = [];
 
-    const subjects = new Set<string>();
-    const tags = new Set<string>();
+    const STOPWORDS = new Set([
+      'sobre', 'para', 'como', 'onde', 'quando', 'mais', 'menos', 'muito', 'pouco',
+      'esta', 'este', 'essa', 'esse', 'isso', 'aquilo', 'projeto', 'anotação', 'anotacao',
+      'nota', 'notas', 'com', 'sem', 'por', 'entre', 'cada', 'tudo', 'nada', 'qual',
+      'quais', 'suas', 'seus', 'dele', 'dela', 'deles', 'delas', 'from', 'with', 'that',
+      'this', 'then', 'than', 'into', 'some', 'about', 'note', 'notes'
+    ]);
 
+    // Helper to categorize notes into macro categories (Level 1)
+    const getMacroCategory = (note: TellusNote): { id: string; label: string; icon: string; color: string } => {
+      const folder = (note.folder || '').trim();
+      const subject = (note.subject || '').trim();
+      const lowerFolder = folder.toLowerCase();
+
+      if (note.isProjectSpecific || lowerFolder.startsWith('projeto') || lowerFolder.includes('kentron') || lowerFolder.includes('csnades') || lowerFolder.includes('agenticide')) {
+        return { id: 'macro_projetos', label: 'Projetos', icon: '📁', color: '#6366f1' };
+      }
+      if (lowerFolder.startsWith('estudo') || lowerFolder.includes('concurso') || lowerFolder.includes('modulo') || lowerFolder.includes('módulo') || subject.toLowerCase().includes('estudo')) {
+        return { id: 'macro_estudos', label: 'Estudos', icon: '🎓', color: '#38bdf8' };
+      }
+      if (!folder || folder === 'Geral' || lowerFolder.includes('quick') || lowerFolder.includes('rapida') || lowerFolder.includes('rápida') || lowerFolder.includes('_attachments') || lowerFolder.includes('inbox')) {
+        return { id: 'macro_rapidas', label: 'Anotações Rápidas', icon: '⚡', color: '#10b981' };
+      }
+      if (lowerFolder.includes('cripto') || lowerFolder.includes('seguranc') || lowerFolder.includes('seguranç')) {
+        return { id: 'macro_seguranca', label: 'Segurança & Criptografia', icon: '🔐', color: '#f59e0b' };
+      }
+      if (lowerFolder.includes('backend') || lowerFolder.includes('frontend') || lowerFolder.includes('engenharia')) {
+        return { id: 'macro_engenharia', label: 'Engenharia de Software', icon: '⚙️', color: '#ec4899' };
+      }
+
+      const rootName = folder.split('/')[0].split('\\')[0].trim() || 'Cadernos Gerais';
+      const safeId = rootName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+      return { id: `macro_${safeId}`, label: rootName, icon: '📚', color: '#a855f7' };
+    };
+
+    const macroBuckets = new Map<string, { label: string; icon: string; color: string; noteCount: number; subjects: Set<string> }>();
+    const subjectBuckets = new Map<string, { label: string; macroId: string; noteCount: number; noteIds: string[] }>();
+    const keywordToNotes = new Map<string, Set<string>>();
+    const keywordToSubjects = new Map<string, Set<string>>();
+
+    // 1. Process all notes, map them to Macro Categories (Level 1) & Subjects (Level 2)
     for (const note of notes) {
+      const macro = getMacroCategory(note);
+      if (!macroBuckets.has(macro.id)) {
+        macroBuckets.set(macro.id, {
+          label: macro.label,
+          icon: macro.icon,
+          color: macro.color,
+          noteCount: 0,
+          subjects: new Set()
+        });
+      }
+      const macroData = macroBuckets.get(macro.id)!;
+      macroData.noteCount++;
+
+      // Subject determination: subfolder or specific subject
+      let subName = note.folder || note.subject || 'Principal';
+      if (subName.includes('/') || subName.includes('\\')) {
+        const parts = subName.split(/[\/\\]/).filter(Boolean);
+        subName = parts.length > 1 ? parts.slice(1).join(' / ') : parts[0];
+      }
+      if (!subName.trim()) subName = 'Principal';
+
+      const subId = `sub_${macro.id}_${subName.toLowerCase().replace(/[^a-z0-9_]/g, '_')}`;
+      macroData.subjects.add(subId);
+
+      if (!subjectBuckets.has(subId)) {
+        subjectBuckets.set(subId, {
+          label: subName,
+          macroId: macro.id,
+          noteCount: 0,
+          noteIds: []
+        });
+      }
+      const subData = subjectBuckets.get(subId)!;
+      subData.noteCount++;
+      subData.noteIds.push(`note_${note.id}`);
+
+      // 2. Extract Keywords / Hot Terms (Tags, Wikilinks & Key Concepts)
+      const extractedTerms: string[] = [];
+
+      // A) Tags
+      for (const t of note.tags) {
+        const cleanTag = t.replace(/^#+/, '').trim().toLowerCase();
+        if (cleanTag && cleanTag.length > 2) extractedTerms.push(cleanTag);
+      }
+
+      // B) Wikilinks
+      for (const wl of note.links) {
+        const cleanWl = wl.trim().toLowerCase();
+        if (cleanWl && cleanWl.length > 2 && !STOPWORDS.has(cleanWl)) extractedTerms.push(cleanWl);
+      }
+
+      // C) Significant words from title (nouns / technical terms)
+      const titleWords = note.title
+        .toLowerCase()
+        .replace(/[^a-z0-9áàâãéèêíïóôõöúçñ\-_ ]/gi, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
+      for (const tw of titleWords) {
+        extractedTerms.push(tw);
+      }
+
+      // Record terms for this note & subject
+      for (const term of extractedTerms) {
+        if (!keywordToNotes.has(term)) {
+          keywordToNotes.set(term, new Set());
+          keywordToSubjects.set(term, new Set());
+        }
+        keywordToNotes.get(term)!.add(`note_${note.id}`);
+        keywordToSubjects.get(term)!.add(subId);
+      }
+
+      // Note Node (Level 4)
       nodes.push({
         id: `note_${note.id}`,
         label: note.title,
         type: 'note',
-        val: 10 + (note.backlinks.length * 4) + (note.links.length * 2),
-        color: note.isProjectSpecific ? '#38bdf8' : '#818cf8'
+        level: 4,
+        val: Math.max(7, Math.min(22, 6 + (note.backlinks.length * 3) + (note.links.length * 2))),
+        color: note.isProjectSpecific ? '#38bdf8' : '#818cf8',
+        parentId: subId,
+        macroCategory: macro.label,
+        details: `Caderno: ${note.folder || 'Geral'} | Links: ${note.links.length} | Backlinks: ${note.backlinks.length}`
       });
 
-      if (note.folder || note.subject) {
-        const sub = note.folder || note.subject;
-        subjects.add(sub);
-        links.push({
-          source: `note_${note.id}`,
-          target: `sub_${sub}`,
-          type: 'subject'
-        });
-      }
+      // Link Note -> Subject
+      links.push({
+        source: `note_${note.id}`,
+        target: subId,
+        type: 'subject'
+      });
 
-      for (const t of note.tags) {
-        tags.add(t);
-        links.push({
-          source: `note_${note.id}`,
-          target: `tag_${t}`,
-          type: 'tag'
-        });
-      }
-
-      // Wikilinks
+      // Wikilinks between notes
       for (const linkTitle of note.links) {
         const targetNote = notes.find(
           n => n.title.toLowerCase() === linkTitle.toLowerCase() || n.id.toLowerCase() === linkTitle.toLowerCase()
@@ -887,26 +1457,88 @@ export class TellusNoteEngine {
       }
     }
 
-    // Add Subject/Folder Nodes
-    for (const sub of Array.from(subjects)) {
+    // 3. Emit Macro Category Nodes (Level 1)
+    for (const [macroId, macro] of macroBuckets.entries()) {
       nodes.push({
-        id: `sub_${sub}`,
-        label: `📂 ${sub}`,
-        type: 'subject',
-        val: 14,
-        color: '#f59e0b'
+        id: macroId,
+        label: `${macro.icon} ${macro.label}`,
+        type: 'macro_category',
+        level: 1,
+        val: Math.max(26, Math.min(42, 20 + macro.noteCount * 1.5)),
+        color: macro.color,
+        details: `${macro.noteCount} nota(s) em ${macro.subjects.size} tema(s)`
       });
     }
 
-    // Add Tag Nodes
-    for (const t of Array.from(tags)) {
+    // 4. Emit Subject / Theme Nodes (Level 2) & Macro -> Subject Links
+    for (const [subId, sub] of subjectBuckets.entries()) {
       nodes.push({
-        id: `tag_${t}`,
-        label: t,
-        type: 'tag',
-        val: 8,
-        color: '#34d399'
+        id: subId,
+        label: `📂 ${sub.label}`,
+        type: 'subject',
+        level: 2,
+        val: Math.max(14, Math.min(26, 11 + sub.noteCount * 1.2)),
+        color: '#f59e0b',
+        parentId: sub.macroId,
+        linkedNoteIds: sub.noteIds,
+        details: `${sub.noteCount} nota(s) organizadas neste tema`
       });
+
+      // Link Macro Category -> Subject
+      links.push({
+        source: sub.macroId,
+        target: subId,
+        type: 'macro_subject'
+      });
+    }
+
+    // 5. Emit Significant Keywords / Hot Terms (Level 3) & Links
+    // Keep terms that connect at least 2 notes or are explicit tags/links, sorted by hotness
+    const hotTermEntries = Array.from(keywordToNotes.entries())
+      .filter(([term, noteSet]) => {
+        const isExplicitTag = notes.some(n => n.tags.some(t => t.toLowerCase().includes(term)));
+        return noteSet.size >= 2 || (isExplicitTag && noteSet.size >= 1);
+      })
+      .sort((a, b) => b[1].size - a[1].size);
+
+    // Limit to top 45 most relevant / hot terms to prevent overcrowding
+    for (const [term, noteSet] of hotTermEntries.slice(0, 45)) {
+      const hotness = noteSet.size;
+      const kwId = `kw_${term.replace(/[^a-z0-9_]/g, '_')}`;
+      const isVeryHot = hotness >= 3;
+
+      nodes.push({
+        id: kwId,
+        label: isVeryHot ? `🔥 #${term}` : `#${term}`,
+        type: 'keyword',
+        level: 3,
+        val: Math.max(10, Math.min(24, 9 + hotness * 2.5)),
+        color: isVeryHot ? '#f43f5e' : '#ec4899', // radiant coral/rose for hot terms
+        hotness,
+        linkedNoteIds: Array.from(noteSet),
+        details: `Termo frequente e conectado a ${hotness} nota(s)`
+      });
+
+      // Link Keyword -> connected Notes
+      for (const noteNodeId of Array.from(noteSet)) {
+        links.push({
+          source: noteNodeId,
+          target: kwId,
+          type: 'keyword'
+        });
+      }
+
+      // Link Keyword -> connected Subjects (for contextual clustering)
+      const relSubjects = keywordToSubjects.get(term);
+      if (relSubjects) {
+        for (const sId of Array.from(relSubjects).slice(0, 3)) {
+          links.push({
+            source: sId,
+            target: kwId,
+            type: 'keyword'
+          });
+        }
+      }
     }
 
     return { nodes, links };

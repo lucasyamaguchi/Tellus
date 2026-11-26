@@ -1,0 +1,14 @@
+{
+  "id": "ui-ux-color-design-mastery",
+  "name": "UI/UX Color Psychology & Progressive Disclosure (Goodnotes/Notion)",
+  "description": "Princípios de Teoria das Cores (Regra 60-30-10, OKLCH/HCL), Psicologia das Cores em UX (2025/2026) e Revelação Progressiva estilo Goodnotes e Notion.",
+  "category": "Design & UI/UX",
+  "promptInstructions": "Ao criar, refatorar ou avaliar interfaces de usuário (UI/UX), aplique rigorosamente os princípios das 5 referências de Design Mastery & Psicologia das Cores:\n1. REGRA 60-30-10 & CONTENÇÃO CROMÁTICA (HermeticOrmus Design Mastery & Ramotion):\n   - 60% Superfície Neutra Dominante: Canvas calmo e silencioso (#0b0d13 a #0f1219 em dark mode; #f8fafc a #ffffff em light mode).\n   - 30% Estrutura Secundária: Sidebars, cards e docks unificados (#141821) com bordas hairline sutis (rgba(255,255,255,0.06)).\n   - 10% Acento Intencional: Reservado exclusivamente para o 1 CTA primário, a ferramenta ativa no momento ou alertas semânticos reais. Nunca coloque vários botões com bordas neon competitivas lado a lado.\n2. PSICOLOGIA DAS CORES & CONFORTO COGNITIVO 2025/2026 (WithLoveInternet & Qamar Jafari):\n   - Reduza a fadiga visual mantendo ferramentas secundárias em tons neutros (slate-400) que só revelam cor em hover ou estado ativo.\n   - Use Indigo/Blue para foco e estabilidade; Cyan/Sky apenas para fluxos ativos de IA/Voz; Emerald para confirmação de salvamento/segurança; Amber/Rose apenas para limites de cota ou ações destrutivas.\n3. UNIFORMIDADE PERCEPTUAL & PALETAS (Emil Hvitfeldt Color Resources):\n   - Prefira escalas perceptualmente uniformes (OKLCH / HCL) e presets de cores de caneta/status com contraste claro de luminância (acessíveis para daltonismo / WCAG AA/AAA).\n4. REVELAÇÃO PROGRESSIVA ESTILO GOODNOTES & NOTION:\n   - Mantenha todas as ferramentas acessíveis a 1 clique, mas oculte barras secundárias por padrão através de um botão expansível ('✏️ Ferramentas' / '⚡ Ações Rápidas' / '⋯ Mais').\n   - Evite títulos duplicados: use um único cabeçalho limpo + título inline estilo Notion diretamente na folha.",
+  "isProjectSpecific": false,
+  "scope": "global",
+  "version": "1.0.0",
+  "author": "Tellus Core Team",
+  "license": "MIT",
+  "securitySanitized": true,
+  "updatedAt": 1793201144492
+}

@@ -7,6 +7,8 @@ import { FileHistoryViewer } from './components/FileHistoryViewer';
 import { MemoryInspector } from './components/MemoryInspector';
 import { TerminalView } from './components/TerminalView';
 import { TellusNoteView } from './components/TellusNoteView';
+import { TellusHomeView } from './components/TellusHomeView';
+import { ConversationsView } from './components/ConversationsView';
 import { SkillsAndArtifactsView } from './components/SkillsAndArtifactsView';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -21,7 +23,9 @@ import { SelfHealingModal } from './components/SelfHealingModal';
 import { PatchNotesModal } from './components/PatchNotesModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { ProjectSettingsModal } from './components/ProjectSettingsModal';
-import { Maximize2, Minimize2, X, Minus, History, Code2 } from 'lucide-react';
+import { Maximize2, Minimize2, X, Minus, History, Code2, FileText, ExternalLink, Edit3, Eye, Copy, Check, Save } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { 
   AppConfig, 
   OpenRouterModel, 
@@ -39,6 +43,7 @@ import {
   TellusNote,
   AgentPipelineConfig,
   ExecutionSecurityPreset,
+  DirectoryAccessPolicy,
   ProjectSettings
 } from './types';
 import { api } from './api';
@@ -54,12 +59,16 @@ export const App: React.FC = () => {
   const [activeModel, setActiveModel] = useState<string>('deepseek/deepseek-r1');
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
 
-  // Top-Level Main View Mode: Agent Workspace vs TellusMD Notes vs Skills
-  const [mainViewMode, setMainViewMode] = useState<'agent' | 'notes' | 'skills'>('agent');
+  // Top-Level Main View Mode: Tellus Home vs Conversations vs Agent Workspace vs TellusMD Notes vs Skills
+  const [mainViewMode, setMainViewMode] = useState<'home' | 'conversations' | 'agent' | 'notes' | 'skills'>('home');
 
   // Chat & Session State
   const [sessions, setSessions] = useState<ChatSessionMetadata[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [quotedMessage, setQuotedMessage] = useState<QuotedMessage | null>(null);
@@ -84,7 +93,13 @@ export const App: React.FC = () => {
   const [openEditorFiles, setOpenEditorFiles] = useState<string[]>([]);
   const [activeMemoryPage, setActiveMemoryPage] = useState<MemoryPage | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'history' | 'memory' | 'terminal'>('code');
+  const [rightPanelTab, setRightPanelTab] = useState<'code' | 'history' | 'memory' | 'terminal' | 'note'>('code');
+  const [splitNote, setSplitNote] = useState<TellusNote | { title: string; content: string; filename?: string; relativePath?: string; folder?: string; id?: string; isProjectSpecific?: boolean } | null>(null);
+  const [isLoadingSplitNote, setIsLoadingSplitNote] = useState<boolean>(false);
+  const [isSplitNoteEditing, setIsSplitNoteEditing] = useState<boolean>(false);
+  const [splitNoteEditContent, setSplitNoteEditContent] = useState<string>('');
+  const [hasCopiedSplitNote, setHasCopiedSplitNote] = useState<boolean>(false);
+  const [isSavingSplitNote, setIsSavingSplitNote] = useState<boolean>(false);
 
   // Modals & Overlay Mode
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
@@ -100,6 +115,7 @@ export const App: React.FC = () => {
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(false);
   const [isProjectSettingsModalOpen, setIsProjectSettingsModalOpen] = useState<boolean>(false);
   const [chatExecutionMode, setChatExecutionMode] = useState<ExecutionSecurityPreset>('inherit');
+  const [chatDirectoryAccessPolicy, setChatDirectoryAccessPolicy] = useState<DirectoryAccessPolicy | 'inherit'>('inherit');
   const [effectiveSecurityPreset, setEffectiveSecurityPreset] = useState<'request_review' | 'default' | 'turbo'>('default');
   const [projectSettings, setProjectSettings] = useState<ProjectSettings | null>(null);
   const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
@@ -108,7 +124,7 @@ export const App: React.FC = () => {
   // Sync Effective Security Preset when chatExecutionMode or currentProject changes
   useEffect(() => {
     let isMounted = true;
-    api.getEffectiveSecurity(chatExecutionMode, currentProject?.path)
+    api.getEffectiveSecurity(chatExecutionMode, currentProject?.path, chatDirectoryAccessPolicy)
       .then(res => {
         if (isMounted) {
           setEffectiveSecurityPreset(res.preset);
@@ -117,11 +133,14 @@ export const App: React.FC = () => {
       })
       .catch(() => {});
     return () => { isMounted = false; };
-  }, [chatExecutionMode, currentProject?.path]);
+  }, [chatExecutionMode, currentProject?.path, chatDirectoryAccessPolicy]);
 
   // Token Efficiency & Multi-Agent Pipeline State
   const [tokenEfficiency, setTokenEfficiency] = useState<boolean>(false);
   const [agentPipeline, setAgentPipeline] = useState<AgentPipelineConfig | undefined>(undefined);
+
+  // Real-time Chat Activity (thinking, reading, coding, streaming) for Sidebar indicators
+  const [chatActivityMap, setChatActivityMap] = useState<Record<string, 'thinking' | 'reading' | 'coding' | 'streaming'>>({});
 
   // Target Note navigation from Chat
   const [targetNoteIdOrTitle, setTargetNoteIdOrTitle] = useState<string | null>(null);
@@ -241,6 +260,7 @@ export const App: React.FC = () => {
     } catch {}
     const newId = 'session_' + Math.random().toString(36).substring(2, 9);
     setActiveSessionId(newId);
+    activeSessionIdRef.current = newId;
     setMessages([]);
     setQuotedMessage(null);
     setMainViewMode('agent');
@@ -255,34 +275,134 @@ export const App: React.FC = () => {
     };
     setAgentPipeline(pipeline);
     setChatExecutionMode('inherit');
+  };
+
+  const handleNewProjectSession = async (targetProjectPath: string) => {
+    handleStopStreaming();
+    setIsStreaming(false);
+    setIsLiveVoiceOpen(false);
+    try {
+      voiceToneAnalyzer.stop();
+    } catch {}
+    try {
+      voiceService.stopAll();
+    } catch {}
+    const newId = 'session_' + Math.random().toString(36).substring(2, 9);
+    setActiveSessionId(newId);
+    activeSessionIdRef.current = newId;
+    setMessages([]);
+    setQuotedMessage(null);
+    setMainViewMode('agent');
+    setIsLiveVoiceActiveInChat(false);
+    setChatLiveVoiceMode('mixed');
+    const pipeline = config?.pipeline || {
+      primaryModel: activeModel,
+      plannerModel: '',
+      codingModel: '',
+      reasoningModel: '',
+      fastToolsModel: ''
+    };
+    setAgentPipeline(pipeline);
+    setChatExecutionMode('inherit');
+  };
+
+  const handleStartSkillArchitectChat = async (initialIdea?: string) => {
+    handleStopStreaming();
+    setIsStreaming(false);
+    setIsLiveVoiceOpen(false);
+    try { voiceToneAnalyzer.stop(); } catch {}
+    try { voiceService.stopAll(); } catch {}
+
+    const newId = 'session_' + Math.random().toString(36).substring(2, 9);
+    setActiveSessionId(newId);
+    activeSessionIdRef.current = newId;
+    setMessages([]);
+    setQuotedMessage(null);
+    setMainViewMode('agent');
+    setIsLiveVoiceActiveInChat(false);
+    setChatLiveVoiceMode('mixed');
+
+    const pipeline = config?.pipeline || {
+      primaryModel: activeModel,
+      plannerModel: '',
+      codingModel: '',
+      reasoningModel: '',
+      fastToolsModel: ''
+    };
+    setAgentPipeline(pipeline);
+    setChatExecutionMode('inherit');
+
+    const defaultTitle = initialIdea ? `✨ Skill: ${initialIdea.slice(0, 25)}` : '✨ Nova Skill (Arquiteto)';
+
     try {
       await api.saveSession({
         id: newId,
-        title: 'Novo Chat',
+        title: defaultTitle,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         model: activeModel,
-        routineId: activeRoutine?.id,
-        tokenEfficiency,
+        routineId: 'skill_architect',
+        tokenEfficiency: false,
         pipeline,
         messages: [],
         isLiveVoice: false,
         liveVoiceMode: 'mixed',
-        projectPath: currentProject?.path,
-        projectName: currentProject?.name,
-        executionMode: 'inherit'
+        projectPath: '',
+        projectName: 'Arquiteto de Skills',
+        executionMode: 'inherit',
+        isStandalone: true,
+        isSkillArchitect: true
       });
+
       const list = await api.listSessions(true);
       setSessions(list);
+
+      const welcomePrompt = initialIdea 
+        ? `Olá! Quero desenvolver uma nova skill para o Tellus. Minha ideia inicial é: "${initialIdea}". Vamos moldar o escopo, definir as diretrizes e regras, simular como ela responderia em uma rotina de uso real e salvá-la quando estiver pronta.`
+        : `Olá! Quero criar uma nova skill personalizada para potencializar as rotinas do Tellus. Pode me orientar passo a passo, estruturando as diretrizes, fazendo ajustes dinâmicos e simulando a execução prática?`;
+
+      setTimeout(() => {
+        // Pass explicit empty customHistory and targetSessionId so it NEVER starts on top of previous chat!
+        handleSendMessage(welcomePrompt, undefined, undefined, [], newId);
+      }, 150);
     } catch {
       // ignore
     }
   };
 
+  const handleNewStandaloneSession = async (customTitle?: string) => {
+    handleStopStreaming();
+    setIsStreaming(false);
+    setIsLiveVoiceOpen(false);
+    try {
+      voiceToneAnalyzer.stop();
+    } catch {}
+    try {
+      voiceService.stopAll();
+    } catch {}
+    const newId = 'session_' + Math.random().toString(36).substring(2, 9);
+    setActiveSessionId(newId);
+    setMessages([]);
+    setQuotedMessage(null);
+    setMainViewMode('agent');
+    setIsLiveVoiceActiveInChat(false);
+    setChatLiveVoiceMode('mixed');
+    const pipeline = config?.pipeline || {
+      primaryModel: activeModel,
+      plannerModel: '',
+      codingModel: '',
+      reasoningModel: '',
+      fastToolsModel: ''
+    };
+    setAgentPipeline(pipeline);
+    setChatExecutionMode('inherit');
+  };
+
   const handleStartLiveVoiceChat = async (
     mode: 'voice_only' | 'mixed' | 'voice_output_only' = 'mixed',
     customTitle?: string,
-    initialPrompt?: string
+    initialPrompt?: string,
+    isStandalone?: boolean
   ) => {
     handleStopStreaming();
     const newId = 'session_' + Math.random().toString(36).substring(2, 9);
@@ -316,9 +436,10 @@ export const App: React.FC = () => {
         messages: [],
         isLiveVoice: true,
         liveVoiceMode: mode,
-        projectPath: currentProject?.path,
-        projectName: currentProject?.name,
-        executionMode: chatExecutionMode
+        projectPath: (isStandalone || !currentProject) ? '' : currentProject?.path,
+        projectName: (isStandalone || !currentProject) ? 'Conversa Livre' : currentProject?.name,
+        executionMode: chatExecutionMode,
+        isStandalone: isStandalone || !currentProject
       });
       api.listSessions(true).then(list => setSessions(list));
       if (initialPrompt) {
@@ -356,6 +477,10 @@ export const App: React.FC = () => {
   };
 
   const handleSelectSession = async (sessionId: string) => {
+    // If previous active session has messages, persist it under its own ID before switching
+    if (activeSessionIdRef.current && messages.length > 0) {
+      saveCurrentSession(messages, isLiveVoiceActiveInChat, chatLiveVoiceMode, chatExecutionMode, activeSessionIdRef.current);
+    }
     handleStopStreaming();
     setIsStreaming(false);
     setIsLiveVoiceOpen(false);
@@ -376,10 +501,12 @@ export const App: React.FC = () => {
           }).catch(() => {});
         }
         setActiveSessionId(session.id);
+        activeSessionIdRef.current = session.id;
         setMessages(session.messages || []);
         setIsLiveVoiceActiveInChat(!!session.isLiveVoice);
         setChatLiveVoiceMode(session.liveVoiceMode || 'mixed');
         setChatExecutionMode(session.executionMode || 'inherit');
+        setChatDirectoryAccessPolicy(session.directoryAccessPolicy || 'inherit');
 
         if (session.model) {
           const cleanModel = session.model.replace(/:batch$/i, '').trim();
@@ -433,18 +560,53 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleMoveSession = async (sessionId: string, targetProjectPath: string | null) => {
+    try {
+      await api.moveSession(sessionId, targetProjectPath);
+      const list = await api.listSessions(true);
+      setSessions(list);
+
+      // If the moved session is the active one, update context and project
+      if (activeSessionId === sessionId) {
+        if (targetProjectPath) {
+          if (!currentProject || currentProject.path !== targetProjectPath) {
+            const overview = await api.openProject(targetProjectPath);
+            setCurrentProject(overview);
+            loadOpenProjects();
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Falha ao mover sessão:', err);
+    }
+  };
+
   const saveCurrentSession = async (
     currentMsgs: Message[],
     overrideLiveVoice?: boolean,
     overrideMode?: 'voice_only' | 'mixed' | 'voice_output_only',
-    overrideExecutionMode?: ExecutionSecurityPreset
+    overrideExecutionMode?: ExecutionSecurityPreset,
+    targetSessionId?: string,
+    targetProjectPath?: string,
+    targetIsStandalone?: boolean,
+    targetIsSkillArchitect?: boolean,
+    overrideDirectoryPolicy?: DirectoryAccessPolicy | 'inherit'
   ) => {
-    const currentId = activeSessionId || ('session_' + Math.random().toString(36).substring(2, 9));
-    if (!activeSessionId) setActiveSessionId(currentId);
+    // Zero empty session hygiene: don't save blank chats with 0 messages to disk
+    if (!currentMsgs || currentMsgs.length === 0) {
+      return;
+    }
+
+    const currentId = targetSessionId || activeSessionIdRef.current || activeSessionId || ('session_' + Math.random().toString(36).substring(2, 9));
+    if (!activeSessionId) {
+      setActiveSessionId(currentId);
+      activeSessionIdRef.current = currentId;
+    }
 
     const isVoice = overrideLiveVoice !== undefined ? overrideLiveVoice : isLiveVoiceActiveInChat;
     const vMode = overrideMode !== undefined ? overrideMode : chatLiveVoiceMode;
     const execMode = overrideExecutionMode !== undefined ? overrideExecutionMode : chatExecutionMode;
+    const dirPolicy = overrideDirectoryPolicy !== undefined ? overrideDirectoryPolicy : chatDirectoryAccessPolicy;
 
     const firstUserMsg = currentMsgs.find(m => m.role === 'user');
     const defaultTitle = isVoice ? `🎙️ Live Voice (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : 'Novo Chat';
@@ -453,22 +615,33 @@ export const App: React.FC = () => {
       ? (isVoice ? '🎙️ ' : '') + cleanFirstContent.slice(0, 35) + (cleanFirstContent.length > 35 ? '...' : '') 
       : defaultTitle;
 
+    const existingMeta = sessions.find(s => s.id === currentId);
+    const isSkillArchitectSession = targetIsSkillArchitect !== undefined 
+      ? targetIsSkillArchitect 
+      : (!!existingMeta?.isSkillArchitect || existingMeta?.routineId === 'skill_architect');
+    const isStandaloneSession = isSkillArchitectSession || (targetIsStandalone !== undefined 
+      ? targetIsStandalone 
+      : (!!existingMeta?.isStandalone || (!currentProject && !existingMeta?.projectPath)));
+
     try {
       await api.saveSession({
         id: currentId,
-        title,
-        createdAt: Date.now(),
+        title: existingMeta?.title && existingMeta.title !== 'Novo Chat' && existingMeta.title !== 'Nova Conversa Livre' ? existingMeta.title : title,
+        createdAt: existingMeta?.createdAt || Date.now(),
         updatedAt: Date.now(),
         model: activeModel,
-        routineId: activeRoutine?.id,
+        routineId: isSkillArchitectSession ? 'skill_architect' : activeRoutine?.id,
         tokenEfficiency,
         pipeline: agentPipeline,
         messages: currentMsgs,
         isLiveVoice: isVoice,
         liveVoiceMode: vMode,
-        projectPath: currentProject?.path,
-        projectName: currentProject?.name,
-        executionMode: execMode
+        projectPath: isStandaloneSession ? '' : (targetProjectPath !== undefined ? targetProjectPath : (existingMeta?.projectPath || currentProject?.path || '')),
+        projectName: isSkillArchitectSession ? 'Arquiteto de Skills' : (isStandaloneSession ? 'Conversa Livre' : (existingMeta?.projectName || currentProject?.name || 'Projeto')),
+        executionMode: execMode,
+        directoryAccessPolicy: dirPolicy,
+        isStandalone: isStandaloneSession,
+        isSkillArchitect: isSkillArchitectSession
       });
 
       api.listSessions(true).then(list => setSessions(list));
@@ -484,13 +657,23 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleChangeDirectoryAccessPolicy = (policy: DirectoryAccessPolicy | 'inherit') => {
+    setChatDirectoryAccessPolicy(policy);
+    if (activeSessionId) {
+      saveCurrentSession(messages, isLiveVoiceActiveInChat, chatLiveVoiceMode, chatExecutionMode, activeSessionId, undefined, undefined, undefined, policy);
+    }
+  };
+
   const handleSendMessage = (
     content: string, 
     attachments?: Attachment[], 
     quotedMsg?: QuotedMessage, 
-    customHistory?: Message[]
+    customHistory?: Message[],
+    targetSessionId?: string
   ) => {
     if (isStreaming) return;
+
+    const streamSessionId = targetSessionId || activeSessionIdRef.current || activeSessionId || ('session_' + Math.random().toString(36).substring(2, 9));
 
     let enrichedPromptForLLM = content;
 
@@ -530,6 +713,7 @@ export const App: React.FC = () => {
     const updatedMessages = [...baseHistory, userMessage];
     setMessages([...updatedMessages, initialAssistantMessage]);
     setIsStreaming(true);
+    setChatActivityMap(prev => ({ ...prev, [streamSessionId]: 'thinking' }));
 
     const apiMessages = updatedMessages.map((m, idx) => {
       if (idx === updatedMessages.length - 1) {
@@ -546,6 +730,17 @@ export const App: React.FC = () => {
       tokenEfficiency,
       agentPipeline,
       (event) => {
+        if (event.type === 'content') {
+          setChatActivityMap(prev => ({ ...prev, [streamSessionId]: 'streaming' }));
+        } else if (event.type === 'reasoning') {
+          setChatActivityMap(prev => ({ ...prev, [streamSessionId]: 'thinking' }));
+        } else if (event.type === 'tool_start') {
+          const toolName = (event.data?.name || '').toLowerCase();
+          const isReading = ['read_file', 'list_dir', 'search_code', 'ast_grep_search', 'note_get', 'note_search'].includes(toolName);
+          setChatActivityMap(prev => ({ ...prev, [streamSessionId]: isReading ? 'reading' : 'coding' }));
+        }
+
+        if (activeSessionIdRef.current !== streamSessionId) return;
         setMessages(prev => {
           const newMsgs = prev.map(msg => {
             if (msg.id !== assistantMessageId) return msg;
@@ -577,6 +772,11 @@ export const App: React.FC = () => {
                 return tc;
               });
               return { ...msg, toolCalls: updatedToolCalls };
+            } else if (event.type === 'task_steps') {
+              return {
+                ...msg,
+                taskSteps: Array.isArray(event.data?.steps) ? event.data.steps : []
+              };
             }
             return msg;
           });
@@ -585,54 +785,78 @@ export const App: React.FC = () => {
       },
       () => {
         setIsStreaming(false);
+        setChatActivityMap(prev => {
+          const next = { ...prev };
+          delete next[streamSessionId];
+          return next;
+        });
         loadProjectOverview();
-        setMessages(latest => {
-          // Garante que se ferramentas foram executadas mas não houve texto, o assistente tem texto explicativo visível no chat
-          const updated = latest.map(m => {
-            if (m.id === assistantMessageId) {
-              if (!m.content || !m.content.trim()) {
-                if (m.toolCalls && m.toolCalls.length > 0) {
-                  return {
-                    ...m,
-                    content: '✅ Todas as notas, diretórios e estruturas foram criados e organizados com sucesso conforme solicitado.'
-                  };
+        if (activeSessionIdRef.current === streamSessionId) {
+          setMessages(latest => {
+            // Garante que se ferramentas foram executadas mas não houve texto, o assistente tem texto explicativo visível no chat
+            const updated = latest.map(m => {
+              if (m.id === assistantMessageId) {
+                if (!m.content || !m.content.trim()) {
+                  if (m.toolCalls && m.toolCalls.length > 0) {
+                    return {
+                      ...m,
+                      content: `⚡ Operações concluídas com sucesso (${m.toolCalls.length} passos executados: ${Array.from(new Set(m.toolCalls.map(tc => tc.name || 'ação'))).join(', ')}).`
+                    };
+                  }
                 }
               }
+              return m;
+            });
+
+            saveCurrentSession(updated, undefined, undefined, undefined, streamSessionId);
+
+            // Se Live Voice estiver ativo no chat comum (e o Orbe modal não estiver aberto), sintetiza com deduplicação
+            if (isLiveVoiceActiveInChatRef.current && !isLiveVoiceOpen) {
+              const assistantMsg = updated.find(m => m.id === assistantMessageId);
+              if (assistantMsg && assistantMsg.content) {
+                voiceService.speakMessageSummary(assistantMsg.id, assistantMsg.content);
+              }
             }
-            return m;
+
+            return updated;
           });
-
-          saveCurrentSession(updated);
-
-          // Se Live Voice estiver ativo no chat comum (e o Orbe modal não estiver aberto), sintetiza com deduplicação
-          if (isLiveVoiceActiveInChatRef.current && !isLiveVoiceOpen) {
-            const assistantMsg = updated.find(m => m.id === assistantMessageId);
-            if (assistantMsg && assistantMsg.content) {
-              voiceService.speakMessageSummary(assistantMsg.id, assistantMsg.content);
-            }
-          }
-
-          return updated;
-        });
+        }
       },
       (err) => {
         setIsStreaming(false);
-        setMessages(prev => {
-          const finalMsgs = prev.map(msg => {
-            if (msg.id === assistantMessageId) {
-              return {
-                ...msg,
-                content: msg.content + `\n\n> ⚠️ **Erro**: ${err.message || 'Falha na comunicação com o modelo.'}`
-              };
-            }
-            return msg;
-          });
-          saveCurrentSession(finalMsgs);
-          return finalMsgs;
+        setChatActivityMap(prev => {
+          const next = { ...prev };
+          delete next[streamSessionId];
+          return next;
         });
+        if (activeSessionIdRef.current === streamSessionId) {
+          setMessages(prev => {
+            const finalMsgs = prev.map(msg => {
+              if (msg.id === assistantMessageId) {
+                return {
+                  ...msg,
+                  content: msg.content + `\n\n> ⚠️ **Erro**: ${err.message || 'Falha na comunicação com o modelo.'}`
+                };
+              }
+              return msg;
+            });
+            saveCurrentSession(finalMsgs, undefined, undefined, undefined, streamSessionId);
+            return finalMsgs;
+          });
+        }
       },
       isLiveVoiceActiveInChatRef.current || isLiveVoiceOpen,
-      chatExecutionMode
+      chatExecutionMode,
+      streamSessionId,
+      sessions.find(s => s.id === streamSessionId)?.title || undefined,
+      sessions.find(s => s.id === streamSessionId)?.isStandalone !== undefined
+        ? sessions.find(s => s.id === streamSessionId)?.isStandalone
+        : !currentProject,
+      sessions.find(s => s.id === streamSessionId)?.projectPath !== undefined
+        ? sessions.find(s => s.id === streamSessionId)?.projectPath
+        : currentProject?.path,
+      sessions.find(s => s.id === streamSessionId)?.isSkillArchitect || sessions.find(s => s.id === streamSessionId)?.routineId === 'skill_architect',
+      chatDirectoryAccessPolicy
     );
 
     stopStreamRef.current = cancelFn;
@@ -672,6 +896,7 @@ export const App: React.FC = () => {
     }
     voiceService.stop();
     setIsStreaming(false);
+    setChatActivityMap({});
   };
 
   const handleTransferVoiceMessages = (voiceMsgs: Array<{ role: 'user' | 'assistant'; content: string }>) => {
@@ -742,6 +967,80 @@ export const App: React.FC = () => {
     setOpenEditorFiles(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
     setRightPanelTab('code');
     if (!isRightPanelOpen) setIsRightPanelOpen(true);
+  };
+
+  const handleOpenNoteInSplit = async (target: string) => {
+    setIsLoadingSplitNote(true);
+    setIsRightPanelOpen(true);
+    setRightPanelTab('note');
+    try {
+      const currentProj = currentProject?.path;
+      const note = await api.getNote(target, currentProj);
+      if (note) {
+        setSplitNote(note);
+        setSplitNoteEditContent(note.content);
+        setIsSplitNoteEditing(false);
+        return;
+      }
+
+      if (currentProj) {
+        try {
+          const fileRes = await api.readFile(target);
+          const fileContent = fileRes.content;
+          const titleMatch = fileContent.match(/^#+\s*(.*)/m);
+          const title = titleMatch ? titleMatch[1].trim() : (target.split('/').pop()?.replace(/\.md$/i, '') || target);
+          const pseudoNote = {
+            id: target.replace(/\.md$/i, '').split('/').pop() || target,
+            title,
+            content: fileContent,
+            filename: target.split('/').pop() || target,
+            relativePath: target,
+            folder: target.includes('/') ? target.split('/')[0] : 'Projeto',
+            subject: 'Projeto',
+            tags: [],
+            links: [],
+            backlinks: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            isProjectSpecific: true
+          };
+          setSplitNote(pseudoNote);
+          setSplitNoteEditContent(fileContent);
+          setIsSplitNoteEditing(false);
+          return;
+        } catch {}
+      }
+
+      // Fallback: full notes view
+      setTargetNoteIdOrTitle(target);
+      setMainViewMode('notes');
+    } catch (err) {
+      console.error('Failed to open note in split pane:', err);
+      setTargetNoteIdOrTitle(target);
+      setMainViewMode('notes');
+    } finally {
+      setIsLoadingSplitNote(false);
+    }
+  };
+
+  const handleSaveSplitNote = async () => {
+    if (!splitNote) return;
+    setIsSavingSplitNote(true);
+    try {
+      await api.saveNote({
+        id: splitNote.id,
+        title: splitNote.title,
+        folder: splitNote.folder,
+        content: splitNoteEditContent,
+        isProjectSpecific: splitNote.isProjectSpecific
+      });
+      setSplitNote({ ...splitNote, content: splitNoteEditContent });
+      setIsSplitNoteEditing(false);
+    } catch (err: any) {
+      alert(`Erro ao salvar anotação: ${err.message}`);
+    } finally {
+      setIsSavingSplitNote(false);
+    }
   };
 
   const handleCloseEditorFile = (filePath: string) => {
@@ -845,10 +1144,72 @@ export const App: React.FC = () => {
         }}
       />
 
+      {/* MODE 0: TELLUS HOME (STARTUP DASHBOARD: GRAFOS, NOTAS RECENTES, ULTIMOS CHATS & CHAT RAPIDO) */}
+      {mainViewMode === 'home' && (
+        <div className="flex-1 flex flex-col w-full min-h-0 overflow-hidden">
+          <TellusHomeView
+            currentProject={currentProject}
+            activeModel={activeModel}
+            sessions={sessions}
+            onOpenNote={(noteTitle) => {
+              setTargetNoteIdOrTitle(noteTitle);
+              setMainViewMode('notes');
+            }}
+            onOpenNotesView={() => setMainViewMode('notes')}
+            onSelectSession={(sessionId) => {
+              handleSelectSession(sessionId);
+              setMainViewMode('agent');
+            }}
+            onStartQuickChat={(prompt) => {
+              handleNewStandaloneSession();
+              if (prompt) {
+                setTimeout(() => {
+                  handleSendMessage(prompt);
+                }, 100);
+              }
+            }}
+            onOpenProjectModal={() => setIsProjectModalOpen(true)}
+            onOpenConversationsView={() => setMainViewMode('conversations')}
+            onOpenProjectSettings={() => setIsProjectSettingsModalOpen(true)}
+            effectiveSecurityPreset={effectiveSecurityPreset}
+            directoryAccessPolicy={projectSettings?.directoryAccessPolicy || 'ask_permission'}
+          />
+        </div>
+      )}
+
+      {/* MODE 1: DEDICATED CONVERSATIONS & CHATS HUB */}
+      {mainViewMode === 'conversations' && (
+        <div className="flex-1 flex flex-col w-full min-h-0 overflow-hidden">
+          <ConversationsView
+            sessions={sessions}
+            currentProject={currentProject}
+            onSelectSession={(sessionId, projectPath) => {
+              if (projectPath && currentProject && projectPath !== currentProject.path) {
+                api.openProject(projectPath).then(overview => {
+                  setCurrentProject(overview);
+                  loadOpenProjects();
+                }).catch(() => {});
+              }
+              handleSelectSession(sessionId);
+            }}
+            onNewStandaloneSession={handleNewStandaloneSession}
+            onNewLiveVoiceStandaloneSession={(mode) => {
+              handleStartLiveVoiceChat(mode || 'mixed', undefined, undefined, true);
+            }}
+            onStartSkillArchitectChat={handleStartSkillArchitectChat}
+            onDeleteSession={(sessionId) => {
+              handleDeleteSession(sessionId);
+            }}
+            onSwitchToAgent={() => setMainViewMode('agent')}
+          />
+        </div>
+      )}
+
       {/* MODE 1: DEDICATED NOTION-STYLE TELLUSMD NOTES & VAULT */}
       {mainViewMode === 'notes' && (
         <div className="flex-1 flex flex-col w-full min-h-0 overflow-hidden">
           <TellusNoteView
+            currentProjectPath={currentProject?.path}
             targetNoteIdOrTitle={targetNoteIdOrTitle}
             onOpenSelfHealing={() => setIsSelfHealingModalOpen(true)}
             onMentionInChat={async (note) => {
@@ -885,7 +1246,6 @@ export const App: React.FC = () => {
               handleStartLiveVoiceChat('mixed', `🎙️ Live Voice: ${topic.slice(0, 25)}`, prompt);
             }}
             onOpenSkills={() => setMainViewMode('skills')}
-            currentProjectPath={currentProject?.path}
           />
         </div>
       )}
@@ -893,7 +1253,7 @@ export const App: React.FC = () => {
       {/* MODE 2: DEDICATED SKILLS & ARTIFACTS GALLERY */}
       {mainViewMode === 'skills' && (
         <div className="flex-1 flex flex-col w-full min-h-0 overflow-hidden">
-          <SkillsAndArtifactsView />
+          <SkillsAndArtifactsView onStartSkillArchitectChat={handleStartSkillArchitectChat} />
         </div>
       )}
 
@@ -931,7 +1291,12 @@ export const App: React.FC = () => {
                   activeSessionId={activeSessionId}
                   onSelectSession={handleSelectSession}
                   onNewSession={handleNewSession}
+                  onNewStandaloneSession={handleNewStandaloneSession}
+                  onNewProjectSession={handleNewProjectSession}
+                  onStartSkillArchitectChat={handleStartSkillArchitectChat}
+                  onMoveSession={handleMoveSession}
                   onDeleteSession={handleDeleteSession}
+                  chatActivityMap={chatActivityMap}
                 />
               </div>
             </div>
@@ -956,6 +1321,8 @@ export const App: React.FC = () => {
                 currentProject={currentProject}
                 activeSessionId={activeSessionId}
                 activeSessionTitle={sessions.find(s => s.id === activeSessionId)?.title}
+                isStandaloneChat={sessions.find(s => s.id === activeSessionId)?.isStandalone || (!currentProject && !sessions.find(s => s.id === activeSessionId)?.projectPath)}
+                isSkillArchitectSession={sessions.find(s => s.id === activeSessionId)?.isSkillArchitect}
                 onQuoteSnippet={(quoted) => setQuotedMessage(quoted)}
                 messages={messages}
                 isStreaming={isStreaming}
@@ -979,18 +1346,17 @@ export const App: React.FC = () => {
                 quotedMessage={quotedMessage}
                 onClearQuotedMessage={() => setQuotedMessage(null)}
                 onOpenNotes={() => setMainViewMode('notes')}
-                onOpenNoteOrFile={(target) => {
-                  setTargetNoteIdOrTitle(target);
-                  setMainViewMode('notes');
-                }}
+                onOpenNoteOrFile={handleOpenNoteInSplit}
                 onEditMessage={handleEditAndResendMessage}
                 onRegenerateResponse={handleRegenerateResponse}
                 tokenEfficiency={tokenEfficiency}
                 onToggleTokenEfficiency={() => setTokenEfficiency(!tokenEfficiency)}
                 executionMode={chatExecutionMode}
+                directoryAccessPolicy={chatDirectoryAccessPolicy}
                 effectiveSecurityPreset={effectiveSecurityPreset}
                 globalSecurityPreset={config?.defaultSecurityPreset || 'default'}
                 onChangeExecutionMode={handleChangeExecutionMode}
+                onChangeDirectoryAccessPolicy={handleChangeDirectoryAccessPolicy}
                 onOpenProjectSettings={() => setIsProjectSettingsModalOpen(true)}
                 onOpenFileHistory={(_fp) => {
                   setIsRightPanelOpen(true);
@@ -1046,6 +1412,20 @@ export const App: React.FC = () => {
                       <History className="w-3.5 h-3.5" />
                       <span>Histórico & Diffs</span>
                     </button>
+                    {splitNote && (
+                      <button
+                        onClick={() => setRightPanelTab('note')}
+                        className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                          rightPanelTab === 'note'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title={`Visualizar nota: ${splitNote.title}`}
+                      >
+                        <FileText className="w-3.5 h-3.5 text-amber-300" />
+                        <span className="max-w-[120px] truncate">{splitNote.title}</span>
+                      </button>
+                    )}
                   </div>
                   {rightPanelTab === 'memory' && (
                     <span className="text-xs font-bold text-accent-light px-2 py-0.5 rounded bg-accent/10 border border-accent/20">
@@ -1137,6 +1517,118 @@ export const App: React.FC = () => {
 
                 {rightPanelTab === 'terminal' && (
                   <TerminalView />
+                )}
+
+                {rightPanelTab === 'note' && (
+                  <div className="flex-1 flex flex-col h-full bg-[#0d1117] text-slate-100 overflow-hidden">
+                    {/* Split Note Header */}
+                    <div className="p-3 border-b border-card-border/80 bg-[#12161f] flex items-center justify-between gap-2 shrink-0 select-none">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/40">
+                            {splitNote?.folder || 'Anotação'}
+                          </span>
+                          {splitNote?.isProjectSpecific && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/40">
+                              Projeto
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-bold text-xs text-white truncate mt-1">
+                          {splitNote?.title || 'Carregando...'}
+                        </h3>
+                      </div>
+
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        {/* Copy Content */}
+                        <button
+                          onClick={() => {
+                            if (splitNote) {
+                              navigator.clipboard.writeText(isSplitNoteEditing ? splitNoteEditContent : splitNote.content);
+                              setHasCopiedSplitNote(true);
+                              setTimeout(() => setHasCopiedSplitNote(false), 2000);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg bg-panel hover:bg-card border border-card-border/60 text-slate-400 hover:text-white transition-all text-xs"
+                          title="Copiar Markdown"
+                        >
+                          {hasCopiedSplitNote ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+
+                        {/* Toggle Edit / Preview */}
+                        <button
+                          onClick={() => setIsSplitNoteEditing(!isSplitNoteEditing)}
+                          className={`p-1.5 rounded-lg border text-xs flex items-center space-x-1 transition-all ${
+                            isSplitNoteEditing 
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
+                              : 'bg-panel hover:bg-card border-card-border/60 text-slate-400 hover:text-white'
+                          }`}
+                          title={isSplitNoteEditing ? 'Modo Visualização' : 'Editar Nota'}
+                        >
+                          {isSplitNoteEditing ? <Eye className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
+                        </button>
+
+                        {/* Open in full notes view */}
+                        <button
+                          onClick={() => {
+                            if (splitNote) {
+                              setTargetNoteIdOrTitle(splitNote.id || splitNote.title);
+                              setMainViewMode('notes');
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg bg-accent/20 hover:bg-accent/30 text-accent-light border border-accent/40 text-xs font-semibold flex items-center space-x-1 transition-all"
+                          title="Abrir no módulo Tellus Notes em tela cheia"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span className="hidden sm:inline">Notes</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Split Note Content */}
+                    <div className="flex-1 overflow-y-auto p-4 select-text">
+                      {isLoadingSplitNote ? (
+                        <div className="h-full flex flex-col items-center justify-center space-y-2 text-slate-400">
+                          <div className="w-6 h-6 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin" />
+                          <span className="text-xs font-mono">Carregando anotação...</span>
+                        </div>
+                      ) : isSplitNoteEditing ? (
+                        <div className="h-full flex flex-col space-y-2">
+                          <textarea
+                            value={splitNoteEditContent}
+                            onChange={(e) => setSplitNoteEditContent(e.target.value)}
+                            className="flex-1 w-full bg-[#080a0f] border border-card-border rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-accent resize-none leading-relaxed"
+                            placeholder="Escreva sua nota em Markdown..."
+                          />
+                          <div className="flex items-center justify-end space-x-2 shrink-0">
+                            <button
+                              onClick={() => {
+                                setIsSplitNoteEditing(false);
+                                setSplitNoteEditContent(splitNote?.content || '');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-panel hover:bg-card border border-card-border text-xs text-slate-300"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={handleSaveSplitNote}
+                              disabled={isSavingSplitNote}
+                              className="px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold flex items-center space-x-1.5 shadow-sm"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              <span>{isSavingSplitNote ? 'Salvando...' : 'Salvar Nota'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="prose prose-invert max-w-none text-xs leading-relaxed">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {splitNote?.content || ''}
+                          </ReactMarkdown>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             </aside>
@@ -1230,6 +1722,7 @@ export const App: React.FC = () => {
         currentPath={currentProject?.path || ''}
         recentProjects={config?.recentProjects || []}
         onOpenProject={handleOpenProject}
+        onCloseProject={() => setCurrentProject(null)}
       />
 
       <MentionModal

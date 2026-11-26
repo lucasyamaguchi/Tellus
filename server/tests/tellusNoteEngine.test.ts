@@ -262,4 +262,42 @@ ANTHROPIC_API_KEY=sk-ant-api03-abcdef1234567890abcdef1234567890`;
     assert.strictEqual(fileContent.includes('sk-proj-abc1234567890'), false, 'Raw OpenAI key must be sanitized');
     assert.strictEqual(fileContent.includes('sk-ant-api03-abcdef'), false, 'Raw Anthropic key must be sanitized');
   });
+
+  it('11. Deletion Hook & Folder Deletion Verification', () => {
+    const deletedEvents: Array<{ path: string; isFolder: boolean }> = [];
+    TellusNoteEngine.registerDeletionHook((relPath, isFolder) => {
+      deletedEvents.push({ path: relPath, isFolder });
+    });
+
+    const noteA = TellusNoteEngine.saveNote({
+      title: 'Nota Para Excluir Avulsa',
+      folder: 'Estudos/Seguranca',
+      content: '# Nota Avulsa'
+    });
+
+    // 1. Delete single note
+    const deletedSingle = TellusNoteEngine.deleteNote(noteA.id);
+    assert.strictEqual(deletedSingle, true);
+    assert.ok(deletedEvents.some(e => e.path === noteA.relativePath && !e.isFolder));
+
+    // 2. Delete folder with multiple notes
+    TellusNoteEngine.saveNote({
+      title: 'Modulo Teste 1',
+      folder: 'PastasTeste/Subpasta1',
+      content: '# Modulo 1'
+    });
+    TellusNoteEngine.saveNote({
+      title: 'Modulo Teste 2',
+      folder: 'PastasTeste/Subpasta2',
+      content: '# Modulo 2'
+    });
+
+    const res = TellusNoteEngine.deleteFolder('PastasTeste');
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(res.deletedNotesCount, 2);
+    assert.ok(deletedEvents.some(e => e.path === 'PastasTeste' && e.isFolder));
+
+    const remaining = TellusNoteEngine.listNotes().filter(n => n.folder.startsWith('PastasTeste'));
+    assert.strictEqual(remaining.length, 0);
+  });
 });

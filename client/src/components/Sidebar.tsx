@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FolderTree, 
+  FolderTree,
+  Globe,
+  MessageSquare,
+  Radio, 
   Brain, 
   Bot, 
   ChevronRight, 
@@ -21,7 +24,10 @@ import {
   Edit3,
   Sparkles,
   Wand2,
-  Copy
+  Copy,
+  Wrench,
+  MoveRight,
+  Code2
 } from 'lucide-react';
 import { FileTreeItem, MemoryPage, Routine, ProjectOverview, ChatSessionMetadata } from '../types';
 import { MaterialFileIcon } from './MaterialFileIcon';
@@ -48,9 +54,14 @@ interface SidebarProps {
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
+  onNewStandaloneSession?: () => void;
   onDeleteSession: (sessionId: string) => void;
   onAskAI?: (prompt: string, filePath?: string) => void;
   onRefreshFileTree?: () => void;
+  onStartSkillArchitectChat?: () => void;
+  onMoveSession?: (sessionId: string, targetProjectPath: string | null) => Promise<void>;
+  onNewProjectSession?: (projectPath: string) => void;
+  chatActivityMap?: Record<string, 'thinking' | 'reading' | 'coding' | 'streaming'>;
 }
 
 function pathBasename(p: string): string {
@@ -75,6 +86,43 @@ function formatRelativeTime(timestamp: number): string {
   return 'agora';
 }
 
+function renderSessionActivityBadge(activity?: 'thinking' | 'reading' | 'coding' | 'streaming') {
+  if (!activity) return null;
+  if (activity === 'thinking') {
+    return (
+      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30 animate-pulse shrink-0" title="Raciocinando internamente...">
+        <Brain className="w-3 h-3 text-purple-400" />
+        <span className="hidden sm:inline">Thinking</span>
+      </span>
+    );
+  }
+  if (activity === 'reading') {
+    return (
+      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30 animate-pulse shrink-0" title="Lendo arquivos e contexto...">
+        <BookOpen className="w-3 h-3 text-blue-400" />
+        <span className="hidden sm:inline">Reading</span>
+      </span>
+    );
+  }
+  if (activity === 'coding') {
+    return (
+      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 animate-pulse shrink-0" title="Executando ações de código...">
+        <Code2 className="w-3 h-3 text-emerald-400" />
+        <span className="hidden sm:inline">Coding</span>
+      </span>
+    );
+  }
+  if (activity === 'streaming') {
+    return (
+      <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 animate-pulse shrink-0" title="Sintetizando resposta...">
+        <Sparkles className="w-3 h-3 text-cyan-400" />
+        <span className="hidden sm:inline">Gerando</span>
+      </span>
+    );
+  }
+  return null;
+}
+
 export const Sidebar: React.FC<SidebarProps> = ({
   currentProject,
   openProjects,
@@ -94,9 +142,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeSessionId,
   onSelectSession,
   onNewSession,
+  onNewStandaloneSession,
   onDeleteSession,
   onAskAI,
-  onRefreshFileTree
+  onRefreshFileTree,
+  onStartSkillArchitectChat,
+  onMoveSession,
+  onNewProjectSession,
+  chatActivityMap
 }) => {
   const [activeTab, setActiveTab] = useState<'projects' | 'files' | 'memory' | 'routines'>('projects');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
@@ -105,9 +158,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [showInactive, setShowInactive] = useState<boolean>(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileTreeItem } | null>(null);
+  const [sessionContextMenu, setSessionContextMenu] = useState<{ x: number; y: number; session: ChatSessionMetadata } | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<string | null>(null);
 
   useEffect(() => {
-    const handleClose = () => setContextMenu(null);
+    const handleClose = () => {
+      setContextMenu(null);
+      setSessionContextMenu(null);
+    };
     window.addEventListener('click', handleClose);
     return () => window.removeEventListener('click', handleClose);
   }, []);
@@ -163,25 +221,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return !isOpen && !isCur;
   });
 
-  // 3. Distribute sessions into projects with path normalization
+  // 3. Separate standalone sessions, skill architect sessions, and project sessions
+  const standaloneSessions: ChatSessionMetadata[] = [];
+  const skillArchitectSessions: ChatSessionMetadata[] = [];
+
   for (const s of sessions) {
-    const targetProjPath = s.projectPath || currentProject?.path;
-    if (targetProjPath) {
-      const k = normKey(targetProjPath);
-      let group = projectMap.get(k);
-      if (!group) {
-        // Only if project is active or has chats, register it
-        group = {
-          path: targetProjPath,
-          name: s.projectName || pathBasename(targetProjPath),
-          isCurrent: currentProject ? normKey(currentProject.path) === k : false,
-          sessions: []
-        };
-        projectMap.set(k, group);
-      }
+    if (s.isSkillArchitect || s.routineId === 'skill_architect') {
+      skillArchitectSessions.push(s);
+      continue;
+    }
+    if (s.isStandalone || !s.projectPath) {
+      standaloneSessions.push(s);
+      continue;
+    }
+    const targetProjPath = s.projectPath;
+    const k = normKey(targetProjPath);
+    let group = projectMap.get(k);
+    if (!group) {
+      group = {
+        path: targetProjPath,
+        name: s.projectName || pathBasename(targetProjPath),
+        isCurrent: currentProject ? normKey(currentProject.path) === k : false,
+        sessions: []
+      };
+      projectMap.set(k, group);
+    }
+    if (!group.sessions.some(existing => existing.id === s.id)) {
       group.sessions.push(s);
-    } else if (currentProject) {
-      projectMap.get(normKey(currentProject.path))?.sessions.push(s);
     }
   }
 
@@ -365,6 +431,282 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* TAB 1: PROJECTS WITH CHATS NESTED INSIDE (REFERENCE UI) */}
         {activeTab === 'projects' && (
           <div className="space-y-1.5">
+            {/* Dedicated Section: Conversas Livres (Sem Projeto) */}
+            {(() => {
+              const matchesQuery = (s: ChatSessionMetadata) => {
+                if (!searchFilter.trim()) return true;
+                const q = searchFilter.toLowerCase();
+                return (s.title && s.title.toLowerCase().includes(q)) || (s.preview && s.preview.toLowerCase().includes(q));
+              };
+              const filteredStandalone = standaloneSessions.filter(matchesQuery);
+              const isExpanded = !collapsedProjects['__standalone__'];
+
+              return (
+                <div key="__standalone__" className="space-y-0.5 mb-2 pb-2 border-b border-card-border/40">
+                  <div
+                    onClick={() => toggleProject('__standalone__')}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      setDragOverTarget('__standalone__');
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverTarget === '__standalone__') setDragOverTarget(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOverTarget(null);
+                      try {
+                        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                        if (data?.sessionId && onMoveSession) {
+                          onMoveSession(data.sessionId, null);
+                        }
+                      } catch {}
+                    }}
+                    className={`group flex items-center justify-between py-1 px-2 rounded-lg cursor-pointer text-xs transition-all ${
+                      dragOverTarget === '__standalone__'
+                        ? 'ring-2 ring-cyan-400 bg-cyan-950/60 border border-cyan-400/80 animate-pulse'
+                        : 'hover:bg-cyan-950/30'
+                    }`}
+                    title="Conversas Livres — Sem projeto vinculado (Arraste conversas para cá para soltá-las do projeto)"
+                  >
+                    <div className="flex items-center space-x-2 overflow-hidden flex-1">
+                      <Globe className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
+                      <span className="truncate font-semibold text-cyan-300">
+                        Conversas Livres
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/15 text-cyan-300">
+                        {standaloneSessions.length}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onNewStandaloneSession) onNewStandaloneSession();
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-cyan-900/40 text-cyan-400 hover:text-cyan-200 transition-opacity"
+                        title="Nova Conversa Livre"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+
+                      <span className="text-slate-500">
+                        {isExpanded ? (
+                          <ChevronDown className="w-3 h-3" />
+                        ) : (
+                          <ChevronRight className="w-3 h-3" />
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="pl-5 space-y-0.5">
+                      {filteredStandalone.length === 0 ? (
+                        <div className="py-1 px-2 text-[11px] text-slate-500 italic flex items-center justify-between">
+                          <span>Nenhuma conversa livre</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onNewStandaloneSession) onNewStandaloneSession();
+                            }}
+                            className="text-[10px] text-cyan-400 hover:underline font-sans not-italic"
+                          >
+                            + Criar
+                          </button>
+                        </div>
+                      ) : (
+                        filteredStandalone.map((s) => {
+                          const isActive = activeSessionId === s.id;
+                          return (
+                            <div
+                              key={s.id}
+                              draggable={true}
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData('text/plain', JSON.stringify({ sessionId: s.id, fromProjectPath: '' }));
+                              }}
+                              onClick={() => onSelectSession(s.id)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSessionContextMenu({
+                                  x: Math.min(e.clientX, window.innerWidth - 250),
+                                  y: Math.min(e.clientY, window.innerHeight - 280),
+                                  session: s
+                                });
+                              }}
+                              className={`group/session flex items-center justify-between py-1 px-2 rounded-md cursor-pointer text-xs transition-colors ${
+                                isActive 
+                                  ? 'bg-cyan-950/60 text-cyan-200 font-medium border border-cyan-500/30' 
+                                  : 'text-slate-400 hover:bg-card/70 hover:text-slate-200'
+                              }`}
+                              title={`${s.title}\n${s.preview}\n(Arraste para um projeto abaixo para vincular)`}
+                            >
+                              <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                {s.isLiveVoice ? (
+                                  <Radio className="w-3 h-3 text-red-400 shrink-0 animate-pulse" />
+                                ) : (
+                                  <MessageSquare className="w-3 h-3 text-cyan-500/70 shrink-0" />
+                                )}
+                                <span className="truncate text-[11px]">
+                                  {s.title || 'Conversa'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center space-x-1 shrink-0">
+                                {renderSessionActivityBadge(chatActivityMap?.[s.id])}
+                                <span className="text-[10px] text-slate-500 group-hover/session:hidden">
+                                  {formatRelativeTime(s.updatedAt || s.createdAt)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteSession(s.id);
+                                  }}
+                                  className="hidden group-hover/session:block p-0.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400"
+                                  title="Excluir conversa"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Dedicated Section: Arquiteto de Skills (Criação de Skills Tellus) */}
+            {(() => {
+              const matchesQuery = (s: ChatSessionMetadata) => {
+                if (!searchFilter.trim()) return true;
+                const q = searchFilter.toLowerCase();
+                return (s.title && s.title.toLowerCase().includes(q)) || (s.preview && s.preview.toLowerCase().includes(q));
+              };
+              const filteredSkills = skillArchitectSessions.filter(matchesQuery);
+              const isExpanded = !collapsedProjects['__skills__'];
+
+              return (
+                <div key="__skills__" className="space-y-0.5 mb-2 pb-2 border-b border-card-border/40">
+                  <div
+                    onClick={() => toggleProject('__skills__')}
+                    className="group flex items-center justify-between py-1 px-2 rounded-lg cursor-pointer text-xs transition-colors hover:bg-amber-950/25"
+                    title="Arquiteto de Skills — Criação e simulação de novas skills para os agentes do Tellus"
+                  >
+                    <div className="flex items-center space-x-2 overflow-hidden flex-1">
+                      <Wrench className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                      <span className="truncate font-semibold text-amber-300">
+                        Arquiteto de Skills
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-300">
+                        {skillArchitectSessions.length}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onStartSkillArchitectChat) onStartSkillArchitectChat();
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-amber-900/40 text-amber-400 hover:text-amber-200 transition-opacity"
+                        title="Forjar Nova Skill com IA"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+
+                      <span className="text-slate-500">
+                        {isExpanded ? (
+                          <ChevronDown className="w-3 h-3" />
+                        ) : (
+                          <ChevronRight className="w-3 h-3" />
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="pl-5 space-y-0.5">
+                      {filteredSkills.length === 0 ? (
+                        <div className="py-1 px-2 text-[11px] text-slate-500 italic flex items-center justify-between">
+                          <span>Nenhum chat de skill ativo</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onStartSkillArchitectChat) onStartSkillArchitectChat();
+                            }}
+                            className="text-[10px] text-amber-400 hover:underline font-sans not-italic"
+                          >
+                            + Forjar Skill
+                          </button>
+                        </div>
+                      ) : (
+                        filteredSkills.map((s) => {
+                          const isActive = activeSessionId === s.id;
+                          return (
+                            <div
+                              key={s.id}
+                              onClick={() => onSelectSession(s.id)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSessionContextMenu({
+                                  x: Math.min(e.clientX, window.innerWidth - 250),
+                                  y: Math.min(e.clientY, window.innerHeight - 280),
+                                  session: s
+                                });
+                              }}
+                              className={`group/session flex items-center justify-between py-1 px-2 rounded-md cursor-pointer text-xs transition-colors ${
+                                isActive 
+                                  ? 'bg-amber-950/60 text-amber-200 font-medium border border-amber-500/30' 
+                                  : 'text-slate-400 hover:bg-card/70 hover:text-slate-200'
+                              }`}
+                              title={`${s.title}\n${s.preview}`}
+                            >
+                              <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                <span className="text-[11px] shrink-0">🛠️</span>
+                                <span className="truncate text-[11px]">
+                                  {s.title || 'Nova Skill'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center space-x-1 shrink-0">
+                                {renderSessionActivityBadge(chatActivityMap?.[s.id])}
+                                <span className="text-[10px] text-slate-500 group-hover/session:hidden">
+                                  {formatRelativeTime(s.updatedAt || s.createdAt)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteSession(s.id);
+                                  }}
+                                  className="hidden group-hover/session:block p-0.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400"
+                                  title="Excluir chat de skill"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {projectGroups.length === 0 ? (
               <div className="p-4 text-center text-slate-500 text-xs space-y-2">
                 <p>Nenhum projeto aberto.</p>
@@ -396,15 +738,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                   return (
                     <div key={group.path} className="space-y-0.5">
-                      {/* Project Header Row (Folder + Project Name) */}
+                      {/* Project Header Row (Folder + Project Name & Drop Target) */}
                       <div
                         onClick={() => toggleProject(group.path)}
-                        className={`group flex items-center justify-between py-1 px-2 rounded-lg cursor-pointer text-xs transition-colors ${
-                          group.isCurrent 
-                            ? 'hover:bg-card-border/40' 
-                            : 'hover:bg-card-border/30'
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          setDragOverTarget(group.path);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverTarget === group.path) setDragOverTarget(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragOverTarget(null);
+                          try {
+                            const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                            if (data?.sessionId && onMoveSession) {
+                              onMoveSession(data.sessionId, group.path);
+                            }
+                          } catch {}
+                        }}
+                        className={`group flex items-center justify-between py-1 px-2 rounded-lg cursor-pointer text-xs transition-all ${
+                          dragOverTarget === group.path
+                            ? 'ring-2 ring-sky-400 bg-sky-950/60 border border-sky-400/80 animate-pulse'
+                            : group.isCurrent 
+                              ? 'hover:bg-card-border/40' 
+                              : 'hover:bg-card-border/30'
                         }`}
-                        title={group.path}
+                        title={`${group.path} — Arraste uma conversa livre para cá para vinculá-la a este projeto`}
                       >
                         <div className="flex items-center space-x-2 overflow-hidden flex-1">
                           <Folder className={`w-3.5 h-3.5 shrink-0 ${group.isCurrent ? 'text-sky-400' : 'text-slate-400'}`} />
@@ -419,11 +781,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (group.isCurrent) {
-                                onNewSession();
+                              if (onNewProjectSession) {
+                                onNewProjectSession(group.path);
                               } else {
-                                onSwitchProject(group.path);
-                                setTimeout(() => onNewSession(), 120);
+                                if (group.isCurrent) {
+                                  onNewSession();
+                                } else {
+                                  onSwitchProject(group.path);
+                                  setTimeout(() => onNewSession(), 120);
+                                }
                               }
                             }}
                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-card-border text-slate-400 hover:text-white transition-opacity"
@@ -467,8 +833,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (!group.isCurrent) onSwitchProject(group.path);
-                                  setTimeout(() => onNewSession(), 100);
+                                  if (onNewProjectSession) {
+                                    onNewProjectSession(group.path);
+                                  } else {
+                                    if (!group.isCurrent) onSwitchProject(group.path);
+                                    setTimeout(() => onNewSession(), 100);
+                                  }
                                 }}
                                 className="text-[10px] text-accent-light hover:underline font-sans not-italic"
                               >
@@ -481,18 +851,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               return (
                                 <div
                                   key={s.id}
+                                  draggable={true}
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.setData('text/plain', JSON.stringify({ sessionId: s.id, fromProjectPath: group.path }));
+                                  }}
                                   onClick={() => {
                                     if (!group.isCurrent) {
                                       onSwitchProject(group.path);
                                     }
                                     onSelectSession(s.id);
                                   }}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSessionContextMenu({
+                                      x: Math.min(e.clientX, window.innerWidth - 250),
+                                      y: Math.min(e.clientY, window.innerHeight - 280),
+                                      session: s
+                                    });
+                                  }}
                                   className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-all ${
                                     isActive
                                       ? 'bg-[#282a2e] text-white font-semibold shadow-xs border border-white/10'
                                       : 'text-slate-400 hover:text-slate-200 hover:bg-card-border/30'
                                   }`}
-                                  title={`${s.title}\n${s.preview}`}
+                                  title={`${s.title}\n${s.preview}\n(Arraste para Conversas Livres ou outro projeto para mover)`}
                                 >
                                   <div className="overflow-hidden pr-2 flex-1 flex items-center space-x-1.5">
                                     {s.isLiveVoice && (
@@ -504,6 +887,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   </div>
 
                                   <div className="flex items-center space-x-1.5 shrink-0">
+                                    {renderSessionActivityBadge(chatActivityMap?.[s.id])}
                                     <span className="text-[10px] text-slate-500 font-mono">
                                       {formatRelativeTime(s.updatedAt)}
                                     </span>
@@ -848,6 +1232,75 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Trash2 className="w-3.5 h-3.5 text-rose-400" />
             <span>Excluir {contextMenu.item.type === 'directory' ? 'Diretório' : 'Arquivo'}</span>
           </button>
+        </div>
+      )}
+
+      {/* Right-Click Context Menu for Chat Sessions */}
+      {sessionContextMenu && (
+        <div
+          style={{ top: `${sessionContextMenu.y}px`, left: `${sessionContextMenu.x}px` }}
+          className="fixed z-50 w-64 rounded-xl bg-[#141821]/95 border border-card-border shadow-2xl p-1.5 text-xs text-slate-200 backdrop-blur-md animate-in fade-in zoom-in-95 space-y-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 py-1.5 border-b border-card-border/50 text-slate-400 font-sans text-[11px] truncate flex items-center space-x-1.5">
+            <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span className="font-semibold text-slate-200 truncate">{sessionContextMenu.session.title}</span>
+          </div>
+
+          {/* Option to move to Standalone (if not already standalone) */}
+          {sessionContextMenu.session.projectPath && onMoveSession && (
+            <button
+              onClick={async () => {
+                const sId = sessionContextMenu.session.id;
+                setSessionContextMenu(null);
+                await onMoveSession(sId, null);
+              }}
+              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-200 flex items-center space-x-2 transition-colors cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="truncate">Mover para Conversas Livres</span>
+            </button>
+          )}
+
+          {/* Options to move to other projects */}
+          {projectGroups.length > 0 && onMoveSession && (
+            <div className="pt-1 border-t border-card-border/40">
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                Mover para Projeto:
+              </div>
+              {projectGroups
+                .filter(g => normKey(g.path) !== normKey(sessionContextMenu.session.projectPath || ''))
+                .map(g => (
+                  <button
+                    key={g.path}
+                    onClick={async () => {
+                      const sId = sessionContextMenu.session.id;
+                      setSessionContextMenu(null);
+                      await onMoveSession(sId, g.path);
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-card-hover text-slate-300 hover:text-white flex items-center space-x-2 transition-colors text-xs cursor-pointer"
+                  >
+                    <Folder className="w-3 h-3 text-sky-400 shrink-0" />
+                    <span className="truncate">{g.name}</span>
+                  </button>
+                ))}
+            </div>
+          )}
+
+          {/* Delete Session */}
+          <div className="pt-1 border-t border-card-border/50">
+            <button
+              onClick={() => {
+                const sId = sessionContextMenu.session.id;
+                setSessionContextMenu(null);
+                onDeleteSession(sId);
+              }}
+              className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 flex items-center space-x-2 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span>Excluir Conversa</span>
+            </button>
+          </div>
         </div>
       )}
     </aside>

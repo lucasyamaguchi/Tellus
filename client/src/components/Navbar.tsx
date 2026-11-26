@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
+  Home,
+  MessageSquare,
   FolderGit2, 
   Sparkles, 
   Cpu, 
@@ -29,7 +31,8 @@ import {
   Wrench,
   Shield,
   Cloud,
-  HelpCircle
+  HelpCircle,
+  Clock
 } from 'lucide-react';
 import { AppConfig, ProjectOverview, Routine, OpenRouterCredits } from '../types';
 import { api } from '../api';
@@ -57,21 +60,21 @@ interface NavbarProps {
   currentProject: ProjectOverview | null;
   activeModel: string;
   activeRoutine: Routine | null;
-  mainViewMode: 'agent' | 'notes' | 'skills';
+  mainViewMode: 'home' | 'conversations' | 'agent' | 'notes' | 'skills';
   isRightPanelOpen: boolean;
-  rightPanelTab: 'code' | 'history' | 'memory' | 'terminal';
+  rightPanelTab: 'code' | 'history' | 'memory' | 'terminal' | 'note';
   isOverlayActive: boolean;
   tokenEfficiency: boolean;
   hasCustomPipeline?: boolean;
   theme?: 'dark' | 'light';
   onToggleTheme?: () => void;
   onOpenLiveVoice?: () => void;
-  onSetMainViewMode: (mode: 'agent' | 'notes' | 'skills') => void;
+  onSetMainViewMode: (mode: 'home' | 'conversations' | 'agent' | 'notes' | 'skills') => void;
   onToggleRightPanel: () => void;
   onToggleOverlay: () => void;
   onToggleTokenEfficiency: () => void;
   onOpenPipelineModal: () => void;
-  onSetRightPanelTab: (tab: 'code' | 'history' | 'memory' | 'terminal') => void;
+  onSetRightPanelTab: (tab: 'code' | 'history' | 'memory' | 'terminal' | 'note') => void;
   onOpenModelModal: () => void;
   onOpenSettingsModal: () => void;
   onOpenProjectModal: () => void;
@@ -126,7 +129,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isUpdatingApp, setIsUpdatingApp] = useState(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
+  const [currentTime, setCurrentTime] = useState<string>(() => new Date().toLocaleTimeString());
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
   const languageRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
 
@@ -264,9 +275,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <div className="relative z-20 select-none shrink-0">
-      <header className="h-12 border-b border-card-border/70 bg-sidebar/95 backdrop-blur-md px-4 flex items-center justify-between gap-3">
-        {/* 1. Left Section: Brand + Notion/Goodnotes Clean View Switcher + Subtle Project Pill */}
-        <div className="flex items-center space-x-3 shrink-0">
+      <header className="h-12 border-b border-white/8 bg-[#0c0d12]/95 backdrop-blur-md px-4 flex items-center justify-between gap-3">
+        {/* 1. Left Section: Brand + Digital Clock + Module Navigation + Project Pill */}
+        <div className="flex items-center space-x-2.5 shrink-0">
           {/* Tellus Brand */}
           <div className="flex items-center space-x-2">
             <div className="w-7 h-7 rounded-lg overflow-hidden border border-card-border/70 shadow-xs bg-white p-0.5 flex items-center justify-center shrink-0">
@@ -284,37 +295,73 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-2.5 h-2.5 group-hover:rotate-12 transition-transform text-accent-light" />
             </button>
 
+            {/* Digital Clock in top-left corner */}
+            <div 
+              className="flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-card/70 border border-card-border/60 text-[11px] font-mono text-slate-300 shadow-xs"
+              title="Horário do Sistema em Tempo Real"
+            >
+              <Clock className="w-3 h-3 text-brand-cyan" />
+              <span>{currentTime}</span>
+            </div>
+
             {onOpenOnboarding && (
               <button
                 onClick={onOpenOnboarding}
-                className="px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 hover:border-emerald-500/50 text-[10px] font-semibold text-emerald-300 flex items-center space-x-1 transition-all cursor-pointer shadow-xs"
+                className="hidden xl:flex px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 hover:border-emerald-500/50 text-[10px] font-semibold text-emerald-300 items-center space-x-1 transition-all cursor-pointer shadow-xs"
                 title="Guia de Primeiro Uso (Como obter API Keys, OpenRouter, Fish Audio, Vault e Setup)"
               >
                 <HelpCircle className="w-2.5 h-2.5 text-emerald-400" />
-                <span className="hidden sm:inline">Guia de Início</span>
+                <span>Guia</span>
               </button>
             )}
           </div>
 
           <div className="h-4 w-[1px] bg-card-border/70 hidden sm:block" />
 
-          {/* View Mode Segmented Controls — 60-30-10 Calm Surface */}
-          <div className="flex items-center bg-card/70 rounded-lg p-0.5 border border-card-border/60 text-xs">
+          {/* View Mode Segmented Controls — Proportional, Crisp Antigravity / Codex Surface */}
+          <div className="flex items-center bg-card/80 rounded-xl p-0.5 border border-card-border/80 text-xs shadow-xs">
+            <button
+              onClick={() => onSetMainViewMode('home')}
+              className={`px-3 py-1 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
+                mainViewMode === 'home'
+                  ? 'bg-accent text-white font-medium shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Tellus Home (Painel Central: Grafos, Notas Recentes, Últimos Chats & Chat Rápido)"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span className="hidden md:inline font-medium">Home</span>
+            </button>
+
+            <button
+              onClick={() => onSetMainViewMode('conversations')}
+              className={`px-3 py-1 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
+                mainViewMode === 'conversations'
+                  ? 'bg-accent text-white font-medium shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Central de Conversas (Chats Livres & Projetos)"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span className="hidden md:inline font-medium">Conversas</span>
+            </button>
+
             <button
               onClick={() => onSetMainViewMode('agent')}
-              className={`px-2.5 py-1 rounded-md transition-all flex items-center space-x-1.5 cursor-pointer ${
+              className={`px-3 py-1 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
                 mainViewMode === 'agent'
                   ? 'bg-accent text-white font-medium shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
+              title="Agente Autônomo & IDE de Desenvolvimento"
             >
               <Bot className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Agente</span>
+              <span className="hidden md:inline font-medium">Agente</span>
             </button>
 
             <button
               onClick={() => onSetMainViewMode('notes')}
-              className={`px-2.5 py-1 rounded-md transition-all flex items-center space-x-1.5 cursor-pointer ${
+              className={`px-3 py-1 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
                 mainViewMode === 'notes'
                   ? 'bg-accent text-white font-medium shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
@@ -322,12 +369,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Tellus Notes & Vault (Cadernos, Markdown e Folha Ink)"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Notas</span>
+              <span className="hidden md:inline font-medium">Notas</span>
             </button>
 
             <button
               onClick={() => onSetMainViewMode('skills')}
-              className={`px-2.5 py-1 rounded-md transition-all flex items-center space-x-1.5 cursor-pointer ${
+              className={`px-3 py-1 rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
                 mainViewMode === 'skills'
                   ? 'bg-accent text-white font-medium shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
@@ -335,14 +382,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Skills dos Agentes e Artefatos do Projeto"
             >
               <Zap className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Skills</span>
+              <span className="hidden md:inline font-medium">Skills</span>
             </button>
           </div>
 
           {/* Subtle Project Selector */}
           <button
             onClick={onOpenProjectModal}
-            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg hover:bg-card/80 border border-transparent hover:border-card-border/70 text-xs text-slate-400 hover:text-slate-200 transition-all max-w-[160px] cursor-pointer"
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg hover:bg-card/80 border border-transparent hover:border-card-border/70 text-xs text-slate-400 hover:text-slate-200 transition-all max-w-[150px] cursor-pointer"
             title={currentProject ? `Projeto ativo: ${currentProject.path}` : 'Selecionar Projeto...'}
           >
             <FolderGit2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -353,22 +400,52 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
 
-        {/* 2. Center Section: Calm Model Pill & Goodnotes-Style Expandable Tools Trigger */}
+        {/* 2. Center Section: Active Model + Direct Pipeline Switcher + Saldo "Por Cima" */}
         <div className="flex items-center space-x-1.5">
           {/* Active Model Pill */}
           <button
             onClick={onOpenModelModal}
-            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-card/70 hover:bg-card border border-card-border/60 text-xs text-slate-300 hover:text-white transition-all group cursor-pointer"
+            className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-card/80 hover:bg-card border border-card-border/70 text-xs text-slate-300 hover:text-white transition-all group cursor-pointer shadow-xs"
             title="Trocar modelo de IA principal"
           >
             <Cpu className="w-3.5 h-3.5 text-slate-400 group-hover:text-accent-light transition-colors" />
-            <span className="font-mono text-[11px] font-medium text-slate-200 max-w-[140px] truncate">
+            <span className="font-mono text-[11px] font-medium text-slate-200 max-w-[130px] truncate">
               {activeModel.split('/').pop()}
             </span>
             <ChevronDown className="w-3 h-3 text-slate-500" />
           </button>
 
-          {/* Primary Action: New Chat (only when in Agent mode, calm ghost/subtle pill) */}
+          {/* Direct Pipeline Button (Prominent in Top Bar) */}
+          <button
+            onClick={onOpenPipelineModal}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer border shadow-xs ${
+              hasCustomPipeline
+                ? 'bg-purple-500/20 border-purple-500/40 text-purple-300 hover:bg-purple-500/30'
+                : 'bg-card/80 hover:bg-card border-card-border/70 text-slate-300 hover:text-white'
+            }`}
+            title="Orquestrar Pipeline Multi-Modelo (Planner, Coding, Reasoning, Fast Tools)"
+          >
+            <Network className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline text-[11px]">Pipeline</span>
+            {hasCustomPipeline && <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />}
+          </button>
+
+          {/* OpenRouter Balance "Por Cima" (Directly Visible on Top Bar) */}
+          {config?.keys.openrouter && (
+            <button
+              onClick={fetchCredits}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs text-emerald-300 font-mono transition-all cursor-pointer shadow-xs"
+              title="Saldo da conta OpenRouter (clique para atualizar em tempo real)"
+            >
+              <Coins className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[11px] font-semibold">
+                {credits !== null ? `$${credits.remainingCredits.toFixed(2)}` : 'Saldo...'}
+              </span>
+              <RefreshCw className={`w-2.5 h-2.5 text-emerald-400/80 ${isLoadingCredits ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+
+          {/* Primary Action: New Chat (only when in Agent mode) */}
           {onNewChat && mainViewMode === 'agent' && (
             <button
               onClick={onNewChat}
@@ -376,7 +453,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Iniciar um novo chat limpo"
             >
               <Plus className="w-3.5 h-3.5 text-slate-400" />
-              <span className="hidden md:inline text-[11px]">Novo Chat</span>
+              <span className="hidden lg:inline text-[11px]">Novo Chat</span>
             </button>
           )}
 
@@ -388,11 +465,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ? 'bg-accent text-white border-accent shadow-sm'
                 : 'bg-card/70 hover:bg-card border-card-border/70 text-slate-300 hover:text-white'
             }`}
-            title="Clique para expandir ou recolher a barra de ferramentas rápidas (Voz, Pipeline, Token Efficiency, Painéis IDE, Auto-Manutenção, Atualizar)"
+            title="Clique para expandir ferramentas secundárias (Voz, Token Efficiency, Painéis IDE, Auto-Manutenção)"
           >
             <Layers className="w-3.5 h-3.5" />
             <span className="text-[11px]">Ferramentas</span>
-            {(hasCustomPipeline || tokenEfficiency) && !isToolsBarExpanded && (
+            {(tokenEfficiency) && !isToolsBarExpanded && (
               <span className="w-1.5 h-1.5 rounded-full bg-brand-cyan" />
             )}
             <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isToolsBarExpanded ? 'rotate-180' : ' opacity-60'}`} />

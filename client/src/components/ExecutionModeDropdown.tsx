@@ -10,13 +10,15 @@ import {
   CheckCircle2, 
   Circle 
 } from 'lucide-react';
-import { ExecutionSecurityPreset } from '../types';
+import { ExecutionSecurityPreset, DirectoryAccessPolicy } from '../types';
 
 interface ExecutionModeDropdownProps {
   currentMode?: ExecutionSecurityPreset;
   effectivePreset: 'request_review' | 'default' | 'turbo';
   globalPreset?: 'request_review' | 'default' | 'turbo';
+  directoryPolicy?: DirectoryAccessPolicy | 'inherit';
   onSelectMode: (mode: ExecutionSecurityPreset) => void;
+  onSelectDirectoryPolicy?: (policy: DirectoryAccessPolicy | 'inherit') => void;
   onOpenDetailedSettings: () => void;
   disabled?: boolean;
 }
@@ -25,7 +27,9 @@ export const ExecutionModeDropdown: React.FC<ExecutionModeDropdownProps> = ({
   currentMode = 'inherit',
   effectivePreset,
   globalPreset = 'default',
+  directoryPolicy = 'inherit',
   onSelectMode,
+  onSelectDirectoryPolicy,
   onOpenDetailedSettings,
   disabled = false
 }) => {
@@ -176,6 +180,37 @@ export const ExecutionModeDropdown: React.FC<ExecutionModeDropdownProps> = ({
                 </button>
               );
             })}
+          </div>
+
+          {/* Directory Scope Policy Section */}
+          <div className="border-t border-card-border/60 px-3 py-2 bg-sidebar/20 text-xs">
+            <span className="text-[10px] uppercase font-mono text-slate-400 block mb-1">Acesso a Outros Diretórios:</span>
+            <div className="flex items-center space-x-1.5">
+              <button
+                type="button"
+                onClick={() => onSelectDirectoryPolicy?.('ask_permission')}
+                className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium border transition-all cursor-pointer ${
+                  directoryPolicy === 'ask_permission' || !directoryPolicy || directoryPolicy === 'inherit'
+                    ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+                    : 'bg-panel/40 border-card-border text-slate-400 hover:text-white'
+                }`}
+                title="Pede confirmação ao usuário antes de criar ou modificar arquivos fora do diretório do projeto"
+              >
+                Pedir Permissão
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectDirectoryPolicy?.('unrestricted')}
+                className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium border transition-all cursor-pointer ${
+                  directoryPolicy === 'unrestricted'
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                    : 'bg-panel/40 border-card-border text-slate-400 hover:text-white'
+                }`}
+                title="Insere chats, arquivos e códigos em qualquer diretório sem parar para perguntar"
+              >
+                Seguir com Tudo
+              </button>
+            </div>
           </div>
 
           {/* Footer Action */}

@@ -3,12 +3,12 @@
 @tailwind utilities;
 
 :root {
-  --color-bg: #131418;
-  --color-card: #1a1c22;
-  --color-card-border: #2a2d36;
-  --color-sidebar: #16181d;
-  --color-sidebar-border: #232630;
-  --color-panel: #1e2027;
+  --color-bg: #0c0d12;
+  --color-card: #11141c;
+  --color-card-border: rgba(255, 255, 255, 0.08);
+  --color-sidebar: #0e1017;
+  --color-sidebar-border: rgba(255, 255, 255, 0.06);
+  --color-panel: #151822;
 }
 
 .light, [data-theme="light"] {

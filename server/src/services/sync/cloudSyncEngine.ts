@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { exec } from 'child_process';
 import { ConfigManager, GoogleAccountProfile, CloudSyncConfig, CloudProviderId } from '../configManager.js';
 import { TellusNoteEngine } from '../notes/tellusNoteEngine.js';
@@ -1221,6 +1222,137 @@ export class CloudSyncEngine {
     }
   }
 
+  private static getTombstoneFilePath(dir: string): string {
+    return path.join(dir, 'capsule-tombstones.json');
+  }
+
+  public static getTombstones(dir: string): { deletedFiles: Record<string, number>; deletedFolders: Record<string, number> } {
+    const tf = this.getTombstoneFilePath(dir);
+    if (fs.existsSync(tf)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(tf, 'utf-8'));
+        return {
+          deletedFiles: parsed.deletedFiles || {},
+          deletedFolders: parsed.deletedFolders || {}
+        };
+      } catch {}
+    }
+    return { deletedFiles: {}, deletedFolders: {} };
+  }
+
+  public static addTombstone(dir: string, relativePath: string, isFolder: boolean): void {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const current = this.getTombstones(dir);
+      const now = Date.now();
+      const norm = relativePath.replace(/\\/g, '/').trim();
+      if (isFolder) {
+        current.deletedFolders[norm] = now;
+      } else {
+        current.deletedFiles[norm] = now;
+      }
+      fs.writeFileSync(this.getTombstoneFilePath(dir), JSON.stringify(current, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('[CloudSync] Falha ao persistir tombstone:', e);
+    }
+  }
+
+  public static removeTombstone(dir: string, relativePath: string): void {
+    try {
+      const current = this.getTombstones(dir);
+      const norm = relativePath.replace(/\\/g, '/').trim();
+      let changed = false;
+      if (current.deletedFiles[norm]) {
+        delete current.deletedFiles[norm];
+        changed = true;
+      }
+      if (current.deletedFolders[norm]) {
+        delete current.deletedFolders[norm];
+        changed = true;
+      }
+      if (changed) {
+        fs.writeFileSync(this.getTombstoneFilePath(dir), JSON.stringify(current, null, 2), 'utf-8');
+      }
+    } catch {}
+  }
+
+  public static recordDeletion(relativePath: string, isFolder: boolean = false): void {
+    const config = ConfigManager.getConfig();
+    const mirrorBase = this.getEffectiveMirrorPath();
+    const activeAccount = config.syncConfig?.googleAccount;
+    const activeHash = SecurityShield.getActiveAccountHash() || activeAccount?.accountHash;
+
+    const normPath = relativePath.replace(/\\/g, '/').trim();
+    if (!normPath) return;
+
+    // 1. Remove from active account cloud mirror
+    if (activeHash) {
+      const accountMirrorRoot = path.join(mirrorBase, 'accounts', activeHash);
+      const targetVaultPath = path.join(accountMirrorRoot, 'vault', normPath);
+      try {
+        if (fs.existsSync(targetVaultPath)) {
+          if (isFolder || (fs.existsSync(targetVaultPath) && fs.statSync(targetVaultPath).isDirectory())) {
+            fs.rmSync(targetVaultPath, { recursive: true, force: true });
+          } else {
+            fs.unlinkSync(targetVaultPath);
+          }
+        }
+      } catch (e) {
+        console.error(`[CloudSync] Error unlinking from account mirror: ${targetVaultPath}`, e);
+      }
+
+      // Also remove associated .ink.json if single note
+      if (!isFolder && normPath.endsWith('.md')) {
+        const noteId = path.basename(normPath, '.md');
+        const inkRemote = path.join(accountMirrorRoot, 'vault', '.ink', `${noteId}.ink.json`);
+        try { if (fs.existsSync(inkRemote)) fs.unlinkSync(inkRemote); } catch {}
+      }
+
+      // Record tombstone in accountMirrorRoot
+      this.addTombstone(accountMirrorRoot, normPath, isFolder);
+    }
+
+    // 2. Also remove from legacy unisolated mirrorBase/vault if exists
+    try {
+      const legacyVaultPath = path.join(mirrorBase, 'vault', normPath);
+      if (fs.existsSync(legacyVaultPath)) {
+        if (isFolder || (fs.existsSync(legacyVaultPath) && fs.statSync(legacyVaultPath).isDirectory())) {
+          fs.rmSync(legacyVaultPath, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(legacyVaultPath);
+        }
+      }
+    } catch {}
+
+    // 3. Also record in local vault tombstone cache (under .backups)
+    try {
+      const localBackupsDir = TellusNoteEngine.BACKUPS_DIR;
+      if (fs.existsSync(localBackupsDir)) {
+        this.addTombstone(localBackupsDir, normPath, isFolder);
+      }
+    } catch {}
+  }
+
+  public static clearTombstone(relativePath: string): void {
+    const config = ConfigManager.getConfig();
+    const mirrorBase = this.getEffectiveMirrorPath();
+    const activeAccount = config.syncConfig?.googleAccount;
+    const activeHash = SecurityShield.getActiveAccountHash() || activeAccount?.accountHash;
+    const normPath = relativePath.replace(/\\/g, '/').trim();
+    if (!normPath) return;
+
+    if (activeHash) {
+      const accountMirrorRoot = path.join(mirrorBase, 'accounts', activeHash);
+      this.removeTombstone(accountMirrorRoot, normPath);
+    }
+    try {
+      const localBackupsDir = TellusNoteEngine.BACKUPS_DIR;
+      if (fs.existsSync(localBackupsDir)) {
+        this.removeTombstone(localBackupsDir, normPath);
+      }
+    } catch {}
+  }
+
   /**
    * Recursively synchronize two directories using Last-Write-Wins (mtimeMs)
    * with optional AES-256-GCM E2EE encryption on the remote mirror.
@@ -1239,6 +1371,26 @@ export class CloudSyncEngine {
 
     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
     if (!fs.existsSync(remoteDir)) fs.mkdirSync(remoteDir, { recursive: true });
+
+    // Merge tombstones from remote account mirror and local backups dir
+    const mirrorDir = remoteDir.includes('accounts')
+      ? path.dirname(remoteDir)
+      : remoteDir;
+    const mirrorTombstones = this.getTombstones(mirrorDir);
+    const localTombstones = this.getTombstones(TellusNoteEngine.BACKUPS_DIR);
+    const allDeletedFiles = { ...mirrorTombstones.deletedFiles, ...localTombstones.deletedFiles };
+    const allDeletedFolders = { ...mirrorTombstones.deletedFolders, ...localTombstones.deletedFolders };
+
+    const isDeletedByTombstone = (relPath: string): boolean => {
+      const norm = relPath.replace(/\\/g, '/');
+      if (allDeletedFiles[norm]) return true;
+      for (const folder of Object.keys(allDeletedFolders)) {
+        if (norm === folder || norm.startsWith(`${folder}/`)) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     const collectLocalFiles = (baseDir: string, currentDir: string, map: Map<string, { fullPath: string; mtimeMs: number }>) => {
       if (!fs.existsSync(currentDir)) return;
@@ -1309,6 +1461,11 @@ export class CloudSyncEngine {
 
     // 1. Local -> Remote & Co-Editing Smart Merge (.ink.json stroke union + .md paragraph merge)
     for (const [rel, localInfo] of localFiles.entries()) {
+      if (isDeletedByTombstone(rel)) {
+        try { fs.unlinkSync(localInfo.fullPath); } catch {}
+        continue;
+      }
+
       const remoteInfo = remoteFiles.get(rel);
       const targetRemotePath = path.join(remoteDir, rel);
 
@@ -1374,6 +1531,11 @@ export class CloudSyncEngine {
 
     // 2. Remote -> Local (Pull & Decrypt with AES-256-GCM E2EE)
     for (const [rel, remoteInfo] of remoteFiles.entries()) {
+      if (isDeletedByTombstone(rel)) {
+        try { fs.unlinkSync(remoteInfo.fullPath); } catch {}
+        continue;
+      }
+
       const localInfo = localFiles.get(rel);
       if (localInfo && extFilter === '.ink.json') {
         // Already union-merged in step 1
@@ -1492,22 +1654,42 @@ export class CloudSyncEngine {
         inkPulled = inkRes.pulled;
       }
 
-      // 3. Sync Chat Sessions (.json)
+      // 3. Sync Chat Sessions (.json) - Strictly Isolated per Project
       if (config.syncConfig?.syncChats !== false) {
         const currentProject = ProjectManager.getCurrentProject();
-        const localSessionsDir = SessionManager.getSessionsDir(currentProject);
-        const remoteSessionsDir = path.join(accountMirrorRoot, 'sessions');
-        const chatRes = this.syncDirectoriesBidirectional(
-          localSessionsDir,
-          remoteSessionsDir,
-          '.json',
-          useE2EE,
-          activeHash,
-          false,
-          details
-        );
-        chatsPushed = chatRes.pushed;
-        chatsPulled = chatRes.pulled;
+        if (currentProject) {
+          const projectKey = 'proj_' + crypto.createHash('sha256').update(currentProject.replace(/\\/g, '/').toLowerCase().trim()).digest('hex').slice(0, 10) + '_' + path.basename(currentProject);
+          const localSessionsDir = SessionManager.getSessionsDir(currentProject);
+          const remoteSessionsDir = path.join(accountMirrorRoot, 'project-sessions', projectKey);
+          const chatRes = this.syncDirectoriesBidirectional(
+            localSessionsDir,
+            remoteSessionsDir,
+            '.json',
+            useE2EE,
+            activeHash,
+            false,
+            details
+          );
+          chatsPushed += chatRes.pushed;
+          chatsPulled += chatRes.pulled;
+        }
+
+        // Sync standalone conversations separately
+        const standaloneLocal = SessionManager.getStandaloneSessionsDir();
+        if (fs.existsSync(standaloneLocal)) {
+          const standaloneRemote = path.join(accountMirrorRoot, 'project-sessions', 'standalone_conversations');
+          const standaloneRes = this.syncDirectoriesBidirectional(
+            standaloneLocal,
+            standaloneRemote,
+            '.json',
+            useE2EE,
+            activeHash,
+            false,
+            details
+          );
+          chatsPushed += standaloneRes.pushed;
+          chatsPulled += standaloneRes.pulled;
+        }
       }
 
       // 4. Sync AI Configurations & Routines (Encrypted with AES-256-GCM)

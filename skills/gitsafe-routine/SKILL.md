@@ -49,7 +49,7 @@ Ative esta rotina imediatamente quando:
 - [ ] **Zero Executáveis Rastreados**: Nenhum `.exe`, `.dll`, `.node`, `.bin` ou instalador local pode ser commitado na árvore do repositório.
 - [ ] **Distribuição Exclusiva por Releases**: Binários compilados devem ser disponibilizados apenas via GitHub Releases e GitHub Actions (`.github/workflows/release.yml`), nunca no commit git.
 
-### Etapa 5: Validação da Política de Versionamento & Compilação
+### Etapa 5: Validação da Política de Versionamento, Gatekeeper Ativo & Loop de Auto-Cura (Self-Healing)
 - [ ] **Mensagens Semânticas**: Seguir estritamente o padrão Conventional Commits:
   - `feat(...)`: Novas funcionalidades
   - `fix(...)`: Correções de bugs
@@ -57,31 +57,52 @@ Ative esta rotina imediatamente quando:
   - `docs(...)`: Documentação
   - `refactor(...)`: Refatoração sem mudança de comportamento
   - `test(...)`: Adição ou ajuste de testes
-- [ ] **Gatekeeper de Compilação & Testes**:
+- [ ] **Gatekeeper Ativo de Compilação & Testes (Mandato de Auto-Cura)**:
   - Compilação limpa com 0 erros (`npm run build`).
+  - Verificação rigorosa de tipos TypeScript (`npx tsc --noEmit` se aplicável).
+  - Linter sem erros críticos (`npm run lint`).
   - Suíte completa de testes aprovada com 100% de sucesso (`npm test`).
+  
+> [!CRITICAL]
+> **REGRA DE AUTO-CURA MANDATÓRIA (ZERO ABANDONO)**:
+> Se qualquer comando de compilação, lint ou teste falhar:
+> 1. **NUNCA encerre o turno dizendo que "não enviou as alterações" ou que "o envio é prematuro".**
+> 2. Chame `update_steps` reportando a etapa com status `failed` e descrevendo o erro exato no campo `reason`.
+> 3. Crie ou atualize uma etapa: `{ title: "Auto-cura: corrigindo falha de compilação", status: "in_progress" }`.
+> 4. Use `read_file` para analisar o arquivo que disparou o erro e aplique a correção via `edit_file` ou `write_file`.
+> 5. Re-execute o comando de compilação/teste até obter saída verde (`exitCode: 0`).
+> 6. Atualize o checklist com `done`.
+> 7. Somente então execute `git add`, `git commit` e `git push origin <branch>`.
 
 ---
 
 ## 🛠️ 3. Comandos Automatizados de Execução da Rotina
 
-Ao rodar a rotina de auditoria interna, execute sequencialmente no terminal:
+Ao rodar a rotina de auditoria interna e entrega de código:
 
 ```bash
-# 1. Verificar arquivos modificados e rastreados
+# 1. Registrar o plano com update_steps no chat
+
+# 2. Verificar arquivos modificados e rastreados
 git status -s
 
-# 2. Auditar arquivos rastreados por palavras sensíveis
+# 3. Auditar arquivos rastreados por palavras sensíveis
 git grep -iE 'die-sonne|users/|api_key|token|sk-ant|sk-or'
 
-# 3. Validar se alguma pasta de chats ou binário está no índice
+# 4. Validar se alguma pasta de chats, vaults ou binários está no índice
 git ls-files | Select-String -Pattern "^Chats/|\.exe$|\.env$"
 
-# 4. Validar integridade e compilação do TypeScript
+# 5. Validar integridade e compilação (aplicar auto-cura se falhar)
 npm run build
-
-# 5. Executar suíte de testes automatizados
 npm test
+
+# 6. Preparar arquivos específicos e realizar commit semântico
+git add <arquivos-da-aplicacao>
+git commit -m "feat/fix/chore: descrição clara"
+
+# 7. Sincronizar com o remoto (se solicitado commit/push)
+git push origin <branch>
+git status
 ```
 
 ---

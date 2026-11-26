@@ -238,6 +238,7 @@ export class OpenRouterService {
       model: cleanModel,
       messages,
       stream: true,
+      max_tokens: 16384,
     };
 
     if (tools && tools.length > 0) {

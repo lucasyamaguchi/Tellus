@@ -1,0 +1,12 @@
+{
+  "id": "security-incident-response",
+  "name": "Security Incident Response",
+  "description": "Quando houver suspeita de invasão ou vazamento de chaves, isole o nó e analise os logs.",
+  "category": "General",
+  "agentAssigned": "all",
+  "promptInstructions": "# Security Incident Response\nQuando houver suspeita de invasão ou vazamento de chaves, isole o nó e analise os logs.\n",
+  "isProjectSpecific": false,
+  "isActive": false,
+  "scope": "situational",
+  "updatedAt": 1795661782707
+}

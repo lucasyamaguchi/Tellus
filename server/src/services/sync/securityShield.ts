@@ -24,6 +24,7 @@ export interface AuthBrowserSession {
 }
 
 export class SecurityShield {
+  private static cachedMachineKey: Buffer | null = null;
   private static activeVaultKey: Buffer | null = null;
   private static activeAccountHash: string | null = null;
   private static browserSessions = new Map<string, AuthBrowserSession>();
@@ -32,8 +33,12 @@ export class SecurityShield {
    * Derives a 256-bit hardware-bound key for encrypting local config secrets at rest (~/.tellus/config.json)
    */
   private static getMachineKey(): Buffer {
+    if (this.cachedMachineKey) {
+      return this.cachedMachineKey;
+    }
     const machineSeed = `tellus-machine-shield:${os.hostname()}:${os.userInfo().username}:${os.platform()}:${os.arch()}`;
-    return crypto.scryptSync(machineSeed, 'tellus-local-at-rest-salt-v1', 32);
+    this.cachedMachineKey = crypto.scryptSync(machineSeed, 'tellus-local-at-rest-salt-v1', 32);
+    return this.cachedMachineKey;
   }
 
   /**

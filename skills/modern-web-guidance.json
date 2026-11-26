@@ -1,0 +1,10 @@
+{
+  "id": "modern-web-guidance",
+  "name": "Modern Web & Clean Frontend",
+  "category": "Frontend",
+  "agentAssigned": "all",
+  "description": "Boas práticas modernas de React, Tailwind CSS, acessibilidade, responsividade e layout.",
+  "promptInstructions": "Priorize componentes funcionais limpos, hooks customizados quando necessário, Tailwind moderno, layout flexível responsivo e descanso visual com bom contraste.",
+  "isProjectSpecific": false,
+  "updatedAt": 1788262754245
+}

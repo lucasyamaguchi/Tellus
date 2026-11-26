@@ -4,6 +4,7 @@ import { ConfigManager } from './configManager.js';
 
 export type ExecutionSecurityPreset = 'request_review' | 'default' | 'turbo' | 'inherit';
 export type PlanReviewPolicy = 'always_proceed' | 'always_review';
+export type DirectoryAccessPolicy = 'ask_permission' | 'unrestricted';
 
 export interface FileAccessRules {
   readAllowed: boolean;
@@ -28,6 +29,7 @@ export interface SandboxAndMcpRules {
 export interface ProjectSettings {
   securityPreset: ExecutionSecurityPreset;
   planReviewPolicy: PlanReviewPolicy;
+  directoryAccessPolicy?: DirectoryAccessPolicy;
   fileAccess: FileAccessRules;
   network: NetworkAccessRules;
   terminal: TerminalExecutionRules;
@@ -37,6 +39,7 @@ export interface ProjectSettings {
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   securityPreset: 'default',
   planReviewPolicy: 'always_review',
+  directoryAccessPolicy: 'ask_permission',
   fileAccess: {
     readAllowed: true,
     writeAllowed: true,
@@ -72,6 +75,7 @@ export class ProjectSettingsManager {
       return {
         securityPreset: parsed.securityPreset || DEFAULT_PROJECT_SETTINGS.securityPreset,
         planReviewPolicy: parsed.planReviewPolicy || DEFAULT_PROJECT_SETTINGS.planReviewPolicy,
+        directoryAccessPolicy: parsed.directoryAccessPolicy || DEFAULT_PROJECT_SETTINGS.directoryAccessPolicy,
         fileAccess: {
           readAllowed: parsed.fileAccess?.readAllowed !== undefined ? parsed.fileAccess.readAllowed : DEFAULT_PROJECT_SETTINGS.fileAccess.readAllowed,
           writeAllowed: parsed.fileAccess?.writeAllowed !== undefined ? parsed.fileAccess.writeAllowed : DEFAULT_PROJECT_SETTINGS.fileAccess.writeAllowed,
@@ -99,6 +103,7 @@ export class ProjectSettingsManager {
     const updated: ProjectSettings = {
       securityPreset: updates.securityPreset || current.securityPreset,
       planReviewPolicy: updates.planReviewPolicy || current.planReviewPolicy,
+      directoryAccessPolicy: updates.directoryAccessPolicy || current.directoryAccessPolicy,
       fileAccess: {
         ...current.fileAccess,
         ...(updates.fileAccess || {})
@@ -128,10 +133,12 @@ export class ProjectSettingsManager {
 
   public static resolveEffectiveSecurity(
     chatMode: ExecutionSecurityPreset | undefined,
-    projectPath: string
+    projectPath: string,
+    chatDirectoryPolicy?: DirectoryAccessPolicy | 'inherit'
   ): {
     preset: 'request_review' | 'default' | 'turbo';
     planReviewPolicy: PlanReviewPolicy;
+    directoryAccessPolicy: DirectoryAccessPolicy;
     source: 'chat' | 'project' | 'global';
     settings: ProjectSettings;
   } {
@@ -152,9 +159,19 @@ export class ProjectSettingsManager {
       source = 'global';
     }
 
+    let directoryAccessPolicy: DirectoryAccessPolicy = 'ask_permission';
+    if (chatDirectoryPolicy && chatDirectoryPolicy !== 'inherit') {
+      directoryAccessPolicy = chatDirectoryPolicy;
+    } else if (projectSettings.directoryAccessPolicy) {
+      directoryAccessPolicy = projectSettings.directoryAccessPolicy;
+    } else if (preset === 'turbo') {
+      directoryAccessPolicy = 'unrestricted';
+    }
+
     return {
       preset,
       planReviewPolicy: projectSettings.planReviewPolicy || config.defaultPlanReviewPolicy || 'always_review',
+      directoryAccessPolicy,
       source,
       settings: projectSettings
     };
@@ -163,8 +180,12 @@ export class ProjectSettingsManager {
   public static checkFileAccess(
     projectPath: string,
     targetRelPath: string,
-    action: 'read' | 'write'
-  ): { allowed: boolean; reason?: string } {
+    action: 'read' | 'write',
+    options?: {
+      directoryAccessPolicy?: DirectoryAccessPolicy;
+      approvedExternalPaths?: string[];
+    }
+  ): { allowed: boolean; reason?: string; isExternal?: boolean; requiresPermission?: boolean } {
     const settings = this.getSettings(projectPath);
 
     if (action === 'read' && !settings.fileAccess.readAllowed) {
@@ -173,6 +194,30 @@ export class ProjectSettingsManager {
 
     if (action === 'write' && !settings.fileAccess.writeAllowed) {
       return { allowed: false, reason: 'Modificação de arquivos desativada nas permissões locais do projeto.' };
+    }
+
+    // Directory Scope & External Paths Check
+    if (projectPath && targetRelPath) {
+      const resolvedTarget = path.isAbsolute(targetRelPath) 
+        ? path.resolve(targetRelPath) 
+        : path.resolve(projectPath, targetRelPath);
+      const resolvedProject = path.resolve(projectPath);
+      const relToProject = path.relative(resolvedProject, resolvedTarget);
+      const isExternal = relToProject.startsWith('..') || path.isAbsolute(relToProject);
+
+      if (isExternal) {
+        const effectivePolicy = options?.directoryAccessPolicy || settings.directoryAccessPolicy || 'ask_permission';
+        const isApproved = options?.approvedExternalPaths?.some(p => resolvedTarget.startsWith(path.resolve(p)));
+
+        if (effectivePolicy !== 'unrestricted' && !isApproved) {
+          return {
+            allowed: false,
+            isExternal: true,
+            requiresPermission: true,
+            reason: `Acesso externo bloqueado: O Tellus está configurado para pedir permissão antes de acessar ou inserir arquivos em outros diretórios fora do projeto (${targetRelPath}). Você pode alterar nas configurações de segurança do chat/projeto para 'Seguir com tudo' se desejar acesso amplo automático.`
+          };
+        }
+      }
     }
 
     // Denied paths check

@@ -1,0 +1,12 @@
+{
+  "id": "clean-architecture-principles",
+  "name": "Clean Architecture Principles",
+  "description": "Diretrizes de arquitetura limpa e desacoplamento para sistemas resilientes",
+  "category": "Architecture",
+  "agentAssigned": "all",
+  "promptInstructions": "# Clean Architecture\n\nInstruções para o agente seguir padrões de inversão de dependência e desacoplamento.",
+  "isProjectSpecific": false,
+  "isActive": true,
+  "scope": "global",
+  "updatedAt": 1795661782687
+}

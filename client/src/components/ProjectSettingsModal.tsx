@@ -369,6 +369,63 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                   </label>
                 </div>
 
+                {/* Directory Scope & External Access Policy */}
+                <div className="pt-2 border-t border-card-border/60">
+                  <label className="block text-xs font-semibold text-slate-200 mb-1">
+                    Escopo de Diretórios & Inserção de Arquivos
+                  </label>
+                  <p className="text-[11px] text-slate-400 mb-2 leading-relaxed">
+                    Define se o Tellus pode criar e modificar arquivos fora do diretório do projeto ou se deve pedir autorização antes.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setSettings({ ...settings, directoryAccessPolicy: 'ask_permission' })}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        (settings.directoryAccessPolicy || 'ask_permission') === 'ask_permission'
+                          ? 'bg-accent/20 border-accent text-white shadow-xs'
+                          : 'bg-panel/60 border-card-border hover:bg-panel text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold flex items-center space-x-1.5">
+                          <Lock className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Pedir Permissão (Padrão)</span>
+                        </span>
+                        {(settings.directoryAccessPolicy || 'ask_permission') === 'ask_permission' && (
+                          <Check className="w-3.5 h-3.5 text-accent-light" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                        Insere livremente no diretório do projeto; pede autorização ao usuário antes de criar ou acessar diretórios externos.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSettings({ ...settings, directoryAccessPolicy: 'unrestricted' })}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        settings.directoryAccessPolicy === 'unrestricted'
+                          ? 'bg-amber-500/20 border-amber-500/50 text-white shadow-xs'
+                          : 'bg-panel/60 border-card-border hover:bg-panel text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold flex items-center space-x-1.5">
+                          <Zap className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Seguir com Tudo (Livre)</span>
+                        </span>
+                        {settings.directoryAccessPolicy === 'unrestricted' && (
+                          <Check className="w-3.5 h-3.5 text-amber-300" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                        Segue direto e insere chats, arquivos e códigos em qualquer diretório necessário sem interrupções.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Denied Paths */}
                 <div>
                   <label className="block text-[11px] font-medium text-slate-400 mb-1.5">

@@ -10,16 +10,16 @@ export interface FileTreeItem {
 }
 
 export class FileTools {
-  private static getSafePath(projectPath: string, relativePath: string): string {
-    const resolved = path.resolve(projectPath, relativePath);
-    if (!resolved.startsWith(path.resolve(projectPath))) {
+  private static getSafePath(projectPath: string, relativePath: string, allowExternal = false): string {
+    const resolved = path.isAbsolute(relativePath) ? path.resolve(relativePath) : path.resolve(projectPath, relativePath);
+    if (!allowExternal && !resolved.startsWith(path.resolve(projectPath))) {
       throw new Error(`Acesso negado: Caminho fora do diretório do projeto (${relativePath})`);
     }
     return resolved;
   }
 
-  public static readFile(projectPath: string, relativePath: string): { content: string; size: number } {
-    const fullPath = this.getSafePath(projectPath, relativePath);
+  public static readFile(projectPath: string, relativePath: string, allowExternal = false): { content: string; size: number } {
+    const fullPath = this.getSafePath(projectPath, relativePath, allowExternal);
     if (!fs.existsSync(fullPath)) {
       throw new Error(`Arquivo não encontrado: ${relativePath}`);
     }
@@ -31,8 +31,8 @@ export class FileTools {
     return { content, size: stat.size };
   }
 
-  public static writeFile(projectPath: string, relativePath: string, content: string): { success: boolean; bytesWritten: number } {
-    const fullPath = this.getSafePath(projectPath, relativePath);
+  public static writeFile(projectPath: string, relativePath: string, content: string, allowExternal = false): { success: boolean; bytesWritten: number } {
+    const fullPath = this.getSafePath(projectPath, relativePath, allowExternal);
     const dir = path.dirname(fullPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -45,9 +45,10 @@ export class FileTools {
     projectPath: string,
     relativePath: string,
     targetContent: string,
-    replacementContent: string
+    replacementContent: string,
+    allowExternal = false
   ): { success: boolean; message: string } {
-    const fullPath = this.getSafePath(projectPath, relativePath);
+    const fullPath = this.getSafePath(projectPath, relativePath, allowExternal);
     if (!fs.existsSync(fullPath)) {
       throw new Error(`Arquivo não encontrado para edição: ${relativePath}`);
     }

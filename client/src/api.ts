@@ -28,6 +28,7 @@ import {
   RecommendedObsidianPlugin,
   ProjectSettings,
   ExecutionSecurityPreset,
+  DirectoryAccessPolicy,
   FileChangeEntry,
   GitDiffReport,
   NoteInkData,
@@ -126,6 +127,29 @@ export const api = {
     return res.json();
   },
 
+  async getDiscoveredProjects(): Promise<{ projectsRoot: string; projects: Array<{
+    name: string;
+    path: string;
+    isCurrent: boolean;
+    isOpen: boolean;
+    hasAgentic: boolean;
+    lastModified: number;
+    modulesCount: number;
+    artifactsCount: number;
+  }> }> {
+    const res = await fetch(`${API_BASE}/projects/discovered`);
+    return res.json();
+  },
+
+  async setProjectsRoot(projectsRoot: string): Promise<{ success: boolean; projectsRoot: string }> {
+    const res = await fetch(`${API_BASE}/projects/set-root`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectsRoot })
+    });
+    return res.json();
+  },
+
   // Project Settings & Security Presets
   async getProjectSettings(projectPath?: string): Promise<ProjectSettings> {
     const url = projectPath 
@@ -144,15 +168,17 @@ export const api = {
     return res.json();
   },
 
-  async getEffectiveSecurity(chatMode?: string, projectPath?: string): Promise<{
+  async getEffectiveSecurity(chatMode?: string, projectPath?: string, chatDirectoryPolicy?: string): Promise<{
     preset: 'request_review' | 'default' | 'turbo';
     planReviewPolicy: 'always_proceed' | 'always_review';
+    directoryAccessPolicy: 'ask_permission' | 'unrestricted';
     source: 'chat' | 'project' | 'global';
     settings: ProjectSettings;
   }> {
     const params = new URLSearchParams();
     if (chatMode) params.append('chatMode', chatMode);
     if (projectPath) params.append('projectPath', projectPath);
+    if (chatDirectoryPolicy) params.append('chatDirectoryPolicy', chatDirectoryPolicy);
     const res = await fetch(`${API_BASE}/project/effective-security?${params.toString()}`);
     return res.json();
   },
@@ -249,13 +275,22 @@ export const api = {
   },
 
   // FrankMD Notes & Knowledge Graph
-  async listNotes(): Promise<FrankNote[]> {
-    const res = await fetch(`${API_BASE}/notes`);
+  async listNotes(projectPath?: string): Promise<FrankNote[]> {
+    const q = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
+    const res = await fetch(`${API_BASE}/notes${q}`);
     return res.json();
   },
 
-  async listFolders(): Promise<string[]> {
-    const res = await fetch(`${API_BASE}/notes/folders`);
+  async getNote(idOrTitle: string, projectPath?: string): Promise<FrankNote | null> {
+    const q = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
+    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(idOrTitle)}${q}`);
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  async listFolders(projectPath?: string): Promise<string[]> {
+    const q = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
+    const res = await fetch(`${API_BASE}/notes/folders${q}`);
     return res.json();
   },
 
@@ -277,6 +312,71 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Falha ao mover pasta' }));
       throw new Error(err.error || 'Falha ao mover pasta');
+    }
+    return res.json();
+  },
+
+  async renameFolder(oldName: string, newName: string): Promise<{ success: boolean; movedNotesCount: number }> {
+    const res = await fetch(`${API_BASE}/notes/folders/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldName, newName })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao renomear pasta' }));
+      throw new Error(err.error || 'Falha ao renomear pasta');
+    }
+    return res.json();
+  },
+
+  async mergeFolders(sourceFolders: string[], targetFolder: string): Promise<{ success: boolean; movedNotesCount: number }> {
+    const res = await fetch(`${API_BASE}/notes/folders/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceFolders, targetFolder })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao mesclar pastas' }));
+      throw new Error(err.error || 'Falha ao mesclar pastas');
+    }
+    return res.json();
+  },
+
+  async bulkMoveNotes(noteIds: string[], targetFolder: string): Promise<{ successCount: number; updatedNotes: FrankNote[] }> {
+    const res = await fetch(`${API_BASE}/notes/bulk-move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteIds, targetFolder })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao mover notas em lote' }));
+      throw new Error(err.error || 'Falha ao mover notas em lote');
+    }
+    return res.json();
+  },
+
+  async bulkDeleteNotes(noteIds: string[]): Promise<{ successCount: number; failedCount: number; protectedCount?: number }> {
+    const res = await fetch(`${API_BASE}/notes/bulk-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteIds })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao excluir notas em lote' }));
+      throw new Error(err.error || 'Falha ao excluir notas em lote');
+    }
+    return res.json();
+  },
+
+  async mergeNotes(noteIds: string[], options: { title?: string; targetFolder?: string; deleteSources?: boolean } = {}): Promise<FrankNote> {
+    const res = await fetch(`${API_BASE}/notes/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteIds, ...options })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao unificar notas' }));
+      throw new Error(err.error || 'Falha ao unificar notas');
     }
     return res.json();
   },
@@ -619,7 +719,15 @@ export const api = {
     const res = await fetch(`${API_BASE}/notes/${id}?isProjectSpecific=${!!isProjectSpecific}`, {
       method: 'DELETE'
     });
-    return res.json();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Falha ao excluir nota' }));
+      throw new Error(err.error || 'Falha ao excluir nota');
+    }
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Não foi possível excluir a nota');
+    }
+    return data;
   },
 
   // Zero-LLM BM25-Lite Weighted Fast Search
@@ -855,8 +963,9 @@ export const api = {
     return res.json();
   },
 
-  async listArtifacts(): Promise<TellusArtifact[]> {
-    const res = await fetch(`${API_BASE}/artifacts`);
+  async listArtifacts(projectPath?: string): Promise<TellusArtifact[]> {
+    const url = projectPath ? `${API_BASE}/artifacts?projectPath=${encodeURIComponent(projectPath)}` : `${API_BASE}/artifacts`;
+    const res = await fetch(url);
     return res.json();
   },
 
@@ -905,6 +1014,17 @@ export const api = {
       method: 'DELETE'
     });
     return res.json();
+  },
+
+  async moveSession(id: string, targetProjectPath: string | null): Promise<ChatSession> {
+    const res = await fetch(`${API_BASE}/sessions/${id}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetProjectPath })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    return data.session;
   },
 
   async searchMessages(query: string): Promise<Array<{
@@ -991,14 +1111,25 @@ export const api = {
     isLiveVoice?: boolean,
     executionMode?: ExecutionSecurityPreset,
     sessionId?: string,
-    sessionTitle?: string
+    sessionTitle?: string,
+    isStandalone?: boolean,
+    projectPath?: string,
+    isSkillArchitect?: boolean,
+    directoryAccessPolicy?: DirectoryAccessPolicy | 'inherit'
   ) {
     const controller = new AbortController();
+    let doneCalled = false;
+    const callDoneOnce = () => {
+      if (!doneCalled) {
+        doneCalled = true;
+        if (onDone) onDone();
+      }
+    };
 
     fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode, sessionId, sessionTitle }),
+      body: JSON.stringify({ messages, model, provider, routineId, tokenEfficiency, pipeline, isLiveVoice, executionMode, directoryAccessPolicy, sessionId, sessionTitle, isStandalone, projectPath, isSkillArchitect }),
       signal: controller.signal
     })
       .then(async (response) => {
@@ -1031,7 +1162,7 @@ export const api = {
               try {
                 const data = JSON.parse(trimmed.replace('data:', '').trim());
                 if (currentEvent === 'done') {
-                  if (onDone) onDone();
+                  callDoneOnce();
                 } else if (currentEvent === 'error') {
                   if (onError) onError(data);
                 } else {
@@ -1043,7 +1174,7 @@ export const api = {
             }
           }
         }
-        if (onDone) onDone();
+        callDoneOnce();
       })
       .catch((err) => {
         if (controller.signal.aborted || err?.name === 'AbortError') {

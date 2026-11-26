@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { SecurityShield } from './sync/securityShield.js';
+import { getDefaultVaultDir } from '../utils/appPaths.js';
 
 export interface AgentPipelineConfig {
   primaryModel: string;
@@ -75,6 +76,7 @@ export interface AppConfig {
     fishAudioModel?: string;
   };
   vaultPath?: string;
+  projectsRoot?: string;
   syncConfig?: CloudSyncConfig;
   defaultModel: string;
   defaultProvider: 'openrouter' | 'google' | 'anthropic' | 'openai';
@@ -108,12 +110,30 @@ function resolveDefaultVaultPath(): string {
   if (process.env.TELLUS_VAULT_DIR) {
     return process.env.TELLUS_VAULT_DIR;
   }
-  return path.join(os.homedir(), 'Documents', 'Tellus Vault');
+  return getDefaultVaultDir();
+}
+
+export function resolveDefaultProjectsRoot(): string {
+  if (process.env.TELLUS_PROJECTS_DIR && fs.existsSync(process.env.TELLUS_PROJECTS_DIR)) {
+    return path.resolve(process.env.TELLUS_PROJECTS_DIR);
+  }
+  const primaryCandidates = [
+    'E:\\Die-Sonne\\Projects',
+    path.join(os.homedir(), 'Documents', 'Projects'),
+    path.join(os.homedir(), 'Projects')
+  ];
+  for (const cand of primaryCandidates) {
+    if (fs.existsSync(cand)) {
+      return path.resolve(cand);
+    }
+  }
+  return path.join(os.homedir(), 'Documents', 'Tellus Projects');
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   keys: {},
   vaultPath: resolveDefaultVaultPath(),
+  projectsRoot: resolveDefaultProjectsRoot(),
   syncConfig: {
     enabled: false,
     autoSync: true,
@@ -225,10 +245,15 @@ export class ConfigManager {
         SecurityShield.restoreSessionFromEncryptedKey(syncCfg.googleAccount.accountHash, syncCfg.encryptedSessionVaultKey);
       }
 
+      let resolvedVault = parsed.vaultPath || DEFAULT_CONFIG.vaultPath;
+      if (!fs.existsSync(resolvedVault) && fs.existsSync(getDefaultVaultDir())) {
+        resolvedVault = getDefaultVaultDir();
+      }
+
       return {
         ...DEFAULT_CONFIG,
         ...parsed,
-        vaultPath: parsed.vaultPath || DEFAULT_CONFIG.vaultPath,
+        vaultPath: resolvedVault,
         syncConfig: syncCfg,
         keys: decryptedKeys,
         customRoutines: mergedRoutines

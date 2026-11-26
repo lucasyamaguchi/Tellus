@@ -1,0 +1,9 @@
+{
+  "id": "api-generator",
+  "name": "RESTful API & Service Generator",
+  "category": "Backend",
+  "agentAssigned": "fast_coder",
+  "description": "Geração rápida e tipada de endpoints Express, rotas REST e documentação Swagger.",
+  "promptInstructions": "Escreva endpoints com validação robusta de tipos, tratamento de exceções padronizado e respostas JSON limpas com códigos HTTP corretos.",
+  "updatedAt": 1787311592567
+}

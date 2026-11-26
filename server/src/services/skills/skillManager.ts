@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getDefaultSkillsDir, getDefaultArtifactsDir } from '../../utils/appPaths.js';
 
 export interface TellusSkill {
   id: string;
@@ -31,8 +32,10 @@ export interface TellusArtifact {
   updatedAt: number;
 }
 
-const GLOBAL_SKILLS_DIR = path.join(os.homedir(), '.tellus', 'skills');
-const GLOBAL_ARTIFACTS_DIR = path.join(os.homedir(), '.tellus', 'artifacts');
+const getGlobalSkillsDir = () => getDefaultSkillsDir();
+const getGlobalArtifactsDir = () => getDefaultArtifactsDir();
+const LEGACY_SKILLS_DIR = path.join(os.homedir(), '.tellus', 'skills');
+const LEGACY_ARTIFACTS_DIR = path.join(os.homedir(), '.tellus', 'artifacts');
 
 const DEFAULT_GLOBAL_SKILLS: TellusSkill[] = [
   {
@@ -224,11 +227,13 @@ FLUXO NO CHAT:
 
 export class SkillManager {
   private static ensureDirs(projectPath?: string) {
-    if (!fs.existsSync(GLOBAL_SKILLS_DIR)) {
-      fs.mkdirSync(GLOBAL_SKILLS_DIR, { recursive: true });
+    const globalSkillsDir = getGlobalSkillsDir();
+    const globalArtifactsDir = getGlobalArtifactsDir();
+    if (!fs.existsSync(globalSkillsDir)) {
+      fs.mkdirSync(globalSkillsDir, { recursive: true });
     }
-    if (!fs.existsSync(GLOBAL_ARTIFACTS_DIR)) {
-      fs.mkdirSync(GLOBAL_ARTIFACTS_DIR, { recursive: true });
+    if (!fs.existsSync(globalArtifactsDir)) {
+      fs.mkdirSync(globalArtifactsDir, { recursive: true });
     }
     if (projectPath) {
       const projSkills = path.join(projectPath, '.agentic', 'skills');
@@ -268,10 +273,11 @@ export class SkillManager {
   public static listSkills(projectPath?: string): TellusSkill[] {
     this.ensureDirs(projectPath);
     const skillsMap = new Map<string, TellusSkill>();
+    const globalSkillsDir = getGlobalSkillsDir();
 
     // Ensure all default global skills exist in global dir
     for (const s of DEFAULT_GLOBAL_SKILLS) {
-      const skillPath = path.join(GLOBAL_SKILLS_DIR, `${s.id}.json`);
+      const skillPath = path.join(globalSkillsDir, `${s.id}.json`);
       if (!fs.existsSync(skillPath)) {
         try {
           fs.writeFileSync(skillPath, JSON.stringify(s, null, 2), 'utf-8');
@@ -279,13 +285,13 @@ export class SkillManager {
       }
     }
 
-    // 1. Read Global Skills
-    if (fs.existsSync(GLOBAL_SKILLS_DIR)) {
-      const files = fs.readdirSync(GLOBAL_SKILLS_DIR);
+    // 1. Read Global Skills from Tellus App Directory
+    if (fs.existsSync(globalSkillsDir)) {
+      const files = fs.readdirSync(globalSkillsDir);
       for (const file of files) {
         if (file.endsWith('.json')) {
           try {
-            const raw = fs.readFileSync(path.join(GLOBAL_SKILLS_DIR, file), 'utf-8');
+            const raw = fs.readFileSync(path.join(globalSkillsDir, file), 'utf-8');
             const parsed: TellusSkill = JSON.parse(raw);
             parsed.isProjectSpecific = false;
             parsed.isActive = true; // Global skills active by default
@@ -293,6 +299,28 @@ export class SkillManager {
           } catch {}
         }
       }
+    }
+
+    // 1b. Fallback: also load any legacy skills from ~/.tellus/skills if not present
+    if (fs.existsSync(LEGACY_SKILLS_DIR) && LEGACY_SKILLS_DIR !== globalSkillsDir) {
+      try {
+        const legacyFiles = fs.readdirSync(LEGACY_SKILLS_DIR);
+        for (const file of legacyFiles) {
+          if (file.endsWith('.json')) {
+            try {
+              const raw = fs.readFileSync(path.join(LEGACY_SKILLS_DIR, file), 'utf-8');
+              const parsed: TellusSkill = JSON.parse(raw);
+              if (!skillsMap.has(parsed.id)) {
+                parsed.isProjectSpecific = false;
+                parsed.isActive = true;
+                skillsMap.set(parsed.id, parsed);
+                // Migrate to new app dir
+                fs.writeFileSync(path.join(globalSkillsDir, file), raw, 'utf-8');
+              }
+            } catch {}
+          }
+        }
+      } catch {}
     }
 
     // 2. Read Project-Specific Skills
@@ -338,7 +366,7 @@ export class SkillManager {
     const isProj = scope === 'project' && !!projectPath;
     const targetDir = isProj
       ? path.join(projectPath!, '.agentic', 'skills')
-      : GLOBAL_SKILLS_DIR;
+      : getGlobalSkillsDir();
 
     const id = skill.id || skill.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
     const fullSkill: TellusSkill = {
@@ -429,7 +457,7 @@ export class SkillManager {
     const isProj = isProjectSpecific && projectPath;
     const targetDir = isProj
       ? path.join(projectPath, '.agentic', 'skills')
-      : GLOBAL_SKILLS_DIR;
+      : getGlobalSkillsDir();
 
     const filePath = path.join(targetDir, `${id}.json`);
     if (fs.existsSync(filePath)) {
@@ -483,11 +511,12 @@ export class SkillManager {
     }
 
     // 2. Global Artifacts / Blueprints
-    if (fs.existsSync(GLOBAL_ARTIFACTS_DIR)) {
-      const files = fs.readdirSync(GLOBAL_ARTIFACTS_DIR);
+    const globalArtifactsDir = getGlobalArtifactsDir();
+    if (fs.existsSync(globalArtifactsDir)) {
+      const files = fs.readdirSync(globalArtifactsDir);
       for (const file of files) {
         if (file.endsWith('.md') || file.endsWith('.json') || file.endsWith('.txt')) {
-          const filePath = path.join(GLOBAL_ARTIFACTS_DIR, file);
+          const filePath = path.join(globalArtifactsDir, file);
           const stat = fs.statSync(filePath);
           const content = fs.readFileSync(filePath, 'utf-8');
           const id = `global_${file.replace(/\.[^.]+$/, '')}`;
@@ -529,7 +558,7 @@ export class SkillManager {
   ): TellusArtifact {
     this.ensureDirs(projectPath);
     const targetDir = isGlobal
-      ? GLOBAL_ARTIFACTS_DIR
+      ? getGlobalArtifactsDir()
       : path.join(projectPath, '.agentic', 'artifacts');
 
     const safeFilename = filename || `${type}_${Date.now()}.md`;
@@ -558,7 +587,7 @@ export class SkillManager {
 
   public static deleteArtifact(filename: string, isGlobal = false, projectPath?: string): boolean {
     const targetDir = isGlobal || !projectPath
-      ? GLOBAL_ARTIFACTS_DIR
+      ? getGlobalArtifactsDir()
       : path.join(projectPath, '.agentic', 'artifacts');
 
     const filePath = path.join(targetDir, filename);

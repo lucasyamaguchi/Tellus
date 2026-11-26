@@ -1,0 +1,11 @@
+{
+  "id": "test-rust-auditor",
+  "name": "Auditor de Memória Rust",
+  "category": "Análise de Código",
+  "description": "Analisa código Rust e valida lifetimes e borrowing.",
+  "promptInstructions": "Você deve examinar structs, traits e lifetimes buscando vulnerabilidades de memória.",
+  "scope": "project",
+  "isProjectSpecific": false,
+  "isActive": true,
+  "updatedAt": 1795661784460
+}

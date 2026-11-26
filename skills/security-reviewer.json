@@ -1,0 +1,9 @@
+{
+  "id": "security-reviewer",
+  "name": "Security & Vulnerability Auditor",
+  "category": "Security",
+  "agentAssigned": "all",
+  "description": "Auditoria de segurança, sanitização de inputs, proteção contra SQLi, XSS e vazamento de chaves.",
+  "promptInstructions": "Verifique se nenhuma chave de API ou credencial está exposta no código. Valide todos os inputs e restrinja permissões de acesso.",
+  "updatedAt": 1787311592561
+}

@@ -36,12 +36,19 @@ export class TerminalRunner {
   public static runCommand(
     projectPath: string,
     command: string,
-    onLog?: (line: string) => void
+    onLog?: (line: string) => void,
+    timeoutMs: number = 45000
   ): Promise<{ taskId: string; exitCode: number | null; output: string }> {
     const taskId = 'task_' + Math.random().toString(36).substring(2, 9);
     const isWindows = os.platform() === 'win32';
-    const shell = isWindows ? 'powershell.exe' : '/bin/bash';
-    const shellArgs = isWindows ? ['-NoProfile', '-NonInteractive', '-Command', command] : ['-c', command];
+    let shell = isWindows ? 'powershell.exe' : '/bin/bash';
+    let shellArgs = isWindows ? ['-NoProfile', '-NonInteractive', '-Command', command] : ['-c', command];
+
+    // On Windows, if command contains bash-style chaining (&& or ||), route through cmd.exe for seamless execution
+    if (isWindows && (command.includes('&&') || command.includes('||'))) {
+      shell = 'cmd.exe';
+      shellArgs = ['/d', '/s', '/c', command];
+    }
 
     const task: TerminalTask = {
       id: taskId,
@@ -58,11 +65,52 @@ export class TerminalRunner {
       try {
         const proc = spawn(shell, shellArgs, {
           cwd: projectPath,
-          env: { ...process.env, FORCE_COLOR: 'true' }
+          env: {
+            ...process.env,
+            FORCE_COLOR: 'true',
+            GIT_TERMINAL_PROMPT: '0',
+            GCM_INTERACTIVE: 'never',
+            CI: 'true',
+            npm_config_yes: 'true'
+          }
         });
+
+        // Close stdin immediately so interactive prompts (git username, npm yes, python input) do not hang waiting for input
+        try {
+          proc.stdin?.end();
+        } catch {}
 
         this.tasks.set(taskId, { task, process: proc });
         this.emit({ taskId, type: 'status', data: task });
+
+        let isDone = false;
+        let timeoutTimer: NodeJS.Timeout | null = null;
+
+        if (timeoutMs > 0) {
+          timeoutTimer = setTimeout(() => {
+            if (isDone) return;
+            isDone = true;
+            const timeoutMsg = `\n⏱️ [Timeout]: O comando excedeu ${Math.round(timeoutMs / 1000)}s e foi cancelado pelo Tellus para evitar travamento do agente.\n`;
+            task.logs.push(timeoutMsg);
+            if (onLog) onLog(timeoutMsg);
+            task.status = 'failed';
+            task.exitCode = 124;
+            task.completedAt = Date.now();
+
+            try {
+              if (isWindows && proc.pid) {
+                spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F']);
+              } else {
+                proc.kill('SIGKILL');
+              }
+            } catch {}
+
+            this.emit({ taskId, type: 'log', data: timeoutMsg });
+            this.emit({ taskId, type: 'status', data: task });
+            this.tasks.delete(taskId);
+            resolve({ taskId, exitCode: 124, output: task.logs.join('') });
+          }, timeoutMs);
+        }
 
         const handleData = (data: Buffer) => {
           const text = data.toString('utf-8');
@@ -75,20 +123,28 @@ export class TerminalRunner {
         proc.stderr?.on('data', handleData);
 
         proc.on('close', (code) => {
+          if (isDone) return;
+          isDone = true;
+          if (timeoutTimer) clearTimeout(timeoutTimer);
           task.status = task.status === 'killed' ? 'killed' : (code === 0 ? 'completed' : 'failed');
           task.exitCode = code;
           task.completedAt = Date.now();
           this.emit({ taskId, type: 'status', data: task });
+          this.tasks.delete(taskId);
           resolve({ taskId, exitCode: code, output: task.logs.join('') });
         });
 
         proc.on('error', (err) => {
+          if (isDone) return;
+          isDone = true;
+          if (timeoutTimer) clearTimeout(timeoutTimer);
           task.status = 'failed';
           const errMsg = `\nErro ao executar processo: ${err.message}\n`;
           task.logs.push(errMsg);
           if (onLog) onLog(errMsg);
           this.emit({ taskId, type: 'log', data: errMsg });
           this.emit({ taskId, type: 'status', data: task });
+          this.tasks.delete(taskId);
           resolve({ taskId, exitCode: 1, output: task.logs.join('') });
         });
       } catch (err: any) {

@@ -9,7 +9,7 @@ import { TellusNoteEngine } from './notes/tellusNoteEngine.js';
 import { SkillManager } from './skills/skillManager.js';
 import { ProviderHub } from './providers/providerHub.js';
 import { ChatMessage, ToolDefinition } from './providers/openrouter.js';
-import { ConfigManager } from './configManager.js';
+import { ConfigManager, AgentPipelineConfig } from './configManager.js';
 import { ProjectSettingsManager } from './projectSettingsManager.js';
 import { FileHistoryManager } from './history/fileHistoryManager.js';
 
@@ -250,6 +250,50 @@ export const AGENT_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'skill_save',
+      description: 'Salva, registra ou atualiza uma Skill customizada no repositório de skills do Tellus.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'ID em kebab-case da skill (ex: "react-perf-optimizer", "security-reviewer")' },
+          name: { type: 'string', description: 'Nome legível da skill' },
+          category: { type: 'string', description: 'Categoria da skill (ex: Frontend, Backend, DevSecOps, Arquitetura, Testes, Estudo, Automação)' },
+          description: { type: 'string', description: 'Descrição concisa do que a skill faz e quando acioná-la' },
+          prompt_instructions: { type: 'string', description: 'Diretrizes, metodologia, regras estritas e prompt instructions completo que guiarão o agente quando a skill estiver ativa' },
+          scope: { type: 'string', enum: ['global', 'project', 'situational'], description: 'Escopo da skill: global (todo o Tellus) ou project (somente este repositório)' }
+        },
+        required: ['name', 'description', 'prompt_instructions']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_list',
+      description: 'Lista todas as skills cadastradas no Tellus para consulta ou comparação.',
+      parameters: {
+        type: 'object',
+        properties: {}
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_get',
+      description: 'Recupera os detalhes completos de uma skill existente pelo id ou nome.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'ID da skill' },
+          name: { type: 'string', description: 'Nome da skill' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'artifact_create',
       description: 'Gera e salva um artefato estruturado no projeto (.agentic/artifacts/) como planos, walkthroughs, diagramas ou relatórios.',
       parameters: {
@@ -333,6 +377,33 @@ export const AGENT_TOOLS: ToolDefinition[] = [
         required: ['summary']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_steps',
+      description: 'Atualiza o checklist de etapas e tarefas no chat em tempo real (estilo Antigravity). Use para exibir o plano de execução ordenado, indicando status de cada etapa (pending, in_progress, done, failed, skipped) e o motivo em caso de falha ou auto-cura.',
+      parameters: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            description: 'Lista ordenada de etapas da tarefa.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'ID curto da etapa (ex: step_1, step_2)' },
+                title: { type: 'string', description: 'Título claro e objetivo da etapa' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'failed', 'skipped'] },
+                reason: { type: 'string', description: 'Opcional: detalhe ou motivo do resultado, essencial em caso de falha ou correção necessária' }
+              },
+              required: ['title', 'status']
+            }
+          }
+        },
+        required: ['steps']
+      }
+    }
   }
 ];
 
@@ -342,7 +413,16 @@ export class AgentLoop {
     toolName: string,
     rawArgs: string,
     currentModel: string,
-    context?: { sessionId?: string; sessionTitle?: string; messageId?: string }
+    context?: {
+      sessionId?: string;
+      sessionTitle?: string;
+      messageId?: string;
+      directoryAccessPolicy?: 'ask_permission' | 'unrestricted';
+      onEvent?: (event: {
+        type: 'content' | 'reasoning' | 'tool_start' | 'tool_end' | 'turn_complete' | 'error' | 'file_changed' | 'model_dispatch' | 'task_steps';
+        data: any;
+      }) => void;
+    }
   ): Promise<any> {
     let args: any = {};
     try {
@@ -352,14 +432,30 @@ export class AgentLoop {
     }
 
     try {
+      // Standalone / Common Chat Mode check (no project open)
+      if (!projectPath) {
+        const projectSpecificTools = ['read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search', 'run_command', 'git_status', 'git_diff', 'git_commit', 'undo_last_change'];
+        if (projectSpecificTools.includes(toolName)) {
+          return {
+            error: "Esta conversa é uma Conversa Livre sem projeto aberto. A ferramenta '" + toolName + "' requer um projeto aberto. Caso queira registrar notas de estudo ou conceitos, utilize 'note_save' ou oriente o usuário a abrir um projeto no menu."
+          };
+        }
+      }
+
       // Enforce Project Security Rules & Permissions
+      const isUnrestricted = context?.directoryAccessPolicy === 'unrestricted';
+
       if (toolName === 'read_file') {
-        const check = ProjectSettingsManager.checkFileAccess(projectPath, args.path || '', 'read');
+        const check = ProjectSettingsManager.checkFileAccess(projectPath, args.path || '', 'read', {
+          directoryAccessPolicy: context?.directoryAccessPolicy
+        });
         if (!check.allowed) {
           return { error: check.reason || 'Leitura de arquivo não permitida pelas configurações do projeto' };
         }
       } else if (toolName === 'write_file' || toolName === 'edit_file') {
-        const check = ProjectSettingsManager.checkFileAccess(projectPath, args.path || '', 'write');
+        const check = ProjectSettingsManager.checkFileAccess(projectPath, args.path || '', 'write', {
+          directoryAccessPolicy: context?.directoryAccessPolicy
+        });
         if (!check.allowed) {
           return { error: check.reason || 'Modificação de arquivo não permitida pelas configurações do projeto' };
         }
@@ -377,17 +473,17 @@ export class AgentLoop {
 
       switch (toolName) {
         case 'read_file': {
-          const result = FileTools.readFile(projectPath, args.path);
+          const result = FileTools.readFile(projectPath, args.path, isUnrestricted);
           return { status: 'success', path: args.path, size: result.size, content: result.content };
         }
         case 'write_file': {
           let oldContent = '';
-          const fullPath = path.resolve(projectPath, args.path);
+          const fullPath = path.isAbsolute(args.path) ? path.resolve(args.path) : path.resolve(projectPath, args.path);
           const existed = fs.existsSync(fullPath);
           if (existed) {
             try { oldContent = fs.readFileSync(fullPath, 'utf-8'); } catch {}
           }
-          const res = FileTools.writeFile(projectPath, args.path, args.content);
+          const res = FileTools.writeFile(projectPath, args.path, args.content, isUnrestricted);
 
           const diffInfo = FileHistoryManager.computeDiff(args.path, oldContent, args.content);
           const historyEntry = FileHistoryManager.recordChange(projectPath, {
@@ -419,11 +515,11 @@ export class AgentLoop {
         }
         case 'edit_file': {
           let oldContent = '';
-          const fullPath = path.resolve(projectPath, args.path);
+          const fullPath = path.isAbsolute(args.path) ? path.resolve(args.path) : path.resolve(projectPath, args.path);
           if (fs.existsSync(fullPath)) {
             try { oldContent = fs.readFileSync(fullPath, 'utf-8'); } catch {}
           }
-          const res = FileTools.editFile(projectPath, args.path, args.target_content, args.replacement_content);
+          const res = FileTools.editFile(projectPath, args.path, args.target_content, args.replacement_content, isUnrestricted);
           let newContent = '';
           if (fs.existsSync(fullPath)) {
             try { newContent = fs.readFileSync(fullPath, 'utf-8'); } catch {}
@@ -465,7 +561,8 @@ export class AgentLoop {
           return { status: 'success', query: args.query, matchCount: matches.length, matches };
         }
         case 'run_command': {
-          const res = await TerminalRunner.runCommand(projectPath, args.command);
+          const timeout = args.timeoutMs || 45000;
+          const res = await TerminalRunner.runCommand(projectPath, args.command, undefined, timeout);
           return {
             status: res.exitCode === 0 ? 'success' : 'error',
             command: args.command,
@@ -521,6 +618,52 @@ export class AgentLoop {
           );
           return { status: 'success', artifact: { id: artifact.id, title: artifact.title, path: artifact.relativePath } };
         }
+        case 'skill_save': {
+          const scope = args.scope || (projectPath ? 'project' : 'global');
+          const savedSkill = SkillManager.saveSkill({
+            id: args.id,
+            name: args.name,
+            category: args.category || 'General',
+            description: args.description,
+            promptInstructions: args.prompt_instructions || args.promptInstructions || '',
+            scope: scope,
+            isProjectSpecific: scope === 'project',
+            isActive: true,
+            updatedAt: Date.now()
+          }, projectPath || undefined);
+          return {
+            status: 'success',
+            message: `Skill '${savedSkill.name}' salva e ativada com sucesso no Tellus!`,
+            skill: {
+              id: savedSkill.id,
+              name: savedSkill.name,
+              category: savedSkill.category,
+              scope: savedSkill.scope,
+              description: savedSkill.description
+            }
+          };
+        }
+        case 'skill_list': {
+          const list = SkillManager.listSkills(projectPath || undefined);
+          return {
+            status: 'success',
+            count: list.length,
+            skills: list.map(s => ({
+              id: s.id,
+              name: s.name,
+              category: s.category,
+              scope: s.scope,
+              description: s.description,
+              isActive: s.isActive
+            }))
+          };
+        }
+        case 'skill_get': {
+          const list = SkillManager.listSkills(projectPath || undefined);
+          const found = list.find(s => s.id === args.id || s.name?.toLowerCase() === (args.name || '').toLowerCase());
+          if (!found) return { error: `Skill não encontrada com id ou nome: ${args.id || args.name}` };
+          return { status: 'success', skill: found };
+        }
         case 'note_save':
         case 'tellus_note_save':
         case 'frank_note_save': {
@@ -565,12 +708,54 @@ export class AgentLoop {
           );
           return { status: 'success', handoff: { filename: handoff.filename, title: handoff.title } };
         }
+        case 'update_steps': {
+          const steps = Array.isArray(args.steps) ? args.steps : [];
+          if (context?.onEvent) {
+            context.onEvent({
+              type: 'task_steps',
+              data: { steps }
+            });
+          }
+          return { status: 'success', totalSteps: steps.length, steps };
+        }
         default:
           return { error: `Ferramenta desconhecida: ${toolName}` };
       }
     } catch (err: any) {
       return { error: err.message || 'Erro durante a execução da ferramenta' };
     }
+  }
+
+  public static selectStepModel(
+    step: number,
+    lastToolCall: string | undefined,
+    baseModel: string,
+    pipeline?: AgentPipelineConfig
+  ): { model: string; role: 'primary' | 'planner' | 'coding' | 'fast_tools' | 'reasoning' } {
+    if (!pipeline) {
+      return { model: baseModel, role: 'primary' };
+    }
+
+    // Step 1: Initial analysis, architecture and task planning
+    if (step === 1 && (pipeline.plannerModel || pipeline.reasoningModel)) {
+      return {
+        model: pipeline.plannerModel || pipeline.reasoningModel || baseModel,
+        role: pipeline.plannerModel ? 'planner' : 'reasoning'
+      };
+    }
+
+    // Subsequent steps requiring code generation, file modification or terminal scripts:
+    if (lastToolCall && ['file_write', 'file_edit', 'terminal_exec'].includes(lastToolCall) && pipeline.codingModel) {
+      return { model: pipeline.codingModel, role: 'coding' };
+    }
+
+    // Subsequent steps for fast file or note retrieval:
+    if (lastToolCall && ['file_read', 'file_list', 'file_search', 'note_search', 'note_read'].includes(lastToolCall) && pipeline.fastToolsModel) {
+      return { model: pipeline.fastToolsModel, role: 'fast_tools' };
+    }
+
+    // Fallback: Primary / Coordinator model
+    return { model: pipeline.primaryModel || baseModel, role: 'primary' };
   }
 
   public static async runAutonomousTurn(
@@ -580,14 +765,15 @@ export class AgentLoop {
     messages: ChatMessage[],
     systemPrompt: string,
     onEvent: (event: {
-      type: 'content' | 'reasoning' | 'tool_start' | 'tool_end' | 'turn_complete' | 'error' | 'file_changed';
+      type: 'content' | 'reasoning' | 'tool_start' | 'tool_end' | 'turn_complete' | 'error' | 'file_changed' | 'model_dispatch' | 'task_steps';
       data: any;
     }) => void,
-    maxToolSteps = 10,
+    maxToolSteps = 50,
     abortSignal?: AbortSignal,
     executionSecurityPreset?: 'request_review' | 'default' | 'turbo',
     planReviewPolicy?: 'always_proceed' | 'always_review',
-    sessionContext?: { sessionId?: string; sessionTitle?: string }
+    sessionContext?: { sessionId?: string; sessionTitle?: string; directoryAccessPolicy?: 'ask_permission' | 'unrestricted' },
+    pipeline?: AgentPipelineConfig
   ): Promise<{ fullMessages: ChatMessage[] }> {
     const memoryContext = MemoryEngine.buildContextPrompt(projectPath);
     const skillsContext = SkillManager.buildSkillsContextPrompt(projectPath);
@@ -728,7 +914,41 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
 - Quando for criar um plano, registre o artefato e prossiga imediatamente com as etapas de implementação sem esperar intervenção.`;
     }
 
-    const enrichedSystemPrompt = `${languageAnchor}\n\n${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}\n\n${techVoiceInterpretationPolicy}\n\n${voiceGuideline}\n\n${executionPresetPolicy}\n\n${planPolicyGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
+    // Software Engineering, GitSafe & Self-Healing Delivery Policy (Antigravity Parity)
+    const engineeringDeliveryPolicy = `[🛠️ PROTOCOLO DE ENGENHARIA, AUTO-CURA E ENTREGA COMPLETA (PARIDADE ANTIGRAVITY)]
+- MANDATO DE CONCLUSÃO INTEGRAL (ZERO ABANDONO):
+  Quando o usuário pedir para criar, implementar, corrigir, testar ou subir algo para o repositório, você DEVE concluir a tarefa até o fim. NUNCA pare no meio do caminho deixando código com erro ou pendências sem resolver.
+- VISIBILIDADE DAS ETAPAS NO CHAT ('update_steps'):
+  Sempre que receber uma solicitação com múltiplos passos ou rotinas de teste/build/git, chame OBRIGATORIAMENTE 'update_steps' no início com a lista ordenada das etapas (status: 'pending').
+  Conforme for progredindo, chame 'update_steps' marcando a etapa ativa como 'in_progress', a finalizada como 'done' ou 'failed'.
+  Em caso de falha ('failed'), informe SEMPRE o campo 'reason' detalhando a falha detectada para o usuário acompanhar.
+- AUTO-CURA MANDATÓRIA (Self-Healing Loop):
+  Se qualquer comando ('run_command') retornar erro de compilação, erro de tipo TypeScript ('npx tsc'), erro de lint ('npm run lint') ou falha em testes ('npm test'):
+  1. NUNCA encerre o turno dizendo que "não enviou as alterações porque há bloqueios".
+  2. Marque a etapa no 'update_steps' com status 'failed' e o erro em 'reason'.
+  3. Adicione/atualize uma etapa de auto-cura ('in_progress') para investigar e corrigir.
+  4. Abra o arquivo afetado com 'read_file', aplique a correção necessária com 'edit_file' ou 'write_file'.
+  5. Re-execute a checagem até passar com 100% de sucesso ('exitCode: 0').
+  6. Atualize a etapa para 'done'.
+- PROTOCOLO DE COMMIT E PUSH:
+  Se o comando envolver subir para a main ou remoto:
+  1. Execute a auditoria de dados sensíveis (zero segredos reais, zero pastas de chats ou vaults).
+  2. Adicione os arquivos da aplicação ('git add ...').
+  3. Crie um commit semântico claro ('git commit -m "feat/fix/chore: ..."').
+  4. Envie para a branch remota ('git push origin <branch>').
+  5. Confirme que o remoto está sincronizado ('git status', 'git log -1') e relate o commit hash e status ao usuário.`;
+
+    const hasProjectRoot = Boolean(
+      projectPath && (fs.existsSync(path.join(projectPath, 'package.json')) || fs.existsSync(path.join(projectPath, '.git')))
+    );
+    const isNoteOrStudyIntent = /\b(nota|notas|caderno|estudo|estudos|concurso|aprender|vault|obsidian|ocr|manuscrito|anote)\b/i.test(userText);
+
+    // Conditionally include heavy study/notes guidelines only when relevant
+    const notesAndOcrContext = (!hasProjectRoot || isNoteOrStudyIntent)
+      ? `${handwrittenOcrPolicy}\n\n${notebooksPolicy}\n\n${deletedNotesPolicy}`
+      : `${notebooksPolicy}`;
+
+    const enrichedSystemPrompt = `${languageAnchor}\n\n${engineeringDeliveryPolicy}\n\n${notesAndOcrContext}\n\n${techVoiceInterpretationPolicy}\n\n${voiceGuideline}\n\n${executionPresetPolicy}\n\n${planPolicyGuideline}\n\n${systemPrompt}\n\n${memoryContext}${skillsContext ? `\n\n${skillsContext}` : ''}`;
 
     // Process Multimodal Images from .agentic/attachments/
     const processedMessages: ChatMessage[] = messages.map(m => {
@@ -766,6 +986,8 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
     ];
 
     let stepCount = 0;
+    const toolCallSignatures: string[] = [];
+    let lastToolName: string | undefined = undefined;
 
     while (stepCount < maxToolSteps) {
       stepCount++;
@@ -773,10 +995,25 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
       let assistantReasoning = '';
       let toolCalls: any[] = [];
 
+      // Multi-Model Pipeline dynamic step routing
+      const stepResolution = AgentLoop.selectStepModel(stepCount, lastToolName, model, pipeline);
+      const currentStepModel = stepResolution.model;
+
+      if (pipeline && (pipeline.plannerModel || pipeline.codingModel || pipeline.fastToolsModel || pipeline.reasoningModel)) {
+        onEvent({
+          type: 'model_dispatch',
+          data: {
+            step: stepCount,
+            role: stepResolution.role,
+            model: currentStepModel
+          }
+        });
+      }
+
       try {
         const streamResult = await ProviderHub.streamChat(
           provider,
-          model,
+          currentStepModel,
           currentHistory,
           AGENT_TOOLS,
           {
@@ -810,11 +1047,27 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
         currentHistory.push(assistantMsg);
 
         if (!toolCalls || toolCalls.length === 0) {
+          // Se o modelo apenas gerou raciocínio (thinking) mas não gerou texto nem ferramentas:
+          if ((!assistantContent || !assistantContent.trim()) && assistantReasoning && assistantReasoning.trim()) {
+            if (stepCount < maxToolSteps) {
+              currentHistory.push({
+                role: 'user',
+                content: 'Prossiga imediatamente com a execução prática das ferramentas planejadas no seu raciocínio ou apresente a resposta final ao usuário.'
+              });
+              continue;
+            } else {
+              const synthesized = `**[Conclusão do Raciocínio]**:\n${assistantReasoning.trim().slice(-600)}`;
+              assistantContent = synthesized;
+              assistantMsg.content = synthesized;
+              onEvent({ type: 'content', data: synthesized });
+            }
+          }
+
           // Se ferramentas foram executadas durante este turno mas o modelo não enviou mensagem final em texto:
           if (stepCount > 1 && (!assistantContent || !assistantContent.trim())) {
             const toolResults = currentHistory.filter(m => m.role === 'tool');
             if (toolResults.length > 0) {
-              const summaryMsg = "✅ Todas as notas, diretórios e estruturas solicitadas foram criados e organizados com sucesso no seu Vault.";
+              const summaryMsg = AgentLoop.synthesizeExecutionSummary(currentHistory);
               assistantContent = summaryMsg;
               assistantMsg.content = summaryMsg;
               onEvent({ type: 'content', data: summaryMsg });
@@ -829,6 +1082,31 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
         for (const tc of toolCalls) {
           const fnName = tc.function.name;
           const fnArgs = tc.function.arguments;
+          const argStr = typeof fnArgs === 'string' ? fnArgs : JSON.stringify(fnArgs);
+          const sig = `${fnName}:${argStr}`;
+          const repeatCount = toolCallSignatures.filter(s => s === sig).length;
+
+          if (repeatCount >= 2) {
+            const loopWarning = `⚠️ [Ciclo Repetitivo Interrompido]: O comando "${fnName}" foi chamado repetidamente sem alteração de estado. A execução foi finalizada com segurança para sintetizar a resposta.`;
+            onEvent({
+              type: 'tool_start',
+              data: { toolCallId: tc.id, name: fnName, arguments: fnArgs }
+            });
+            onEvent({
+              type: 'tool_end',
+              data: { toolCallId: tc.id, name: fnName, result: { status: 'cancelled_loop_detected', message: loopWarning } }
+            });
+            currentHistory.push({
+              role: 'tool',
+              name: fnName,
+              tool_call_id: tc.id,
+              content: JSON.stringify({ status: 'cancelled_loop_detected', message: loopWarning })
+            });
+            break;
+          }
+
+          toolCallSignatures.push(sig);
+          if (toolCallSignatures.length > 8) toolCallSignatures.shift();
 
           onEvent({
             type: 'tool_start',
@@ -838,7 +1116,9 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
           const result = await this.executeTool(projectPath, fnName, fnArgs, model, {
             sessionId: sessionContext?.sessionId,
             sessionTitle: sessionContext?.sessionTitle,
-            messageId: tc.id
+            messageId: tc.id,
+            directoryAccessPolicy: sessionContext?.directoryAccessPolicy,
+            onEvent
           });
 
           if (result && result.changeId) {
@@ -861,6 +1141,7 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
             data: { toolCallId: tc.id, name: fnName, result }
           });
 
+          lastToolName = fnName;
           currentHistory.push({
             role: 'tool',
             name: fnName,
@@ -874,6 +1155,68 @@ REGRAS INEGOCIÁVEIS DE NÃO-PRESUMÇÃO DE ESTUDOS E PLANOS:
       }
     }
 
+    // Se o loop terminou por atingir o limite de passos ou a última mensagem é de ferramenta:
+    const lastMsg = currentHistory[currentHistory.length - 1];
+    if (lastMsg && (lastMsg.role === 'tool' || (lastMsg.role === 'assistant' && (!lastMsg.content || !String(lastMsg.content).trim())))) {
+      const summaryMsg = AgentLoop.synthesizeExecutionSummary(currentHistory);
+      if (lastMsg.role === 'assistant') {
+        lastMsg.content = summaryMsg;
+      } else {
+        currentHistory.push({
+          role: 'assistant',
+          content: summaryMsg
+        });
+      }
+      onEvent({ type: 'content', data: summaryMsg });
+      onEvent({ type: 'turn_complete', data: { totalSteps: stepCount } });
+    }
+
     return { fullMessages: currentHistory };
+  }
+
+  public static synthesizeExecutionSummary(history: ChatMessage[]): string {
+    const toolResults = history.filter(m => m.role === 'tool');
+    if (toolResults.length === 0) return '✅ Ações concluídas com sucesso.';
+
+    const terminalCommands: string[] = [];
+    const modifiedFiles: string[] = [];
+    const createdNotes: string[] = [];
+    const memoryWrites: string[] = [];
+
+    for (const m of toolResults) {
+      try {
+        const data = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
+        if (m.name === 'run_command' && data.command) {
+          const shortCmd = data.command.length > 70 ? data.command.slice(0, 70) + '...' : data.command;
+          const status = data.status === 'success' ? 'sucesso' : 'código ' + data.exitCode;
+          terminalCommands.push('`' + shortCmd + '` (' + status + ')');
+        } else if ((m.name === 'write_file' || m.name === 'edit_file') && data.path) {
+          modifiedFiles.push('`' + data.path + '`');
+        } else if ((m.name === 'note_save' || m.name === 'tellus_note_save') && data.note && data.note.title) {
+          createdNotes.push('[[' + data.note.title + ']]');
+        } else if (m.name === 'memory_write_page' && data.page && data.page.title) {
+          memoryWrites.push('**' + data.page.title + '**');
+        }
+      } catch {}
+    }
+
+    const sections: string[] = ['### ⚡ Resumo das Operações Realizadas'];
+
+    if (terminalCommands.length > 0) {
+      sections.push('**Comandos executados no terminal:**\n' + terminalCommands.slice(0, 10).map(c => '- ' + c).join('\n'));
+    }
+    if (modifiedFiles.length > 0) {
+      const uniqueFiles = Array.from(new Set(modifiedFiles));
+      sections.push('**Arquivos alterados/criados:**\n' + uniqueFiles.slice(0, 10).map(f => '- ' + f).join('\n'));
+    }
+    if (createdNotes.length > 0) {
+      sections.push('**Notas registradas no Vault:**\n' + createdNotes.slice(0, 10).map(n => '- ' + n).join('\n'));
+    }
+    if (memoryWrites.length > 0) {
+      sections.push('**Memória & Contexto:**\n' + memoryWrites.slice(0, 5).map(mw => '- ' + mw).join('\n'));
+    }
+
+    sections.push('*Total de ' + toolResults.length + ' passos executados.*');
+    return sections.join('\n\n');
   }
 }

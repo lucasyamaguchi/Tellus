@@ -9,6 +9,10 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle, 
+  ListChecks,
+  Loader2,
+  MinusCircle,
+  Circle,
   Terminal, 
   FileCode, 
   Database, 
@@ -40,11 +44,12 @@ import {
   Radio,
   Plus,
   FolderGit2,
+  Globe,
   History
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, ToolCallItem, Routine, Attachment, QuotedMessage, ExecutionSecurityPreset, ProjectOverview } from '../types';
+import { Message, ToolCallItem, Routine, Attachment, QuotedMessage, ExecutionSecurityPreset, DirectoryAccessPolicy, ProjectOverview } from '../types';
 import { api } from '../api';
 import { voiceService, generateThinkingAcknowledgement } from '../services/voiceService';
 import { voiceToneAnalyzer } from '../services/voiceToneAnalyzer';
@@ -54,6 +59,8 @@ import { ExecutionModeDropdown } from './ExecutionModeDropdown';
 
 interface ChatAreaProps {
   currentProject?: ProjectOverview | null;
+  isStandaloneChat?: boolean;
+  isSkillArchitectSession?: boolean;
   messages: Message[];
   isStreaming: boolean;
   activeModel: string;
@@ -85,15 +92,19 @@ interface ChatAreaProps {
   onOpenLiveVoiceOrb?: () => void;
   onNewChat?: () => void;
   executionMode?: ExecutionSecurityPreset;
+  directoryAccessPolicy?: DirectoryAccessPolicy | 'inherit';
   effectiveSecurityPreset?: 'request_review' | 'default' | 'turbo';
   globalSecurityPreset?: 'request_review' | 'default' | 'turbo';
   onChangeExecutionMode?: (mode: ExecutionSecurityPreset) => void;
+  onChangeDirectoryAccessPolicy?: (policy: DirectoryAccessPolicy | 'inherit') => void;
   onOpenProjectSettings?: () => void;
   onOpenFileHistory?: (filePath?: string) => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
   currentProject,
+  isStandaloneChat,
+  isSkillArchitectSession,
   messages,
   isStreaming,
   activeModel,
@@ -125,9 +136,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenLiveVoiceOrb,
   onNewChat,
   executionMode = 'inherit',
+  directoryAccessPolicy = 'inherit',
   effectiveSecurityPreset = 'default',
   globalSecurityPreset = 'default',
   onChangeExecutionMode,
+  onChangeDirectoryAccessPolicy,
   onOpenProjectSettings,
   onOpenFileHistory
 }) => {
@@ -139,6 +152,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [expandedToolGroups, setExpandedToolGroups] = useState<Record<string, boolean>>({});
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [collapsedSteps, setCollapsedSteps] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Floating Snippet Selection State for quoting or copying partial message content
@@ -713,6 +728,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     setExpandedToolGroups(prev => ({ ...prev, [msgId]: !prev[msgId] }));
   };
 
+  const toggleCategory = (msgId: string, category: string) => {
+    const key = `${msgId}:${category}`;
+    setExpandedCategories(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const getToolIcon = (name: string) => {
     switch (name) {
       case 'read_file':
@@ -815,7 +835,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               <span className="font-semibold text-[11px] tracking-wide">LIVE VOICE</span>
             </div>
 
-            {currentProject && (
+            {isSkillArchitectSession ? (
+              <div
+                className="hidden lg:flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-purple-950/70 to-cyan-950/70 border border-purple-500/40 text-[10px] text-purple-200 shadow-xs font-semibold"
+                title="Sessão dedicada ao desenvolvimento e simulação de Skills do Tellus"
+              >
+                <Sparkles className="w-3 h-3 text-cyan-400 animate-pulse" />
+                <span className="truncate max-w-[140px]">Arquiteto de Skills</span>
+              </div>
+            ) : isStandaloneChat || !currentProject ? (
+              <div
+                className="hidden lg:flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-cyan-950/40 border border-cyan-500/30 text-[10px] text-cyan-300 shadow-xs"
+                title="Conversa Livre (Sem Projeto)"
+              >
+                <Globe className="w-3 h-3 text-cyan-400" />
+                <span className="font-semibold truncate max-w-[140px]">Conversa Livre</span>
+              </div>
+            ) : currentProject ? (
               <div
                 className="hidden lg:flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-black/40 border border-white/10 text-[10px] font-mono text-slate-300 shadow-xs"
                 title={`Diretório de Trabalho Ativo: ${currentProject.path}`}
@@ -823,7 +859,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <FolderGit2 className="w-3 h-3 text-red-400" />
                 <span className="font-semibold text-white truncate max-w-[140px]">{currentProject.name}</span>
               </div>
-            )}
+            ) : null}
 
             {/* 3 Modes Switcher */}
             <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10 text-xs">
@@ -938,7 +974,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 currentMode={executionMode}
                 effectivePreset={effectiveSecurityPreset}
                 globalPreset={globalSecurityPreset}
+                directoryPolicy={directoryAccessPolicy}
                 onSelectMode={onChangeExecutionMode}
+                onSelectDirectoryPolicy={onChangeDirectoryAccessPolicy}
                 onOpenDetailedSettings={onOpenProjectSettings}
                 disabled={isStreaming}
               />
@@ -959,7 +997,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       ) : (
         <div className="border-b border-card-border/40 px-4 py-1 flex items-center justify-between text-xs text-slate-400 bg-sidebar/20 shrink-0 gap-2">
           <div className="flex items-center space-x-2 text-[11px] text-slate-400 min-w-0">
-            {currentProject && (
+            {isSkillArchitectSession ? (
+              <div
+                className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-purple-950/70 to-cyan-950/70 border border-purple-500/40 text-[10px] text-purple-200 font-semibold shrink-0 shadow-xs"
+                title="Sessão dedicada ao desenvolvimento e simulação de Skills do Tellus"
+              >
+                <Sparkles className="w-3 h-3 text-cyan-400 animate-pulse shrink-0" />
+                <span>Arquiteto de Skills</span>
+              </div>
+            ) : isStandaloneChat || !currentProject ? (
+              <div
+                className="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-[10px] text-cyan-300 font-medium shrink-0"
+                title="Conversa Livre — Ideal para dúvidas gerais, estudos e notas"
+              >
+                <Globe className="w-3 h-3 text-cyan-400 shrink-0" />
+                <span>Conversa Livre</span>
+              </div>
+            ) : currentProject ? (
               <div
                 className="flex items-center space-x-1.5 text-[11px] font-mono text-slate-400 shrink-0"
                 title={`Diretório Ativo de Trabalho:\n${currentProject.path}`}
@@ -969,7 +1023,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   {currentProject.name}
                 </span>
               </div>
-            )}
+            ) : null}
             {activeSessionTitle && (
               <>
                 <span className="text-slate-600">/</span>
@@ -985,7 +1039,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 currentMode={executionMode}
                 effectivePreset={effectiveSecurityPreset}
                 globalPreset={globalSecurityPreset}
+                directoryPolicy={directoryAccessPolicy}
                 onSelectMode={onChangeExecutionMode}
+                onSelectDirectoryPolicy={onChangeDirectoryAccessPolicy}
                 onOpenDetailedSettings={onOpenProjectSettings}
                 disabled={isStreaming}
               />
@@ -1173,10 +1229,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               <div
                 data-message-id={msg.id}
                 data-message-role={msg.role}
-                className={`message-bubble max-w-[85%] rounded-2xl p-4 transition-all chat-selectable select-text cursor-text ${
+                className={`message-bubble max-w-[85%] rounded-xl p-4 transition-all chat-selectable select-text cursor-text ${
                   msg.role === 'user'
-                    ? 'bg-gradient-to-tr from-accent/90 to-accent text-white shadow-lg shadow-accent/15 selection:bg-white/30 selection:text-white'
-                    : 'bg-card border border-card-border text-slate-100 shadow-md w-full selection:bg-accent/40 selection:text-white'
+                    ? 'bg-blue-600 text-white shadow-xs selection:bg-white/30 selection:text-white'
+                    : 'bg-[#11141c] border border-white/8 text-slate-100 shadow-xs w-full selection:bg-blue-500/40 selection:text-white'
                 }`}
               >
                 {/* Quoted Message Card */}
@@ -1235,205 +1291,384 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </div>
                 )}
 
-                {/* Reasoning Accordion (Thinking Block) */}
-                {msg.reasoning && (
-                  <div className="mb-3 rounded-xl bg-background/70 border border-accent/20 overflow-hidden">
-                    <button
-                      onClick={() => toggleReasoning(msg.id)}
-                      className="w-full px-3 py-2 flex items-center justify-between text-xs text-accent-light font-medium bg-accent/5 hover:bg-accent/10 transition-colors"
-                    >
-                      <div className="flex items-center space-x-2">
-                        <Brain className="w-3.5 h-3.5 animate-pulse-subtle text-accent" />
-                        <span>Processo de Raciocínio (Deep Thought)</span>
-                      </div>
-                      {expandedReasoning[msg.id] ? (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    {expandedReasoning[msg.id] && (
-                      <div className="p-3 text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed border-t border-accent/15 max-h-60 overflow-y-auto">
-                        {msg.reasoning}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Tool Execution Accordion Group (Processing / Actions) */}
-                {msg.toolCalls && msg.toolCalls.length > 0 && (() => {
-                  const totalCount = msg.toolCalls.length;
-                  const runningCount = msg.toolCalls.filter(tc => tc.status === 'running').length;
-                  const errorCount = msg.toolCalls.filter(tc => tc.status === 'error').length;
-                  const completedCount = msg.toolCalls.filter(tc => tc.status === 'completed').length;
-                  const isRunning = runningCount > 0;
-                  const isGroupExpanded = expandedToolGroups[msg.id] ?? isRunning;
+                {/* Antigravity-Style Live Task Steps / Checklist Card */}
+                {msg.taskSteps && msg.taskSteps.length > 0 && (() => {
+                  const steps = msg.taskSteps;
+                  const total = steps.length;
+                  const doneCount = steps.filter(s => s.status === 'done').length;
+                  const failedCount = steps.filter(s => s.status === 'failed').length;
+                  const inProgressCount = steps.filter(s => s.status === 'in_progress').length;
+                  const isCollapsed = collapsedSteps[msg.id];
+                  const percent = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
                   return (
-                    <div className="mb-3 rounded-xl border border-card-border/80 bg-panel/60 overflow-hidden shadow-xs backdrop-blur-xs">
-                      <button
-                        type="button"
-                        onClick={() => toggleToolGroup(msg.id)}
-                        className="w-full px-3 py-2 flex items-center justify-between text-xs hover:bg-card/70 transition-colors text-left group"
+                    <div className="mb-3 rounded-xl bg-[#0e1118] border border-white/10 shadow-xs overflow-hidden transition-all">
+                      {/* Header */}
+                      <div 
+                        onClick={() => setCollapsedSteps(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                        className="px-3.5 py-2.5 bg-[#141822]/90 hover:bg-[#141822] flex items-center justify-between cursor-pointer border-b border-white/8 select-none"
                       >
-                        <div className="flex items-center space-x-2.5 min-w-0">
-                          <div className="flex items-center justify-center w-5 h-5 rounded-md bg-accent/10 border border-accent/20 text-accent shrink-0">
-                            {isRunning ? (
-                              <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                            ) : errorCount > 0 ? (
-                              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-                            ) : (
-                              <Zap className="w-3.5 h-3.5 text-accent-light" />
-                            )}
-                          </div>
-                          <div className="flex items-center space-x-2 truncate">
-                            <span className="font-semibold text-slate-200">
-                              {isRunning ? 'Processando Ações do Sistema...' : 'Ações do Sistema'}
-                            </span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/40 text-slate-400 border border-white/5 font-mono">
-                              {completedCount}/{totalCount}
-                            </span>
-                            <div className="hidden sm:flex items-center space-x-1">
-                              {Array.from(new Set(msg.toolCalls.map(tc => tc.name.replace(/^(frank_|tellus_)/, '')))).slice(0, 3).map(name => (
-                                <span key={name} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-slate-300 border border-white/5">
-                                  {name}
-                                </span>
-                              ))}
-                              {new Set(msg.toolCalls.map(tc => tc.name)).size > 3 && (
-                                <span className="text-[9px] text-slate-500">...</span>
-                              )}
-                            </div>
-                          </div>
+                        <div className="flex items-center space-x-2">
+                          <ListChecks className="w-4 h-4 text-blue-400 shrink-0" />
+                          <span className="text-xs font-semibold text-slate-200">
+                            Etapas do Plano
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+                            {doneCount}/{total} concluídas
+                          </span>
                         </div>
 
-                        <div className="flex items-center space-x-2 shrink-0">
-                          {isRunning && (
-                            <span className="text-[10px] text-amber-400 flex items-center">
-                              Em andamento
+                        <div className="flex items-center space-x-2 text-xs">
+                          {failedCount > 0 ? (
+                            <span className="text-[10px] font-medium text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 flex items-center space-x-1">
+                              <AlertCircle className="w-3 h-3" />
+                              <span>{failedCount} com falha / ajuste</span>
                             </span>
-                          )}
-                          {isGroupExpanded ? (
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors" />
-                          ) : (
-                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-200 transition-colors" />
-                          )}
-                        </div>
-                      </button>
+                          ) : inProgressCount > 0 ? (
+                            <span className="text-[10px] font-medium text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 flex items-center space-x-1">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Em execução</span>
+                            </span>
+                          ) : doneCount === total ? (
+                            <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center space-x-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Concluído</span>
+                            </span>
+                          ) : null}
 
-                      {isGroupExpanded && (
-                        <div className="p-2 space-y-2 border-t border-card-border/60 bg-background/40">
-                          {msg.toolCalls.map((tc) => {
-                            const isItemExpanded = expandedTools[tc.id];
-                            const cleanName = tc.name.replace(/^(frank_|tellus_)/, '');
+                          <button type="button" className="text-slate-400 hover:text-slate-200 p-0.5">
+                            {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="w-full h-0.5 bg-slate-800/80 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-300 ${failedCount > 0 ? 'bg-amber-400' : 'bg-blue-500'}`} 
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+
+                      {/* Steps List */}
+                      {!isCollapsed && (
+                        <div className="p-3 space-y-2">
+                          {steps.map((st, sIdx) => {
+                            const isDone = st.status === 'done';
+                            const isRunning = st.status === 'in_progress';
+                            const isFailed = st.status === 'failed';
+                            const isSkipped = st.status === 'skipped';
+
                             return (
-                              <div
-                                key={tc.id}
-                                className="rounded-lg border border-card-border/60 bg-panel/80 overflow-hidden text-xs"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => toggleTool(tc.id)}
-                                  className="w-full px-2.5 py-1.5 flex items-center justify-between hover:bg-card/60 transition-colors text-left"
-                                >
-                                  <div className="flex items-center space-x-2 truncate">
-                                    {getToolIcon(tc.name)}
-                                    <span className="font-mono font-medium text-slate-300 truncate">
-                                      {cleanName}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center space-x-2 shrink-0">
-                                    {['write_file', 'edit_file'].includes(cleanName) && onOpenFileHistory && (
-                                      <button
-                                        type="button"
-                                        title="Ver no Histórico / Diff"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          try {
-                                            const parsed = JSON.parse(tc.arguments || '{}');
-                                            onOpenFileHistory(parsed.path || parsed.file_path);
-                                          } catch {
-                                            onOpenFileHistory();
-                                          }
-                                        }}
-                                        className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent-light text-[10px] font-sans font-medium transition-colors"
-                                      >
-                                        <History className="w-2.5 h-2.5" />
-                                        <span>Diff</span>
-                                      </button>
-                                    )}
-                                    {tc.status === 'running' && (
-                                      <span className="flex items-center text-[10px] text-amber-400">
-                                        <Clock className="w-2.5 h-2.5 mr-1 animate-spin" /> Executando
-                                      </span>
-                                    )}
-                                    {tc.status === 'completed' && (
-                                      <span className="flex items-center text-[10px] text-emerald-400">
-                                        <CheckCircle2 className="w-2.5 h-2.5 mr-1" /> Concluído
-                                      </span>
-                                    )}
-                                    {tc.status === 'error' && (
-                                      <span className="flex items-center text-[10px] text-rose-400">
-                                        <AlertCircle className="w-2.5 h-2.5 mr-1" /> Erro
-                                      </span>
-                                    )}
-                                    {isItemExpanded ? (
-                                      <ChevronDown className="w-3 h-3 text-slate-500" />
+                              <div key={st.id || sIdx} className="flex flex-col space-y-1">
+                                <div className="flex items-start space-x-2.5">
+                                  <div className="pt-0.5 shrink-0">
+                                    {isDone ? (
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                    ) : isRunning ? (
+                                      <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                                    ) : isFailed ? (
+                                      <AlertCircle className="w-4 h-4 text-rose-400" />
+                                    ) : isSkipped ? (
+                                      <MinusCircle className="w-4 h-4 text-slate-500" />
                                     ) : (
-                                      <ChevronRight className="w-3 h-3 text-slate-500" />
+                                      <Circle className="w-4 h-4 text-slate-600" />
                                     )}
                                   </div>
-                                </button>
-
-                                {isItemExpanded && (
-                                  <div className="p-2.5 border-t border-card-border/50 text-[11px] font-mono space-y-2 bg-background/60">
-                                    {['write_file', 'edit_file'].includes(cleanName) && onOpenFileHistory && (
-                                      <div className="flex items-center justify-between pb-1.5 border-b border-card-border/40">
-                                        <span className="text-[10px] text-accent-light font-sans font-medium flex items-center">
-                                          <History className="w-3 h-3 mr-1" /> Alteração registrada no histórico
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            try {
-                                              const parsed = JSON.parse(tc.arguments || '{}');
-                                              onOpenFileHistory(parsed.path || parsed.file_path);
-                                            } catch {
-                                              onOpenFileHistory();
-                                            }
-                                          }}
-                                          className="flex items-center space-x-1 px-2 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent-light text-[10px] font-sans font-medium transition-colors"
-                                        >
-                                          <span>Abrir Histórico Completo &rarr;</span>
-                                        </button>
-                                      </div>
-                                    )}
-                                    <div>
-                                      <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
-                                        Argumentos:
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center space-x-2">
+                                      <span className={`text-xs ${
+                                        isDone 
+                                          ? 'text-slate-300 font-medium' 
+                                          : isRunning 
+                                          ? 'text-white font-semibold' 
+                                          : isFailed 
+                                          ? 'text-rose-200 font-semibold' 
+                                          : 'text-slate-400'
+                                      }`}>
+                                        {st.title}
                                       </span>
-                                      <pre className="text-slate-300 p-2 rounded bg-panel/90 overflow-x-auto text-[10px]">
-                                        {tc.arguments}
-                                      </pre>
                                     </div>
-                                    {tc.result && (
-                                      <div>
-                                        <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
-                                          Resultado:
-                                        </span>
-                                        <pre className="text-emerald-300 p-2 rounded bg-panel/90 overflow-x-auto max-h-48 overflow-y-auto text-[10px]">
-                                          {typeof tc.result === 'string'
-                                            ? tc.result
-                                            : JSON.stringify(tc.result, null, 2)}
-                                        </pre>
+                                    {st.reason && (
+                                      <div className={`mt-1 p-2 rounded text-[11px] font-mono leading-relaxed break-words ${
+                                        isFailed 
+                                          ? 'bg-rose-500/10 border border-rose-500/25 text-rose-300' 
+                                          : 'bg-slate-800/60 border border-slate-700/60 text-slate-300'
+                                      }`}>
+                                        {st.reason}
                                       </div>
                                     )}
                                   </div>
-                                )}
+                                </div>
                               </div>
                             );
                           })}
                         </div>
                       )}
+                    </div>
+                  );
+                })()}
+
+                {/* Modern Sleek Minimalist Activity Bar: Thinking, Reading, Coding, Executing */}
+                {(msg.reasoning || (msg.toolCalls && msg.toolCalls.length > 0)) && (() => {
+                  const tools = msg.toolCalls || [];
+                  const getToolCategory = (name: string): 'reading' | 'coding' | 'executing' | 'notes' | 'action' => {
+                    const clean = name.replace(/^(frank_|tellus_)/, '').toLowerCase();
+                    if (clean.includes('read') || clean.includes('list') || clean.includes('grep') || clean.includes('search') || clean.includes('query')) {
+                      return 'reading';
+                    }
+                    if (clean.includes('write') || clean.includes('edit') || clean.includes('create') || clean.includes('artifact') || clean.includes('patch')) {
+                      return 'coding';
+                    }
+                    if (clean.includes('command') || clean.includes('terminal') || clean.includes('exec') || clean.includes('run') || clean.includes('git')) {
+                      return 'executing';
+                    }
+                    if (clean.includes('note')) {
+                      return 'notes';
+                    }
+                    return 'action';
+                  };
+
+                  const categories: Array<{ id: 'reading' | 'coding' | 'executing' | 'notes' | 'action'; label: string }> = [
+                    { id: 'reading', label: 'Reading' },
+                    { id: 'coding', label: 'Coding' },
+                    { id: 'executing', label: 'Executing' },
+                    { id: 'notes', label: 'Notes' },
+                    { id: 'action', label: 'Actions' }
+                  ];
+
+                  const activeCategories = categories
+                    .map(cat => ({
+                      ...cat,
+                      tools: tools.filter(t => getToolCategory(t.name) === cat.id)
+                    }))
+                    .filter(cat => cat.tools.length > 0);
+
+                  return (
+                    <div className="mb-2.5 space-y-2">
+                      {/* Minimalist Activity Pills Row (Thinking >, Reading >, Coding >, Executing >) */}
+                      <div className="flex flex-wrap items-center gap-1.5 select-none">
+                        {/* Thinking Pill */}
+                        {msg.reasoning && (
+                          <button
+                            type="button"
+                            onClick={() => toggleReasoning(msg.id)}
+                            className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-sans transition-all cursor-pointer select-none border ${
+                              expandedReasoning[msg.id]
+                                ? 'bg-[#181c26] text-white border-white/20 shadow-xs'
+                                : 'bg-[#0f1118] hover:bg-[#161922] text-slate-300 hover:text-white border-white/10'
+                            }`}
+                          >
+                            <span>Thinking</span>
+                            <ChevronRight
+                              className={`w-3 h-3 text-slate-500 transition-transform ${
+                                expandedReasoning[msg.id] ? 'rotate-90 text-slate-300' : ''
+                              }`}
+                            />
+                          </button>
+                        )}
+
+                        {/* Categorized Tool Pills */}
+                        {activeCategories.map(cat => {
+                          const catKey = `${msg.id}:${cat.id}`;
+                          const isCatOpen = Boolean(expandedCategories[catKey]);
+                          const isRunning = cat.tools.some(t => t.status === 'running');
+                          const hasError = cat.tools.some(t => t.status === 'error');
+
+                          return (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              onClick={() => toggleCategory(msg.id, cat.id)}
+                              className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-sans transition-all cursor-pointer select-none border ${
+                                isCatOpen
+                                  ? 'bg-[#181c26] text-white border-white/20 shadow-xs'
+                                  : 'bg-[#0f1118] hover:bg-[#161922] text-slate-300 hover:text-white border-white/10'
+                              }`}
+                            >
+                              {isRunning ? (
+                                <Clock className="w-3 h-3 text-amber-400 animate-spin" />
+                              ) : hasError ? (
+                                <AlertCircle className="w-3 h-3 text-rose-400" />
+                              ) : null}
+                              <span>{cat.label}</span>
+                              {cat.tools.length > 1 && (
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  ({cat.tools.length})
+                                </span>
+                              )}
+                              <ChevronRight
+                                className={`w-3 h-3 text-slate-500 transition-transform ${
+                                  isCatOpen ? 'rotate-90 text-slate-300' : ''
+                                }`}
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Expanded Thinking Drawer */}
+                      {msg.reasoning && expandedReasoning[msg.id] && (
+                        <div className="p-3.5 rounded-xl bg-[#080a10] border border-white/10 text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto select-text animate-in fade-in slide-in-from-top-1 shadow-inner">
+                          <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10 text-[11px] font-sans text-slate-400">
+                            <span className="flex items-center space-x-1.5">
+                              <Brain className="w-3.5 h-3.5 text-accent-light" />
+                              <strong className="text-slate-200">Raciocínio Interno (Thinking)</strong>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleReasoning(msg.id)}
+                              className="text-slate-500 hover:text-slate-300 cursor-pointer"
+                            >
+                              Recolher ✕
+                            </button>
+                          </div>
+                          {msg.reasoning}
+                        </div>
+                      )}
+
+                      {/* Expanded Category Drawers */}
+                      {activeCategories.map(cat => {
+                        const catKey = `${msg.id}:${cat.id}`;
+                        if (!expandedCategories[catKey]) return null;
+
+                        return (
+                          <div
+                            key={`expanded-${cat.id}`}
+                            className="p-3 rounded-xl bg-[#080a10] border border-white/10 space-y-2.5 animate-in fade-in slide-in-from-top-1"
+                          >
+                            <div className="flex items-center justify-between pb-2 border-b border-white/10 text-xs">
+                              <span className="font-semibold text-slate-200 flex items-center space-x-1.5 font-sans">
+                                <span>{cat.label}</span>
+                                <span className="text-[10px] font-mono text-slate-500">
+                                  ({cat.tools.length} {cat.tools.length === 1 ? 'ação' : 'ações'})
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleCategory(msg.id, cat.id)}
+                                className="text-[11px] text-slate-500 hover:text-slate-300 cursor-pointer"
+                              >
+                                Recolher ✕
+                              </button>
+                            </div>
+
+                            <div className="space-y-2">
+                              {cat.tools.map(tc => {
+                                const isItemExpanded = expandedTools[tc.id];
+                                const cleanName = tc.name.replace(/^(frank_|tellus_)/, '');
+
+                                return (
+                                  <div
+                                    key={tc.id}
+                                    className="rounded-lg border border-card-border/70 bg-[#12151f] overflow-hidden text-xs"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTool(tc.id)}
+                                      className="w-full px-3 py-2 flex items-center justify-between hover:bg-card/60 transition-colors text-left cursor-pointer"
+                                    >
+                                      <div className="flex items-center space-x-2.5 truncate flex-1 min-w-0">
+                                        {getToolIcon(tc.name)}
+                                        <span className="font-mono font-medium text-slate-200 truncate">
+                                          {cleanName}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center space-x-2 shrink-0 ml-2">
+                                        {['write_file', 'edit_file'].includes(cleanName) && onOpenFileHistory && (
+                                          <button
+                                            type="button"
+                                            title="Ver no Histórico / Diff"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                const parsed = JSON.parse(tc.arguments || '{}');
+                                                onOpenFileHistory(parsed.path || parsed.file_path);
+                                              } catch {
+                                                onOpenFileHistory();
+                                              }
+                                            }}
+                                            className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent-light text-[10px] font-sans font-medium transition-colors cursor-pointer"
+                                          >
+                                            <History className="w-2.5 h-2.5" />
+                                            <span>Diff</span>
+                                          </button>
+                                        )}
+                                        {tc.status === 'running' && (
+                                          <span className="flex items-center text-[10px] text-amber-400">
+                                            <Clock className="w-2.5 h-2.5 mr-1 animate-spin" /> Executando
+                                          </span>
+                                        )}
+                                        {tc.status === 'completed' && (
+                                          <span className="flex items-center text-[10px] text-emerald-400">
+                                            <CheckCircle2 className="w-2.5 h-2.5 mr-1" /> Concluído
+                                          </span>
+                                        )}
+                                        {tc.status === 'error' && (
+                                          <span className="flex items-center text-[10px] text-rose-400">
+                                            <AlertCircle className="w-2.5 h-2.5 mr-1" /> Erro
+                                          </span>
+                                        )}
+                                        <ChevronRight
+                                          className={`w-3 h-3 text-slate-500 transition-transform ${
+                                            isItemExpanded ? 'rotate-90 text-slate-300' : ''
+                                          }`}
+                                        />
+                                      </div>
+                                    </button>
+
+                                    {isItemExpanded && (
+                                      <div className="p-3 border-t border-card-border/50 text-[11px] font-mono space-y-2.5 bg-[#0a0c12]">
+                                        {['write_file', 'edit_file'].includes(cleanName) && onOpenFileHistory && (
+                                          <div className="flex items-center justify-between pb-1.5 border-b border-card-border/40">
+                                            <span className="text-[10px] text-accent-light font-sans font-medium flex items-center">
+                                              <History className="w-3 h-3 mr-1" /> Alteração registrada no histórico
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                try {
+                                                  const parsed = JSON.parse(tc.arguments || '{}');
+                                                  onOpenFileHistory(parsed.path || parsed.file_path);
+                                                } catch {
+                                                  onOpenFileHistory();
+                                                }
+                                              }}
+                                              className="flex items-center space-x-1 px-2 py-0.5 rounded bg-accent/20 hover:bg-accent/30 text-accent-light text-[10px] font-sans font-medium transition-colors"
+                                            >
+                                              <span>Abrir Histórico Completo &rarr;</span>
+                                            </button>
+                                          </div>
+                                        )}
+                                        <div>
+                                          <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
+                                            Argumentos:
+                                          </span>
+                                          <pre className="text-slate-300 p-2 rounded bg-black/60 border border-white/5 overflow-x-auto text-[10px] leading-relaxed">
+                                            {tc.arguments}
+                                          </pre>
+                                        </div>
+                                        {tc.result && (
+                                          <div>
+                                            <span className="text-slate-500 uppercase text-[9px] font-bold block mb-1">
+                                              Resultado:
+                                            </span>
+                                            <pre className="text-emerald-300 p-2 rounded bg-black/60 border border-white/5 overflow-x-auto max-h-56 overflow-y-auto text-[10px] leading-relaxed">
+                                              {typeof tc.result === 'string'
+                                                ? tc.result
+                                                : JSON.stringify(tc.result, null, 2)}
+                                            </pre>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -1511,7 +1746,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             );
                           },
                           a({ href, children, ...props }: any) {
-                            if (href && (href.startsWith('note://') || href.startsWith('vault://') || href.endsWith('.md'))) {
+                            const isNoteLink = href && (
+                              href.startsWith('note://') || 
+                              href.startsWith('vault://') || 
+                              href.endsWith('.md') || 
+                              href.endsWith('.markdown') ||
+                              href.includes('.agentic/artifacts') || 
+                              href.includes('artifacts/') ||
+                              href.includes('notes/')
+                            );
+                            if (isNoteLink) {
                               const target = href.replace(/^(note|vault):\/\//, '');
                               return (
                                 <button
@@ -1521,9 +1765,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                     e.stopPropagation();
                                     if (onOpenNoteOrFile) onOpenNoteOrFile(target);
                                   }}
-                                  className="inline-flex items-center space-x-1 font-semibold text-accent-light hover:text-white underline cursor-pointer"
+                                  className="inline-flex items-center space-x-1.5 font-semibold text-brand-cyan hover:text-white underline cursor-pointer bg-cyan-950/40 hover:bg-cyan-900/60 px-2 py-0.5 rounded-md border border-cyan-500/40 hover:border-cyan-400 transition-all shadow-xs mx-0.5 group"
+                                  title={`Visualizar nota/artefato "${target}" em visualização dividida`}
                                 >
-                                  <FileText className="w-3 h-3" />
+                                  <FileText className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
                                   <span>{children}</span>
                                 </button>
                               );

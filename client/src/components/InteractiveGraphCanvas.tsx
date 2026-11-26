@@ -15,7 +15,9 @@ import {
   Sliders, 
   Info,
   CheckCircle2,
-  X
+  X,
+  Flame,
+  ExternalLink
 } from 'lucide-react';
 import { GraphData, GraphNode, GraphLink } from '../types';
 import { api } from '../api';
@@ -44,6 +46,7 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [chargeStrength, setChargeStrength] = useState<number>(450);
+  const [graphStyleMode, setGraphStyleMode] = useState<'solid' | 'neon'>('solid');
 
   // Filters state
   const [showSubNodes1, setShowSubNodes1] = useState<boolean>(true);  // folders / categories / modules
@@ -59,6 +62,51 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
   } | null>(null);
 
   const [selectedNodeDetails, setSelectedNodeDetails] = useState<GraphNode | null>(null);
+  const [expandedTermId, setExpandedTermId] = useState<string | null>(null);
+  const [zoomTier, setZoomTier] = useState<1 | 2 | 3 | 4>(2);
+  const [pendingZoomTarget, setPendingZoomTarget] = useState<{ zoom: number; nodeId?: string } | null>(null);
+
+  // Extract Top Hot Terms from GraphData (Keywords with most connections)
+  const hotKeywords = React.useMemo(() => {
+    if (!graphData || activeTab !== 'notes') return [];
+    return graphData.nodes
+      .filter(n => n.type === 'keyword')
+      .map(n => ({
+        id: n.id,
+        label: n.label.replace(/^[🔥#\s]+/, ''),
+        count: n.hotness || 1,
+        noteIds: n.linkedNoteIds || []
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [graphData, activeTab]);
+
+  // Expanded Term Details
+  const expandedTerm = React.useMemo(() => {
+    if (!expandedTermId || !graphData) return null;
+    const node = graphData.nodes.find(n => n.id === expandedTermId);
+    if (!node) return null;
+    return {
+      id: node.id,
+      label: node.label.replace(/^[🔥#\s]+/, ''),
+      count: node.hotness || 1,
+      noteIds: node.linkedNoteIds || []
+    };
+  }, [expandedTermId, graphData]);
+
+  // Notes linked to the active expanded term
+  const linkedNotesForExpandedTerm = React.useMemo(() => {
+    if (!expandedTerm || !graphData) return [];
+    const noteIdSet = new Set(expandedTerm.noteIds);
+    return graphData.nodes.filter(n => 
+      n.type === 'note' && (
+        noteIdSet.has(n.id) || 
+        graphData.links.some(l => 
+          (l.source === n.id && l.target === expandedTerm.id) || 
+          (l.target === n.id && l.source === expandedTerm.id)
+        )
+      )
+    );
+  }, [expandedTerm, graphData]);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -68,6 +116,8 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
     setIsLoading(true);
     setGraphData(null);
     setHoveredNode(null);
+    setExpandedTermId(null);
+    setZoomTier(2);
     try {
       let data: GraphData;
       if (tab === 'notes') {
@@ -77,9 +127,13 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       } else {
         data = await api.getProjectsGraph();
       }
+      if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+        data = { nodes: (data && Array.isArray((data as any).nodes)) ? (data as any).nodes : [], links: (data && Array.isArray((data as any).links)) ? (data as any).links : [] };
+      }
       setGraphData(data);
     } catch (err) {
       console.error('[InteractiveGraph] Failed to fetch graph data:', err);
+      setGraphData({ nodes: [], links: [] });
     } finally {
       setIsLoading(false);
     }
@@ -163,6 +217,11 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       val: number;
       color: string;
       details?: string;
+      level?: 1 | 2 | 3 | 4;
+      hotness?: number;
+      linkedNoteIds?: string[];
+      parentId?: string;
+      macroCategory?: string;
       x: number;
       y: number;
       vx: number;
@@ -184,19 +243,26 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       const dist = Math.min(spreadRadius, 30 + (i % 4) * 25);
       
       let radius = 9;
-      if (n.type === 'note') radius = Math.max(7, Math.min(22, 6 + (n.val / 3)));
+      if (n.type === 'macro_category') radius = 30;
+      else if (n.type === 'subject') radius = 17;
+      else if (n.type === 'keyword') radius = Math.min(24, 11 + (n.hotness ? n.hotness * 2.2 : 2));
+      else if (n.type === 'note') radius = Math.max(7, Math.min(18, 6 + (n.val / 3)));
       else if (n.type === 'project') radius = 22;
       else if (n.type === 'category' || n.type === 'agent') radius = 16;
       else if (n.type === 'skill') radius = 11;
-      else if (n.type === 'subject') radius = 14;
 
       return {
         id: n.id,
         label: n.label,
         type: n.type,
         val: n.val,
-        color: n.color || '#38bdf8',
+        color: n.color || (n.type === 'keyword' ? '#f43f5e' : '#38bdf8'),
         details: n.details,
+        level: n.level,
+        hotness: n.hotness,
+        linkedNoteIds: n.linkedNoteIds,
+        parentId: n.parentId,
+        macroCategory: n.macroCategory,
         x: initialCenterX + Math.cos(angle) * dist,
         y: initialCenterY + Math.sin(angle) * dist,
         vx: 0,
@@ -224,6 +290,27 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
     let zoom = 1;
     let panX = 0;
     let panY = 0;
+
+    let targetZoom: number | null = null;
+    let targetPanX: number | null = null;
+    let targetPanY: number | null = null;
+    let lastReportedTier: 1 | 2 | 3 | 4 = 2;
+
+    if (pendingZoomTarget) {
+      if (pendingZoomTarget.nodeId) {
+        const targetNode = nodeMap.get(pendingZoomTarget.nodeId);
+        if (targetNode) {
+          targetZoom = pendingZoomTarget.zoom;
+          targetPanX = -(targetNode.x - initialCenterX);
+          targetPanY = -(targetNode.y - initialCenterY);
+        }
+      } else {
+        targetZoom = pendingZoomTarget.zoom;
+        targetPanX = 0;
+        targetPanY = 0;
+      }
+      setPendingZoomTarget(null);
+    }
 
     let isPanning = false;
     let panStartX = 0;
@@ -364,6 +451,34 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cssW, cssH);
 
+      // Smooth Camera Transition Interpolation
+      if (targetZoom !== null && targetPanX !== null && targetPanY !== null) {
+        zoom += (targetZoom - zoom) * 0.16;
+        panX += (targetPanX - panX) * 0.16;
+        panY += (targetPanY - panY) * 0.16;
+        if (Math.abs(targetZoom - zoom) < 0.008 && Math.abs(targetPanX - panX) < 0.8 && Math.abs(targetPanY - panY) < 0.8) {
+          zoom = targetZoom;
+          panX = targetPanX;
+          panY = targetPanY;
+          targetZoom = null;
+          targetPanX = null;
+          targetPanY = null;
+        }
+        ticks = 0;
+      }
+
+      // Calculate semantic zoom tier
+      let currentTier: 1 | 2 | 3 | 4 = 2;
+      if (zoom < 0.72) currentTier = 1;
+      else if (zoom < 1.18) currentTier = 2;
+      else if (zoom < 1.72) currentTier = 3;
+      else currentTier = 4;
+
+      if (currentTier !== lastReportedTier) {
+        lastReportedTier = currentTier;
+        setZoomTier(currentTier);
+      }
+
       ctx.save();
       // Apply Pan & Zoom around center
       ctx.translate(panX + curCenterX, panY + curCenterY);
@@ -387,87 +502,217 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
 
       // Draw Links
       for (const link of simLinks) {
-        const isHovered = activeHoverNode && 
-          (activeHoverNode.id === link.source.id || activeHoverNode.id === link.target.id);
-        const isDimmed = activeHoverNode && !isHovered;
+        const isHovered = Boolean(activeHoverNode && 
+          (activeHoverNode.id === link.source.id || activeHoverNode.id === link.target.id));
+        const isConnectedToExpanded = Boolean(expandedTermId &&
+          (link.source.id === expandedTermId || link.target.id === expandedTermId));
+
+        let strokeColor = 'rgba(148, 163, 184, 0.22)';
+        let strokeW = 1.1;
+        let linkAlpha = 0.55;
+
+        if (expandedTermId) {
+          if (isConnectedToExpanded) {
+            strokeColor = '#f43f5e';
+            strokeW = 2.6;
+            linkAlpha = 0.95;
+          } else {
+            strokeColor = 'rgba(148, 163, 184, 0.04)';
+            strokeW = 0.6;
+            linkAlpha = 0.06;
+          }
+        } else if (isHovered) {
+          strokeColor = '#38bdf8';
+          strokeW = 2.4;
+          linkAlpha = 0.95;
+        } else if (activeHoverNode) {
+          strokeColor = 'rgba(148, 163, 184, 0.05)';
+          strokeW = 0.8;
+          linkAlpha = 0.12;
+        } else {
+          if (graphStyleMode === 'solid') {
+            if (link.type === 'macro_subject') {
+              strokeColor = '#38bdf8';
+              strokeW = 2.0;
+              linkAlpha = 0.7;
+            } else if (link.type === 'keyword') {
+              strokeColor = '#f43f5e';
+              strokeW = 1.5;
+              linkAlpha = 0.6;
+            } else {
+              strokeColor = 'rgba(100, 116, 139, 0.6)';
+              strokeW = 1.3;
+              linkAlpha = 0.5;
+            }
+          } else {
+            strokeColor = link.type === 'keyword' ? 'rgba(244, 63, 94, 0.45)' : 'rgba(148, 163, 184, 0.22)';
+            strokeW = link.type === 'macro_subject' ? 1.8 : 1.1;
+            linkAlpha = 0.5;
+          }
+        }
 
         ctx.beginPath();
         ctx.moveTo(link.source.x, link.source.y);
         ctx.lineTo(link.target.x, link.target.y);
-
-        if (isHovered) {
-          ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 2.4;
-          ctx.globalAlpha = 0.95;
-        } else if (isDimmed) {
-          ctx.strokeStyle = 'rgba(148, 163, 184, 0.05)';
-          ctx.lineWidth = 0.8;
-          ctx.globalAlpha = 0.12;
-        } else {
-          ctx.strokeStyle = link.type === 'synergy' ? 'rgba(56, 189, 248, 0.45)' : 'rgba(148, 163, 184, 0.22)';
-          ctx.lineWidth = link.type === 'synergy' ? 1.6 : 1.1;
-          ctx.globalAlpha = 0.55;
-        }
-
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = strokeW;
+        ctx.globalAlpha = linkAlpha;
         ctx.stroke();
       }
 
       // Draw Nodes
       for (const node of simNodes) {
         const isHovered = activeHoverNode?.id === node.id;
-        const isConnectedToHover = activeHoverNode && simLinks.some(
+        const isConnectedToHover = Boolean(activeHoverNode && simLinks.some(
           l => (l.source.id === activeHoverNode?.id && l.target.id === node.id) ||
                (l.target.id === activeHoverNode?.id && l.source.id === node.id)
-        );
-        const isDimmed = activeHoverNode && !isHovered && !isConnectedToHover;
+        ));
 
-        ctx.globalAlpha = isDimmed ? 0.22 : 1.0;
+        const isExpandedTermNode = expandedTermId === node.id;
+        const isConnectedToExpanded = Boolean(expandedTermId && simLinks.some(
+          l => (l.source.id === expandedTermId && l.target.id === node.id) ||
+               (l.target.id === expandedTermId && l.source.id === node.id)
+        ));
 
-        // Glow ring for hovered/connected
-        if (isHovered || isConnectedToHover) {
+        let nodeAlpha = 1.0;
+        if (expandedTermId) {
+          if (isExpandedTermNode || isConnectedToExpanded) {
+            nodeAlpha = 1.0;
+          } else {
+            nodeAlpha = 0.08;
+          }
+        } else if (activeHoverNode) {
+          nodeAlpha = (isHovered || isConnectedToHover) ? 1.0 : 0.18;
+        } else if (activeTab === 'notes') {
+          // Progressive Semantic Zooming Opacities
+          if (currentTier === 1) {
+            nodeAlpha = node.type === 'macro_category' ? 1.0 : node.type === 'subject' ? 0.6 : 0.25;
+          } else if (currentTier === 2) {
+            nodeAlpha = (node.type === 'macro_category' || node.type === 'subject') ? 1.0 : node.type === 'keyword' ? 0.65 : 0.4;
+          } else if (currentTier === 3) {
+            nodeAlpha = (node.type === 'keyword' || node.type === 'subject') ? 1.0 : 0.8;
+          } else {
+            nodeAlpha = 1.0;
+          }
+        }
+
+        ctx.globalAlpha = nodeAlpha;
+
+        // Visual Accents:
+        // 1. Macro Category Orbital Ring (Level 1)
+        if (node.type === 'macro_category' && nodeAlpha > 0.3) {
+          ctx.save();
           ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius + 7, 0, 2 * Math.PI);
-          ctx.fillStyle = isHovered ? 'rgba(56, 189, 248, 0.4)' : 'rgba(56, 189, 248, 0.18)';
+          ctx.setLineDash([4, 4]);
+          ctx.arc(node.x, node.y, node.radius + 8, 0, 2 * Math.PI);
+          ctx.strokeStyle = node.color;
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // 2. Hot Term Radiant Aura (Level 3)
+        if (node.type === 'keyword' && node.hotness && node.hotness >= 3 && nodeAlpha > 0.3) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 6, 0, 2 * Math.PI);
+          ctx.fillStyle = isExpandedTermNode ? 'rgba(244, 63, 94, 0.45)' : 'rgba(244, 63, 94, 0.25)';
           ctx.fill();
         }
 
-        // Main Node Body
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
-        ctx.fillStyle = node.color;
-        ctx.shadowColor = node.color;
-        ctx.shadowBlur = isHovered ? 16 : 4;
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        // 3. Hover or Connected Glow
+        if (isHovered || isConnectedToHover || isExpandedTermNode) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 8, 0, 2 * Math.PI);
+          ctx.fillStyle = isExpandedTermNode ? 'rgba(244, 63, 94, 0.4)' : isHovered ? 'rgba(56, 189, 248, 0.4)' : 'rgba(56, 189, 248, 0.18)';
+          ctx.fill();
+        }
 
-        // Label thresholding (Hubs always visible, notes visible on hover/connections or zoom in, tags only zoomed in)
-        const isHub = node.type === 'subject' || node.type === 'category' || node.type === 'project';
-        const isTag = node.type === 'tag';
-        const shouldShowLabel = isHovered || isConnectedToHover || isHub || (isTag ? zoom > 1.35 : zoom > 1.05);
+        // Main Node Body (Solid 3D Spherical vs Neon Bloom)
+        if (graphStyleMode === 'solid') {
+          // Soft projected drop shadow
+          ctx.beginPath();
+          ctx.ellipse(node.x, node.y + node.radius * 0.45, node.radius * 0.95, node.radius * 0.35, 0, 0, Math.PI * 2);
+          ctx.fillStyle = nodeAlpha < 0.5 ? 'rgba(0, 0, 0, 0.15)' : 'rgba(0, 0, 0, 0.65)';
+          ctx.fill();
 
-        if (shouldShowLabel && !isDimmed) {
-          ctx.font = `${isHovered ? 'bold 12px' : (isHub ? 'bold 11px' : '10px')} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          // Spherical radial gradient
+          const grad = ctx.createRadialGradient(
+            node.x - node.radius * 0.32,
+            node.y - node.radius * 0.32,
+            node.radius * 0.08,
+            node.x,
+            node.y,
+            node.radius
+          );
+          grad.addColorStop(0, '#ffffff');
+          grad.addColorStop(0.28, node.color);
+          grad.addColorStop(0.85, node.color);
+          grad.addColorStop(1.0, '#0a0d14');
+
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
+          ctx.fillStyle = grad;
+          ctx.fill();
+
+          ctx.lineWidth = (isHovered || isExpandedTermNode) ? 2.5 : 1.2;
+          ctx.strokeStyle = isExpandedTermNode ? '#f43f5e' : isHovered ? '#38bdf8' : 'rgba(255, 255, 255, 0.2)';
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
+          ctx.fillStyle = node.color;
+          ctx.shadowColor = node.color;
+          ctx.shadowBlur = (isHovered || isExpandedTermNode) ? 18 : 5;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+
+        // Label thresholding by semantic tier
+        const isMacro = node.type === 'macro_category';
+        const isSubject = node.type === 'subject';
+        const isKeyword = node.type === 'keyword';
+        const isNote = node.type === 'note';
+
+        let shouldShowLabel = false;
+        if (expandedTermId) {
+          shouldShowLabel = (isExpandedTermNode || isConnectedToExpanded);
+        } else if (isHovered || isConnectedToHover) {
+          shouldShowLabel = true;
+        } else if (isMacro) {
+          shouldShowLabel = true;
+        } else if (isSubject) {
+          shouldShowLabel = zoom > 0.65;
+        } else if (isKeyword) {
+          shouldShowLabel = (node.hotness && node.hotness >= 3) ? zoom > 0.8 : zoom > 1.05;
+        } else if (isNote) {
+          shouldShowLabel = zoom > 1.25;
+        } else {
+          shouldShowLabel = zoom > 1.05;
+        }
+
+        if (shouldShowLabel && nodeAlpha > 0.3) {
+          const fontSize = isMacro ? 'bold 12px' : isSubject ? 'bold 11px' : isKeyword ? 'bold 11px' : '10px';
+          ctx.font = `${fontSize} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          
-          // Label Shadow / Background Box
-          const text = node.label.length > 28 ? node.label.slice(0, 26) + '...' : node.label;
+
+          const text = node.label.length > 30 ? node.label.slice(0, 28) + '...' : node.label;
           const textMetrics = ctx.measureText(text);
-          const bgPaddingX = 5;
+          const bgPaddingX = 6;
           const bgPaddingY = 3;
 
           const boxX = node.x - textMetrics.width / 2 - bgPaddingX;
-          const boxY = node.y + node.radius + 5;
+          const boxY = node.y + node.radius + 6;
           const boxW = textMetrics.width + bgPaddingX * 2;
           const boxH = 14 + bgPaddingY * 2;
 
-          ctx.fillStyle = 'rgba(11, 15, 25, 0.9)';
+          ctx.fillStyle = 'rgba(10, 13, 20, 0.92)';
           ctx.fillRect(boxX, boxY, boxW, boxH);
-          ctx.strokeStyle = isHovered ? '#38bdf8' : 'rgba(255, 255, 255, 0.12)';
+          ctx.strokeStyle = isExpandedTermNode ? '#f43f5e' : isHovered ? '#38bdf8' : isMacro ? node.color : 'rgba(255, 255, 255, 0.14)';
           ctx.lineWidth = 1;
           ctx.strokeRect(boxX, boxY, boxW, boxH);
 
-          ctx.fillStyle = isHovered ? '#ffffff' : (isHub ? '#fde68a' : (isTag ? '#6ee7b7' : '#cbd5e1'));
+          ctx.fillStyle = isExpandedTermNode ? '#fda4af' : isHovered ? '#ffffff' : isMacro ? '#ffffff' : isKeyword ? '#f472b6' : isSubject ? '#fde68a' : '#cbd5e1';
           ctx.fillText(text, node.x, boxY + boxH / 2);
         }
       }
@@ -574,14 +819,55 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       zoom = Math.max(0.25, Math.min(3.5, zoom * zoomFactor));
     };
 
+    const zoomToNode = (targetNode: SimNode, targetZ: number) => {
+      const bRect = canvas.getBoundingClientRect();
+      const cX = (bRect.width || 1) / 2;
+      const cY = (bRect.height || 1) / 2;
+      targetZoom = targetZ;
+      targetPanX = -(targetNode.x - cX);
+      targetPanY = -(targetNode.y - cY);
+      ticks = 0;
+    };
+
+    const handleDblClick = (e: MouseEvent) => {
+      const pos = getCanvasMousePos(e);
+      const hit = findNodeAt(pos.x, pos.y);
+      if (hit) {
+        if (hit.type === 'macro_category') {
+          zoomToNode(hit, 0.95);
+        } else if (hit.type === 'subject') {
+          zoomToNode(hit, 1.45);
+        } else if (hit.type === 'keyword') {
+          setExpandedTermId(hit.id);
+          zoomToNode(hit, 2.0);
+        } else if (hit.type === 'note') {
+          const cleanTitle = hit.label.replace(/^#+\s*/, '');
+          onOpenNote?.(cleanTitle);
+        }
+      } else {
+        targetZoom = 1.0;
+        targetPanX = 0;
+        targetPanY = 0;
+        setExpandedTermId(null);
+        ticks = 0;
+      }
+    };
+
     const handleClick = (e: MouseEvent) => {
       const pos = getCanvasMousePos(e);
       const hit = findNodeAt(pos.x, pos.y);
       if (hit) {
         // Node Click Handler
-        if (activeTab === 'notes' && hit.type === 'note') {
+        if (hit.type === 'keyword') {
+          // Single click on keyword expands or focuses the term constellation
+          setExpandedTermId(prev => prev === hit.id ? null : hit.id);
+          setSelectedNodeDetails(hit);
+        } else if (hit.type === 'macro_category' || hit.type === 'subject') {
+          setSelectedNodeDetails(hit);
+        } else if (activeTab === 'notes' && hit.type === 'note') {
           const cleanTitle = hit.label.replace(/^#+\s*/, '');
           onOpenNote?.(cleanTitle);
+          setSelectedNodeDetails(hit);
         } else if (activeTab === 'skills' && hit.type === 'skill') {
           const skillId = hit.id.replace(/^skill_/, '');
           onOpenSkill?.(skillId);
@@ -598,11 +884,176 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       }
     };
 
+    // Touchscreen Navigation Engine (Pan, Drag, Pinch-to-Zoom, Tap & Double-Tap)
+    let initialPinchDist = 0;
+    let initialPinchZoom = 1;
+    let touchStartTime = 0;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let lastTapTimestamp = 0;
+    let lastTapNodeId: string | null = null;
+
+    const getCanvasTouchPos = (touch: React.Touch | Touch) => {
+      const bRect = canvas.getBoundingClientRect();
+      const screenX = touch.clientX - bRect.left;
+      const screenY = touch.clientY - bRect.top;
+      const curCenterX = (bRect.width || 1) / 2;
+      const curCenterY = (bRect.height || 1) / 2;
+
+      const canvasWorldX = (screenX - (panX + curCenterX)) / zoom + curCenterX;
+      const canvasWorldY = (screenY - (panY + curCenterY)) / zoom + curCenterY;
+
+      return { x: canvasWorldX, y: canvasWorldY, screenX, screenY };
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        touchStartTime = Date.now();
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        const pos = getCanvasTouchPos(touch);
+        const hit = findNodeAt(pos.x, pos.y);
+
+        if (hit) {
+          draggedNode = hit;
+          hit.isPinned = true;
+          ticks = 0;
+        } else {
+          isPanning = true;
+          panStartX = touch.clientX - panX;
+          panStartY = touch.clientY - panY;
+        }
+      } else if (e.touches.length === 2) {
+        isPanning = false;
+        if (draggedNode) {
+          draggedNode.isPinned = false;
+          draggedNode = null;
+        }
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        initialPinchDist = Math.hypot(dx, dy);
+        initialPinchZoom = zoom;
+      }
+      if (e.cancelable) e.preventDefault();
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        const pos = getCanvasTouchPos(touch);
+
+        if (draggedNode) {
+          draggedNode.x = pos.x;
+          draggedNode.y = pos.y;
+          draggedNode.vx = 0;
+          draggedNode.vy = 0;
+          ticks = 0;
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+
+        if (isPanning) {
+          panX = touch.clientX - panStartX;
+          panY = touch.clientY - panStartY;
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+      } else if (e.touches.length === 2 && initialPinchDist > 0) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const curDist = Math.hypot(dx, dy);
+        const scale = curDist / initialPinchDist;
+        zoom = Math.max(0.25, Math.min(3.8, initialPinchZoom * scale));
+        ticks = 0;
+        if (e.cancelable) e.preventDefault();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (draggedNode) {
+        draggedNode.isPinned = false;
+        draggedNode = null;
+      }
+      isPanning = false;
+
+      if (e.changedTouches.length === 1 && Date.now() - touchStartTime < 350) {
+        const touch = e.changedTouches[0];
+        const moveDist = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
+        if (moveDist < 14) {
+          const pos = getCanvasTouchPos(touch);
+          const hit = findNodeAt(pos.x, pos.y);
+          const now = Date.now();
+          const isDoubleTap = hit && lastTapNodeId === hit.id && (now - lastTapTimestamp < 350);
+
+          if (isDoubleTap && hit) {
+            // Double-tap on touchscreen:
+            if (hit.type === 'macro_category') {
+              zoomToNode(hit, 0.95);
+            } else if (hit.type === 'subject') {
+              zoomToNode(hit, 1.45);
+            } else if (hit.type === 'keyword') {
+              setExpandedTermId(hit.id);
+              zoomToNode(hit, 2.0);
+            } else if (hit.type === 'note') {
+              const cleanTitle = hit.label.replace(/^#+\s*/, '');
+              onOpenNote?.(cleanTitle);
+            }
+            lastTapTimestamp = 0;
+            lastTapNodeId = null;
+            return;
+          }
+
+          lastTapTimestamp = now;
+          lastTapNodeId = hit ? hit.id : null;
+
+          if (hit) {
+            if (hit.type === 'keyword') {
+              setExpandedTermId(prev => prev === hit.id ? null : hit.id);
+              setSelectedNodeDetails(hit);
+            } else if (hit.type === 'macro_category' || hit.type === 'subject') {
+              setSelectedNodeDetails(hit);
+            } else if (activeTab === 'notes' && hit.type === 'note') {
+              const cleanTitle = hit.label.replace(/^#+\s*/, '');
+              onOpenNote?.(cleanTitle);
+              setSelectedNodeDetails(hit);
+            } else if (activeTab === 'skills' && hit.type === 'skill') {
+              const skillId = hit.id.replace(/^skill_/, '');
+              onOpenSkill?.(skillId);
+              setSelectedNodeDetails(hit);
+            } else if (activeTab === 'projects' && hit.type === 'project') {
+              const rawPath = hit.details?.replace(/^Caminho do projeto:\s*/, '') || '';
+              if (rawPath && onSwitchProject) {
+                onSwitchProject(rawPath);
+              }
+              setSelectedNodeDetails(hit);
+            } else {
+              setSelectedNodeDetails(hit);
+            }
+          }
+        }
+      }
+    };
+
+    const handleTouchCancel = () => {
+      if (draggedNode) {
+        draggedNode.isPinned = false;
+        draggedNode = null;
+      }
+      isPanning = false;
+    };
+
     canvas.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('wheel', handleWheel, { passive: false });
     canvas.addEventListener('click', handleClick);
+    canvas.addEventListener('dblclick', handleDblClick);
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchCancel);
 
     return () => {
       isRunning = false;
@@ -614,8 +1065,17 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
       window.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('wheel', handleWheel);
       canvas.removeEventListener('click', handleClick);
+      canvas.removeEventListener('dblclick', handleDblClick);
+
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchCancel);
     };
-  }, [graphData, isLoading, activeTab, showSubNodes1, showSubNodes2, showLinks, searchFilter, chargeStrength, onOpenNote, onOpenSkill, onSwitchProject]);
+  }, [
+    graphData, isLoading, activeTab, graphStyleMode, showSubNodes1, showSubNodes2, showLinks,
+    searchFilter, chargeStrength, expandedTermId, pendingZoomTarget, onOpenNote, onOpenSkill, onSwitchProject
+  ]);
 
   return (
     <div className={`flex flex-col w-full h-full bg-[#0a0c10] text-slate-100 select-none overflow-hidden relative ${embeddedMode ? '' : 'rounded-2xl border border-card-border shadow-2xl'}`}>
@@ -686,11 +1146,37 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
           )}
         </div>
 
-        {/* Right Controls: Refresh & Close */}
+        {/* Right Controls: Mode Toggle, Refresh & Close */}
         <div className="flex items-center space-x-1.5">
+          {/* Visual Style Mode: Solid 3D vs Neon Bloom */}
+          <div className="flex items-center bg-card rounded-xl p-0.5 border border-card-border text-[11px]">
+            <button
+              onClick={() => setGraphStyleMode('solid')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                graphStyleMode === 'solid'
+                  ? 'bg-accent text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Modo Sólido: Nós esféricos 3D com iluminação radial, sombras e condutos estruturais"
+            >
+              Sólido
+            </button>
+            <button
+              onClick={() => setGraphStyleMode('neon')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                graphStyleMode === 'neon'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Modo Neon: Brilho de energia cósmica, partículas e bloom"
+            >
+              Neon
+            </button>
+          </div>
+
           <button
             onClick={() => loadGraph(activeTab)}
-            className="p-2 rounded-xl bg-card hover:bg-card-border border border-card-border text-slate-400 hover:text-white transition-colors"
+            className="p-2 rounded-xl bg-card hover:bg-card-border border border-card-border text-slate-400 hover:text-white transition-colors cursor-pointer"
             title="Recarregar grafo"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -708,60 +1194,150 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
         </div>
       </div>
 
-      {/* 2. Floating Filter Overlay */}
-      <div className="absolute top-16 left-4 z-10 flex flex-wrap items-center gap-2 text-xs">
-        <div className="flex items-center space-x-1 bg-card/90 backdrop-blur-md p-1 rounded-xl border border-card-border shadow-lg">
-          {/* Toggle 1 */}
-          <button
-            onClick={() => setShowSubNodes1(!showSubNodes1)}
-            className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-all ${
-              showSubNodes1
-                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                : 'bg-transparent border-transparent text-slate-500 line-through'
-            }`}
-          >
-            {activeTab === 'notes' ? '📂 Pastas' : activeTab === 'skills' ? '📂 Categorias' : '📁 Módulos'}
-          </button>
+      {/* 2. Floating Filter Overlay & Semantic Zoom Stepper */}
+      <div className="absolute top-16 left-4 z-10 flex flex-col gap-2 max-w-[calc(100%-2rem)]">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex items-center space-x-1 bg-card/90 backdrop-blur-md p-1 rounded-xl border border-card-border shadow-lg">
+            {/* Toggle 1 */}
+            <button
+              onClick={() => setShowSubNodes1(!showSubNodes1)}
+              className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-all ${
+                showSubNodes1
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                  : 'bg-transparent border-transparent text-slate-500 line-through'
+              }`}
+            >
+              {activeTab === 'notes' ? '📂 Pastas' : activeTab === 'skills' ? '📂 Categorias' : '📁 Módulos'}
+            </button>
 
-          {/* Toggle 2 */}
-          <button
-            onClick={() => setShowSubNodes2(!showSubNodes2)}
-            className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-all ${
-              showSubNodes2
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-transparent border-transparent text-slate-500 line-through'
-            }`}
-          >
-            {activeTab === 'notes' ? '#️⃣ Tags' : activeTab === 'skills' ? '🤖 Agentes' : '🧠 Memórias'}
-          </button>
+            {/* Toggle 2 */}
+            <button
+              onClick={() => setShowSubNodes2(!showSubNodes2)}
+              className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-all ${
+                showSubNodes2
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-transparent border-transparent text-slate-500 line-through'
+              }`}
+            >
+              {activeTab === 'notes' ? '🔥 Termos Quentes' : activeTab === 'skills' ? '🤖 Agentes' : '🧠 Memórias'}
+            </button>
 
-          {/* Toggle 3: Links */}
-          <button
-            onClick={() => setShowLinks(!showLinks)}
-            className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-all ${
-              showLinks
-                ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
-                : 'bg-transparent border-transparent text-slate-500 line-through'
-            }`}
-          >
-            {activeTab === 'notes' ? '🔗 Wikilinks' : activeTab === 'skills' ? '⚡ Sinergias' : '⚡ Rotinas'}
-          </button>
+            {/* Toggle 3: Links */}
+            <button
+              onClick={() => setShowLinks(!showLinks)}
+              className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-all ${
+                showLinks
+                  ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
+                  : 'bg-transparent border-transparent text-slate-500 line-through'
+              }`}
+            >
+              {activeTab === 'notes' ? '🔗 Wikilinks' : activeTab === 'skills' ? '⚡ Sinergias' : '⚡ Rotinas'}
+            </button>
+          </div>
+
+          {/* Repulsion / Physics Slider */}
+          <div className="hidden sm:flex items-center space-x-2 bg-card/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-card-border shadow-lg text-[11px] text-slate-400">
+            <span>Repulsão:</span>
+            <input
+              type="range"
+              min="150"
+              max="600"
+              step="25"
+              value={chargeStrength}
+              onChange={(e) => setChargeStrength(parseInt(e.target.value, 10))}
+              className="w-20 accent-brand-cyan cursor-pointer"
+            />
+          </div>
         </div>
 
-        {/* Repulsion / Physics Slider */}
-        <div className="hidden sm:flex items-center space-x-2 bg-card/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-card-border shadow-lg text-[11px] text-slate-400">
-          <span>Repulsão:</span>
-          <input
-            type="range"
-            min="150"
-            max="600"
-            step="25"
-            value={chargeStrength}
-            onChange={(e) => setChargeStrength(parseInt(e.target.value, 10))}
-            className="w-20 accent-brand-cyan cursor-pointer"
-          />
-        </div>
+        {/* Semantic Zoom Stepper (Notes Mode) */}
+        {activeTab === 'notes' && (
+          <div className="flex items-center space-x-1.5 bg-[#0f131c]/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-card-border/90 shadow-xl text-[11px] text-slate-300 w-fit">
+            <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 hidden md:inline">Nível Semântico:</span>
+            {[
+              { tier: 1, label: '1. Macro Cadernos', targetZ: 0.55 },
+              { tier: 2, label: '2. Temas & Pastas', targetZ: 0.95 },
+              { tier: 3, label: '3. Termos Quentes 🔥', targetZ: 1.45 },
+              { tier: 4, label: '4. Notas Detalhadas', targetZ: 2.1 }
+            ].map((step, idx) => {
+              const isActive = zoomTier === step.tier;
+              return (
+                <React.Fragment key={step.tier}>
+                  {idx > 0 && <span className="text-slate-600 text-[10px]">›</span>}
+                  <button
+                    onClick={() => setPendingZoomTarget({ zoom: step.targetZ })}
+                    className={`px-2 py-0.5 rounded-md font-semibold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/40 shadow-xs'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                    }`}
+                    title={`Clique para navegar para o ${step.label}`}
+                  >
+                    {step.label}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Hot Topics Quick Filter Chips Bar (Notes Mode) */}
+        {activeTab === 'notes' && hotKeywords.length > 0 && (
+          <div className="flex items-center space-x-1.5 bg-[#0f131c]/90 backdrop-blur-md px-2.5 py-1 rounded-xl border border-rose-500/30 shadow-lg text-[11px] overflow-x-auto max-w-2xl py-1">
+            <div className="flex items-center space-x-1 text-rose-400 font-bold shrink-0 text-[10px] uppercase font-mono mr-1">
+              <Flame className="w-3.5 h-3.5 fill-rose-500/20 text-rose-500" />
+              <span>Foco Atual:</span>
+            </div>
+            {hotKeywords.map((kw) => {
+              const isSelected = expandedTermId === kw.id;
+              return (
+                <button
+                  key={kw.id}
+                  onClick={() => {
+                    if (isSelected) {
+                      setExpandedTermId(null);
+                    } else {
+                      setExpandedTermId(kw.id);
+                      setPendingZoomTarget({ zoom: 1.9, nodeId: kw.id });
+                    }
+                  }}
+                  className={`px-2 py-0.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all flex items-center space-x-1 cursor-pointer shrink-0 ${
+                    isSelected
+                      ? 'bg-rose-500 text-white shadow-sm shadow-rose-500/40 ring-1 ring-white/30'
+                      : 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-200 border border-rose-800/40'
+                  }`}
+                  title={`${kw.count} notas conectadas ao termo #${kw.label}`}
+                >
+                  <span>#{kw.label}</span>
+                  <span className={`text-[10px] px-1 rounded-full ${isSelected ? 'bg-rose-700 text-white' : 'bg-rose-900/60 text-rose-300'}`}>
+                    {kw.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {/* Active Expanded Term Constellation Floating Banner */}
+      {expandedTerm && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-3 bg-[#0d1117]/95 backdrop-blur-md px-4 py-2 rounded-2xl border border-rose-500/60 shadow-2xl animate-in fade-in slide-in-from-top-3">
+          <div className="flex items-center space-x-2 text-rose-400 font-bold text-xs">
+            <Flame className="w-4 h-4 fill-rose-500/40 text-rose-500 animate-pulse" />
+            <span>Foco no Termo: <strong className="text-white">#{expandedTerm.label}</strong></span>
+            <span className="bg-rose-500/20 text-rose-300 text-[10px] px-2 py-0.5 rounded-full border border-rose-500/30">
+              {linkedNotesForExpandedTerm.length} notas vinculadas
+            </span>
+          </div>
+          <button
+            onClick={() => setExpandedTermId(null)}
+            className="flex items-center space-x-1 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-xl text-[11px] font-semibold transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Ver Todo o Grafo</span>
+          </button>
+        </div>
+      )}
 
       {/* 3. Hover Tooltip Badge */}
       {hoveredNode && (
@@ -805,13 +1381,89 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
               </div>
             )}
             
+            {/* Keyword / Hot Term Inspector */}
+            {selectedNodeDetails.type === 'keyword' && (
+              <div className="space-y-2 mt-2">
+                <button
+                  onClick={() => {
+                    setExpandedTermId(prev => prev === selectedNodeDetails.id ? null : selectedNodeDetails.id);
+                    setPendingZoomTarget({ zoom: 1.9, nodeId: selectedNodeDetails.id });
+                  }}
+                  className="w-full py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-rose-600/30 cursor-pointer"
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  <span>{expandedTermId === selectedNodeDetails.id ? '✕ Desfazer Foco no Termo' : '🔥 Focar Constelação deste Termo'}</span>
+                </button>
+
+                {selectedNodeDetails.linkedNoteIds && selectedNodeDetails.linkedNoteIds.length > 0 && (
+                  <div className="pt-2 border-t border-card-border/60">
+                    <span className="text-[10px] text-slate-400 font-mono block mb-1.5">
+                      Notas Conectadas ({selectedNodeDetails.linkedNoteIds.length}):
+                    </span>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {selectedNodeDetails.linkedNoteIds.map((noteId) => {
+                        const noteTitle = noteId.replace(/^note_/, '').replace(/^#+\s*/, '');
+                        return (
+                          <div
+                            key={noteId}
+                            className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 text-xs transition-colors"
+                          >
+                            <span className="truncate text-slate-200 font-medium mr-2" title={noteTitle}>
+                              📄 {noteTitle}
+                            </span>
+                            <button
+                              onClick={() => {
+                                onOpenNote?.(noteTitle);
+                                setSelectedNodeDetails(null);
+                              }}
+                              className="shrink-0 px-2 py-1 bg-brand-cyan/20 hover:bg-brand-cyan text-brand-cyan hover:text-slate-950 font-bold text-[10px] rounded-lg transition-colors flex items-center space-x-1 cursor-pointer"
+                              title="Abrir nota no editor"
+                            >
+                              <span>Abrir</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Macro Category Drilldown */}
+            {selectedNodeDetails.type === 'macro_category' && (
+              <button
+                onClick={() => {
+                  setPendingZoomTarget({ zoom: 0.95, nodeId: selectedNodeDetails.id });
+                }}
+                className="w-full mt-2 py-1.5 rounded-xl bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan border border-brand-cyan/40 font-bold text-xs flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Explorar Temas e Pastas</span>
+              </button>
+            )}
+
+            {/* Subject Drilldown */}
+            {selectedNodeDetails.type === 'subject' && (
+              <button
+                onClick={() => {
+                  setPendingZoomTarget({ zoom: 1.45, nodeId: selectedNodeDetails.id });
+                }}
+                className="w-full mt-2 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Explorar Termos e Notas</span>
+              </button>
+            )}
+
             {activeTab === 'notes' && selectedNodeDetails.type === 'note' && (
               <button
                 onClick={() => {
                   onOpenNote?.(selectedNodeDetails.label.replace(/^#+\s*/, ''));
                   setSelectedNodeDetails(null);
                 }}
-                className="w-full mt-2 py-1.5 rounded-xl bg-brand-cyan hover:bg-brand-cyan/80 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-brand-cyan/20"
+                className="w-full mt-2 py-1.5 rounded-xl bg-brand-cyan hover:bg-brand-cyan/80 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-brand-cyan/20 cursor-pointer"
               >
                 <BookOpen className="w-3.5 h-3.5" />
                 <span>Abrir no Editor de Notas</span>
@@ -831,17 +1483,31 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
               </button>
             )}
 
-            {activeTab === 'projects' && selectedNodeDetails.type === 'project' && (
+            {selectedNodeDetails.type === 'project' && (
               <button
                 onClick={() => {
-                  const rawPath = selectedNodeDetails.details?.replace(/^Caminho do projeto:\s*/, '') || '';
+                  const rawPath = (selectedNodeDetails as any).path || selectedNodeDetails.details?.replace(/^Caminho do projeto:\s*/, '').split('\n')[0] || '';
                   if (rawPath) onSwitchProject?.(rawPath);
                   setSelectedNodeDetails(null);
                 }}
-                className="w-full mt-2 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-blue-600/20"
+                className="w-full mt-2 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-blue-600/20 cursor-pointer"
               >
                 <FolderGit2 className="w-3.5 h-3.5" />
                 <span>Tornar Projeto Ativo</span>
+              </button>
+            )}
+
+            {(selectedNodeDetails.type === 'note' || selectedNodeDetails.type === 'artifact' || selectedNodeDetails.type === 'memory') && (
+              <button
+                onClick={() => {
+                  const target = (selectedNodeDetails as any).path || selectedNodeDetails.label.replace(/^[📄🧠📝]\s*/, '') || selectedNodeDetails.id;
+                  onOpenNote?.(target);
+                  setSelectedNodeDetails(null);
+                }}
+                className="w-full mt-2 py-1.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-md cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Abrir Anotação / Artefato</span>
               </button>
             )}
           </div>
@@ -857,6 +1523,18 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
           </div>
         )}
 
+        {!isLoading && (!graphData || graphData.nodes.length === 0) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-card/40 backdrop-blur-sm z-20 space-y-3 p-6 text-center select-none">
+            <Network className="w-10 h-10 text-slate-600" />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-200">Nenhum nó disponível nesta categoria</p>
+              <p className="text-xs text-slate-500 max-w-sm">
+                Selecione outra visualização acima (Arquivos & Notas, Skills ou Projetos) ou ative os filtros de módulos e rotinas.
+              </p>
+            </div>
+          </div>
+        )}
+
         <canvas
           ref={canvasRef}
           className="w-full h-full block"
@@ -865,14 +1543,14 @@ export const InteractiveGraphCanvas: React.FC<InteractiveGraphCanvasProps> = ({
 
       {/* 6. Footer Navigation Hints */}
       <div className="h-7 bg-[#0b0e14] border-t border-card-border/60 px-4 flex items-center justify-between text-[10px] text-slate-500 font-mono shrink-0">
-        <div className="flex items-center space-x-3">
-          <span>💡 Clique e arraste para mover nós</span>
+        <div className="flex items-center space-x-3 overflow-hidden text-ellipsis whitespace-nowrap">
+          <span>🤏 Pinça no touch / Scroll: Zoom Semântico (Níveis 1 a 4)</span>
           <span>•</span>
-          <span>Roda do mouse: Zoom</span>
+          <span>Duplo-clique ou toque: Entrar no nível</span>
           <span>•</span>
-          <span>Clique no nó: Abrir / Inspecionar</span>
+          <span>Clique em termo 🔥: Isolar constelação</span>
         </div>
-        <div>
+        <div className="shrink-0 ml-2">
           {graphData && (
             <span>
               {graphData.nodes.length} nós • {graphData.links.length} conexões

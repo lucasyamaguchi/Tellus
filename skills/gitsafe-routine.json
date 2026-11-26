@@ -1,0 +1,14 @@
+{
+  "id": "gitsafe-routine",
+  "name": "GitSafe & Data Sanitization Routine",
+  "category": "Security & Governance",
+  "agentAssigned": "all",
+  "description": "Rotina mandatória de auditoria interna: higienização de conversas (Chats), dados sensíveis, segredos, caminhos locais e política estrita de versionamento.",
+  "promptInstructions": "Execute auditoria rigorosa de segurança: garanta zero vazamento de conversas particulares, currículos, vaults pessoais (.tellus/vault), chaves de API e caminhos absolutos locais. Valide o .gitignore, certifique-se de que nenhum executável ou binário esteja rastreado e exija compilação limpa com 100% dos testes aprovados. Se a compilação ou testes falharem, aplique auto-cura imediata (leia o erro, corrija o arquivo e re-execute) até passar. Use update_steps para informar o checklist e o motivo de eventuais falhas. Finalize preparando o commit semântico e enviando com git push se solicitado.",
+  "isProjectSpecific": false,
+  "version": "1.0.0",
+  "author": "Tellus Core Team",
+  "license": "MIT",
+  "securitySanitized": true,
+  "updatedAt": 1793201144492
+}

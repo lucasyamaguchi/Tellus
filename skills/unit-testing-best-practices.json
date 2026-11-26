@@ -1,0 +1,10 @@
+{
+  "id": "unit-testing-best-practices",
+  "name": "Testing & Quality Assurance",
+  "category": "Testing",
+  "agentAssigned": "all",
+  "description": "Criação de testes unitários e de integração confiáveis e livres de efeitos colaterais.",
+  "promptInstructions": "Escreva testes que cubram casos de sucesso, valores de borda e cenários de falha. Mantenha os testes determinísticos e de rápida execução.",
+  "isProjectSpecific": false,
+  "updatedAt": 1788262754245
+}
